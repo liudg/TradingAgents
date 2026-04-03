@@ -107,15 +107,10 @@ git clone https://github.com/TauricResearch/TradingAgents.git
 cd TradingAgents
 ```
 
-Create a virtual environment in any of your favorite environment managers:
-```bash
-conda create -n tradingagents python=3.13
-conda activate tradingagents
-```
-
-Install the package and its dependencies:
-```bash
-pip install .
+Create the project virtual environment and install dependencies:
+```powershell
+.\scripts\create_venv.ps1
+.\scripts\install_deps.ps1
 ```
 
 ### Docker
@@ -154,9 +149,9 @@ cp .env.example .env
 ### CLI Usage
 
 Launch the interactive CLI:
-```bash
-tradingagents          # installed command
-python -m cli.main     # alternative: run directly from source
+```powershell
+.\.venv\Scripts\tradingagents.exe
+.\.venv\Scripts\python.exe -m cli.main
 ```
 You will see a screen where you can select your desired tickers, analysis date, LLM provider, research depth, and more.
 
@@ -173,6 +168,20 @@ An interface will appear showing results as they load, letting you track the age
 <p align="center">
   <img src="assets/cli/cli_transaction.png" width="100%" style="display: inline-block; margin: 0 2%;">
 </p>
+
+### API Usage
+
+Start the FastAPI service from the project virtual environment:
+```powershell
+.\scripts\start_api.ps1
+```
+
+Custom host/port and auto-reload are also supported:
+```powershell
+.\scripts\start_api.ps1 -BindHost 127.0.0.1 -Port 8000 -Reload
+```
+
+After startup, open `http://127.0.0.1:8000/docs` for the API docs, or call `GET /api/metadata/options` as a health check.
 
 ## TradingAgents Package
 
