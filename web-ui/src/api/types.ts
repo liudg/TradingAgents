@@ -58,6 +58,7 @@ export interface AnalysisJobResponse {
   decision: string | null;
   error_message: string | null;
   report_path: string | null;
+  log_path?: string | null;
   created_at: string;
   started_at: string | null;
   finished_at: string | null;
@@ -96,6 +97,11 @@ export interface HistoricalReportSummary {
   llm_provider: string;
   deep_think_llm: string;
   quick_think_llm: string;
+  backend_url?: string | null;
+  google_thinking_level?: string | null;
+  openai_reasoning_effort?: string | null;
+  anthropic_effort?: string | null;
+  output_language: string;
   max_debate_rounds: number;
   max_risk_discuss_rounds: number;
   max_recur_limit: number;

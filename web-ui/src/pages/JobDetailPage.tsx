@@ -237,6 +237,29 @@ export function JobDetailPage() {
               <Descriptions.Item label="输出语言">
                 {job.request.output_language}
               </Descriptions.Item>
+              <Descriptions.Item label="Backend URL" span={2}>
+                {job.request.backend_url || "-"}
+              </Descriptions.Item>
+              <Descriptions.Item label="Deep Model">
+                {job.request.deep_think_llm}
+              </Descriptions.Item>
+              <Descriptions.Item label="Quick Model">
+                {job.request.quick_think_llm}
+              </Descriptions.Item>
+              <Descriptions.Item label="OpenAI Reasoning Effort">
+                {job.request.openai_reasoning_effort || "-"}
+              </Descriptions.Item>
+              <Descriptions.Item label="Google Thinking Level">
+                {job.request.google_thinking_level || "-"}
+              </Descriptions.Item>
+              <Descriptions.Item label="Anthropic Effort">
+                {job.request.anthropic_effort || "-"}
+              </Descriptions.Item>
+              <Descriptions.Item label="Research Depth">
+                {job.request.max_debate_rounds === job.request.max_risk_discuss_rounds
+                  ? job.request.max_debate_rounds
+                  : `${job.request.max_debate_rounds}/${job.request.max_risk_discuss_rounds}`}
+              </Descriptions.Item>
               <Descriptions.Item label="创建时间">
                 {formatDateTime(job.created_at)}
               </Descriptions.Item>
@@ -248,6 +271,9 @@ export function JobDetailPage() {
               </Descriptions.Item>
               <Descriptions.Item label="服务端报告路径">
                 {job.report_path || "-"}
+              </Descriptions.Item>
+              <Descriptions.Item label="服务端日志路径" span={2}>
+                {job.log_path || "-"}
               </Descriptions.Item>
             </Descriptions>
           </Col>

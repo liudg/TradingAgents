@@ -173,11 +173,26 @@ export function HistoricalReportDetailPage() {
             <Descriptions.Item label="LLM Provider">
               {detail.llm_provider}
             </Descriptions.Item>
+            <Descriptions.Item label="Backend URL">
+              {detail.backend_url || "-"}
+            </Descriptions.Item>
             <Descriptions.Item label="Deep Model">
               {detail.deep_think_llm}
             </Descriptions.Item>
             <Descriptions.Item label="Quick Model">
               {detail.quick_think_llm}
+            </Descriptions.Item>
+            <Descriptions.Item label="Output Language">
+              {detail.output_language}
+            </Descriptions.Item>
+            <Descriptions.Item label="OpenAI Reasoning Effort">
+              {detail.openai_reasoning_effort || "-"}
+            </Descriptions.Item>
+            <Descriptions.Item label="Google Thinking Level">
+              {detail.google_thinking_level || "-"}
+            </Descriptions.Item>
+            <Descriptions.Item label="Anthropic Effort">
+              {detail.anthropic_effort || "-"}
             </Descriptions.Item>
             <Descriptions.Item label="任务 ID">
               <Typography.Text copyable>{detail.job_id}</Typography.Text>

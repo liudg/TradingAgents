@@ -5,6 +5,7 @@ import {
   Card,
   Col,
   DatePicker,
+  Divider,
   Form,
   Input,
   InputNumber,
@@ -12,6 +13,7 @@ import {
   Select,
   Skeleton,
   Space,
+  Typography,
 } from "antd";
 import dayjs, { Dayjs } from "dayjs";
 import { useEffect, useMemo } from "react";
@@ -20,9 +22,22 @@ import { useNavigate } from "react-router-dom";
 import { useCreateAnalysisJob, useMetadataOptions } from "../api/hooks";
 import { AnalystType, AnalysisJobRequest } from "../api/types";
 import { extractErrorMessage } from "../utils/format";
+import {
+  anthropicEffortOptions,
+  googleThinkingLevelOptions,
+  openaiReasoningEffortOptions,
+  outputLanguageOptions,
+  resolveBackendUrl,
+  resolveOutputLanguageFields,
+  resolveResearchDepth,
+  researchDepthOptions,
+  resetProviderSpecificConfig,
+} from "../utils/jobConfig";
 
 interface AnalysisJobFormValues extends Omit<AnalysisJobRequest, "trade_date"> {
   trade_date: Dayjs;
+  custom_output_language?: string;
+  research_depth?: number;
 }
 
 const analystNameMap: Record<AnalystType, string> = {
@@ -32,18 +47,17 @@ const analystNameMap: Record<AnalystType, string> = {
   fundamentals: "基本面分析师",
 };
 
-const outputLanguageOptions = [
-  { label: "中文", value: "zh-CN" },
-  { label: "英文", value: "en-US" },
-];
-
 export function CreateJobPage() {
   const [form] = Form.useForm<AnalysisJobFormValues>();
   const { message } = App.useApp();
   const navigate = useNavigate();
   const metadataQuery = useMetadataOptions();
   const createJobMutation = useCreateAnalysisJob();
+
   const provider = Form.useWatch("llm_provider", form);
+  const outputLanguage = Form.useWatch("output_language", form);
+  const maxDebateRounds = Form.useWatch("max_debate_rounds", form);
+  const maxRiskRounds = Form.useWatch("max_risk_discuss_rounds", form);
 
   const providerModelOptions = useMemo(() => {
     if (!metadataQuery.data || !provider) {
@@ -56,7 +70,7 @@ export function CreateJobPage() {
     };
   }, [metadataQuery.data, provider]);
 
-  useEffect(() => {
+  const applyDefaultFormValues = () => {
     if (!metadataQuery.data) {
       return;
     }
@@ -73,36 +87,87 @@ export function CreateJobPage() {
       llm_provider: initialProvider,
       deep_think_llm: defaults.deep_think_llm || modelGroup.deep?.[0]?.value,
       quick_think_llm: defaults.quick_think_llm || modelGroup.quick?.[0]?.value,
-      backend_url: defaults.backend_url ?? "",
-      google_thinking_level: defaults.google_thinking_level ?? "",
-      openai_reasoning_effort: defaults.openai_reasoning_effort ?? "",
-      anthropic_effort: defaults.anthropic_effort ?? "",
-      output_language: defaults.output_language || "zh-CN",
+      backend_url: resolveBackendUrl(initialProvider, defaults.backend_url),
+      ...resetProviderSpecificConfig(initialProvider),
+      google_thinking_level:
+        defaults.google_thinking_level ??
+        resetProviderSpecificConfig(initialProvider).google_thinking_level,
+      openai_reasoning_effort:
+        defaults.openai_reasoning_effort ??
+        resetProviderSpecificConfig(initialProvider).openai_reasoning_effort,
+      anthropic_effort:
+        defaults.anthropic_effort ??
+        resetProviderSpecificConfig(initialProvider).anthropic_effort,
+      ...resolveOutputLanguageFields(defaults.output_language),
+      research_depth: resolveResearchDepth(
+        defaults.max_debate_rounds,
+        defaults.max_risk_discuss_rounds,
+      ),
       max_debate_rounds: defaults.max_debate_rounds || 1,
       max_risk_discuss_rounds: defaults.max_risk_discuss_rounds || 1,
       max_recur_limit: defaults.max_recur_limit || 100,
     });
+  };
+
+  useEffect(() => {
+    applyDefaultFormValues();
   }, [form, metadataQuery.data]);
+
+  useEffect(() => {
+    const nextDepth = resolveResearchDepth(maxDebateRounds, maxRiskRounds);
+    if (form.getFieldValue("research_depth") !== nextDepth) {
+      form.setFieldsValue({ research_depth: nextDepth });
+    }
+  }, [form, maxDebateRounds, maxRiskRounds]);
+
+  const handleResearchDepthChange = (depth: number) => {
+    form.setFieldsValue({
+      max_debate_rounds: depth,
+      max_risk_discuss_rounds: depth,
+      research_depth: depth,
+    });
+  };
 
   const handleProviderChange = (nextProvider: string) => {
     const modelGroup = metadataQuery.data?.models[nextProvider] || {};
     form.setFieldsValue({
+      llm_provider: nextProvider,
       deep_think_llm: modelGroup.deep?.[0]?.value,
       quick_think_llm: modelGroup.quick?.[0]?.value,
+      backend_url: resolveBackendUrl(nextProvider, null),
+      ...resetProviderSpecificConfig(nextProvider),
     });
   };
 
   const handleSubmit = async (values: AnalysisJobFormValues) => {
     try {
       const payload: AnalysisJobRequest = {
-        ...values,
         ticker: values.ticker.trim().toUpperCase(),
         trade_date: values.trade_date.format("YYYY-MM-DD"),
+        selected_analysts: values.selected_analysts,
+        llm_provider: values.llm_provider,
+        deep_think_llm: values.deep_think_llm,
+        quick_think_llm: values.quick_think_llm,
         backend_url: values.backend_url?.trim() || null,
-        google_thinking_level: values.google_thinking_level?.trim() || null,
+        google_thinking_level:
+          values.llm_provider === "google"
+            ? values.google_thinking_level?.trim() || null
+            : null,
         openai_reasoning_effort:
-          values.openai_reasoning_effort?.trim() || null,
-        anthropic_effort: values.anthropic_effort?.trim() || null,
+          values.llm_provider === "openai"
+            ? values.openai_reasoning_effort?.trim() || null
+            : null,
+        anthropic_effort:
+          values.llm_provider === "anthropic"
+            ? values.anthropic_effort?.trim() || null
+            : null,
+        output_language:
+          values.output_language === "custom"
+            ? values.custom_output_language?.trim() || "Chinese"
+            : values.output_language,
+        max_debate_rounds: values.max_debate_rounds,
+        max_risk_discuss_rounds: values.max_risk_discuss_rounds,
+        max_recur_limit: values.max_recur_limit,
       };
       const result = await createJobMutation.mutateAsync(payload);
       message.success(`任务已创建：${result.job_id}`);
@@ -183,6 +248,28 @@ export function CreateJobPage() {
               </Col>
 
               <Col xs={24} md={8}>
+                <Form.Item label="Research Depth" name="research_depth">
+                  <Select
+                    options={researchDepthOptions}
+                    onChange={handleResearchDepthChange}
+                  />
+                </Form.Item>
+              </Col>
+              <Col xs={24} md={8}>
+                <Form.Item label="研究员辩论轮数" name="max_debate_rounds">
+                  <InputNumber min={1} max={10} style={{ width: "100%" }} />
+                </Form.Item>
+              </Col>
+              <Col xs={24} md={8}>
+                <Form.Item
+                  label="风控辩论轮数"
+                  name="max_risk_discuss_rounds"
+                >
+                  <InputNumber min={1} max={10} style={{ width: "100%" }} />
+                </Form.Item>
+              </Col>
+
+              <Col xs={24} md={8}>
                 <Form.Item label="模型供应商" name="llm_provider">
                   <Select
                     options={metadataQuery.data.llm_providers.map((item) => ({
@@ -212,46 +299,67 @@ export function CreateJobPage() {
                 </Form.Item>
               </Col>
 
+              <Col span={24}>
+                <Form.Item label="Backend URL" name="backend_url">
+                  <Input placeholder="自定义模型网关地址，例如 https://api.openai.com/v1" />
+                </Form.Item>
+              </Col>
+
               <Col xs={24} md={8}>
                 <Form.Item label="报告输出语言" name="output_language">
                   <Select options={outputLanguageOptions} />
                 </Form.Item>
               </Col>
-              <Col xs={24} md={8}>
-                <Form.Item
-                  label="Google Thinking Level"
-                  name="google_thinking_level"
-                >
-                  <Input placeholder="可选" />
-                </Form.Item>
-              </Col>
-              <Col xs={24} md={8}>
-                <Form.Item
-                  label="OpenAI Reasoning Effort"
-                  name="openai_reasoning_effort"
-                >
-                  <Input placeholder="可选，例如 low / medium / high" />
-                </Form.Item>
-              </Col>
-              <Col xs={24} md={8}>
-                <Form.Item label="Anthropic Effort" name="anthropic_effort">
-                  <Input placeholder="可选" />
-                </Form.Item>
-              </Col>
-
-              <Col xs={24} md={8}>
-                <Form.Item label="研究员辩论轮数" name="max_debate_rounds">
-                  <InputNumber min={1} max={10} style={{ width: "100%" }} />
-                </Form.Item>
-              </Col>
-              <Col xs={24} md={8}>
-                <Form.Item
-                  label="风控辩论轮数"
-                  name="max_risk_discuss_rounds"
-                >
-                  <InputNumber min={1} max={10} style={{ width: "100%" }} />
-                </Form.Item>
-              </Col>
+              {outputLanguage === "custom" ? (
+                <Col xs={24} md={8}>
+                  <Form.Item
+                    label="自定义输出语言"
+                    name="custom_output_language"
+                    rules={[
+                      {
+                        required: true,
+                        message: "请输入自定义输出语言",
+                      },
+                      {
+                        validator: async (_, value) => {
+                          if (!value || !String(value).trim()) {
+                            throw new Error("请输入自定义输出语言");
+                          }
+                        },
+                      },
+                    ]}
+                  >
+                    <Input placeholder="例如 Turkish / Vietnamese / Thai" />
+                  </Form.Item>
+                </Col>
+              ) : null}
+              {provider === "google" ? (
+                <Col xs={24} md={8}>
+                  <Form.Item
+                    label="Google Thinking Level"
+                    name="google_thinking_level"
+                  >
+                    <Select options={googleThinkingLevelOptions} />
+                  </Form.Item>
+                </Col>
+              ) : null}
+              {provider === "openai" ? (
+                <Col xs={24} md={8}>
+                  <Form.Item
+                    label="OpenAI Reasoning Effort"
+                    name="openai_reasoning_effort"
+                  >
+                    <Select options={openaiReasoningEffortOptions} />
+                  </Form.Item>
+                </Col>
+              ) : null}
+              {provider === "anthropic" ? (
+                <Col xs={24} md={8}>
+                  <Form.Item label="Anthropic Effort" name="anthropic_effort">
+                    <Select options={anthropicEffortOptions} />
+                  </Form.Item>
+                </Col>
+              ) : null}
               <Col xs={24} md={8}>
                 <Form.Item label="图递归上限" name="max_recur_limit">
                   <InputNumber min={1} max={300} style={{ width: "100%" }} />
@@ -259,15 +367,18 @@ export function CreateJobPage() {
               </Col>
             </Row>
 
-            <Space>
-              <Button
-                type="primary"
-                htmlType="submit"
-                loading={createJobMutation.isPending}
-              >
-                创建分析任务
-              </Button>
-              <Button onClick={() => form.resetFields()}>重置表单</Button>
+            <Divider />
+            <Space direction="vertical" size={8} style={{ width: "100%" }}>
+              <Space>
+                <Button
+                  type="primary"
+                  htmlType="submit"
+                  loading={createJobMutation.isPending}
+                >
+                  创建分析任务
+                </Button>
+                <Button onClick={applyDefaultFormValues}>重置表单</Button>
+              </Space>
             </Space>
           </Form>
         </Card>

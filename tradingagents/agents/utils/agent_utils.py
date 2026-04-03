@@ -23,12 +23,12 @@ from tradingagents.agents.utils.news_data_tools import (
 def get_language_instruction() -> str:
     """Return a prompt instruction for the configured output language.
 
-    Returns empty string when English (default), so no extra tokens are used.
+    Returns empty string when English, so no extra tokens are used.
     Only applied to user-facing agents (analysts, portfolio manager).
     Internal debate agents stay in English for reasoning quality.
     """
     from tradingagents.dataflows.config import get_config
-    lang = get_config().get("output_language", "English")
+    lang = get_config().get("output_language", "Chinese")
     if lang.strip().lower() == "english":
         return ""
     return f" Write your entire response in {lang}."

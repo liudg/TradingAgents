@@ -94,6 +94,7 @@ class AnalysisJobResponse(BaseModel):
     decision: Optional[str] = None
     error_message: Optional[str] = None
     report_path: Optional[str] = None
+    log_path: Optional[str] = None
     created_at: datetime
     started_at: Optional[datetime] = None
     finished_at: Optional[datetime] = None
@@ -120,6 +121,11 @@ class HistoricalReportSummary(BaseModel):
     llm_provider: str
     deep_think_llm: str
     quick_think_llm: str
+    backend_url: Optional[str] = None
+    google_thinking_level: Optional[str] = None
+    openai_reasoning_effort: Optional[str] = None
+    anthropic_effort: Optional[str] = None
+    output_language: str
     max_debate_rounds: int
     max_risk_discuss_rounds: int
     max_recur_limit: int

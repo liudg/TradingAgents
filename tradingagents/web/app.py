@@ -1,4 +1,5 @@
 import uvicorn
+from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse
 
@@ -15,6 +16,8 @@ from tradingagents.web.schemas import (
     MetadataOptionsResponse,
 )
 
+
+load_dotenv()
 
 app = FastAPI(
     title="TradingAgents Web API",
