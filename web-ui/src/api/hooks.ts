@@ -3,6 +3,7 @@ import { useMutation, useQuery } from "@tanstack/react-query";
 import {
   createAnalysisJob,
   fetchAnalysisJob,
+  fetchAnalysisJobLogs,
   fetchAnalysisReport,
   fetchHistoricalReport,
   fetchHistoricalReports,
@@ -42,6 +43,16 @@ export function useAnalysisReport(jobId: string, enabled: boolean) {
     queryKey: ["analysis-report", jobId],
     queryFn: () => fetchAnalysisReport(jobId),
     enabled,
+  });
+}
+
+export function useAnalysisJobLogs(jobId: string, status?: JobStatus) {
+  return useQuery({
+    queryKey: ["analysis-job-logs", jobId],
+    queryFn: () => fetchAnalysisJobLogs(jobId),
+    refetchInterval:
+      status && activeStatuses.includes(status) ? 2000 : false,
+    enabled: Boolean(jobId),
   });
 }
 

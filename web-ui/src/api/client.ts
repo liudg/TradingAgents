@@ -1,5 +1,6 @@
 import {
   AnalysisJobCreateResponse,
+  AnalysisJobLogEntry,
   AnalysisJobRequest,
   AnalysisJobResponse,
   ApiError,
@@ -52,6 +53,12 @@ export async function createAnalysisJob(payload: AnalysisJobRequest) {
 
 export async function fetchAnalysisJob(jobId: string) {
   return requestJson<AnalysisJobResponse>(`/api/analysis-jobs/${jobId}`);
+}
+
+export async function fetchAnalysisJobLogs(jobId: string) {
+  return requestJson<AnalysisJobLogEntry[]>(
+    `/api/analysis-jobs/${jobId}/logs`,
+  );
 }
 
 export async function fetchAnalysisReport(jobId: string) {

@@ -64,6 +64,13 @@ export interface AnalysisJobResponse {
   finished_at: string | null;
 }
 
+export interface AnalysisJobLogEntry {
+  line_no: number;
+  timestamp: string | null;
+  level: string;
+  content: string;
+}
+
 export interface ModelOptionItem {
   label: string;
   value: string;

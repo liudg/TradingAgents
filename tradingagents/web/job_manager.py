@@ -1,4 +1,5 @@
 import json
+import re
 import traceback
 from concurrent.futures import ThreadPoolExecutor
 from copy import deepcopy
@@ -14,6 +15,7 @@ from tradingagents.default_config import DEFAULT_CONFIG
 from tradingagents.graph.trading_graph import TradingAgentsGraph
 from tradingagents.reporting import save_report_to_disk
 from tradingagents.web.schemas import (
+    AnalysisJobLogEntry,
     AnalysisJobRequest,
     AnalysisJobResponse,
     HistoricalReportAgentGroup,
@@ -34,6 +36,11 @@ REPORT_PROGRESS_WEIGHTS = {
     "trader_investment_plan": 15,
     "final_trade_decision": 17,
 }
+JOB_LOG_PATTERN = re.compile(
+    r"^(?P<timestamp>\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}) "
+    r"\[(?P<level>[^\]]+)\] "
+    r"(?P<content>.*)$"
+)
 
 ANALYST_REPORT_SECTIONS = [
     ("market", "市场技术分析师", "market_report", "市场技术分析报告"),
@@ -122,6 +129,23 @@ class AnalysisJobManager:
                 f"Report for job '{job_id}' is not ready. Current status: {job.status}"
             )
         return Path(job.report_path)
+
+    def list_job_logs(self, job_id: str) -> list[AnalysisJobLogEntry]:
+        snapshot = self._get_job_snapshot(job_id)
+        log_path = Path(
+            snapshot.get("log_path")
+            or Path(snapshot["results_dir"]) / "message_tool.log"
+        )
+        if not log_path.exists():
+            return []
+
+        entries: list[AnalysisJobLogEntry] = []
+        for line_no, raw_line in enumerate(
+            log_path.read_text(encoding="utf-8").splitlines(),
+            start=1,
+        ):
+            entries.append(self._parse_job_log_line(line_no, raw_line))
+        return entries
 
     def list_historical_reports(self) -> list[HistoricalReportSummary]:
         with self._lock:
@@ -409,6 +433,27 @@ class AnalysisJobManager:
         normalized_content = content.replace("\r\n", "\n").replace("\n", " ")
         with log_path.open("a", encoding="utf-8") as log_file:
             log_file.write(f"{timestamp} [{message_type}] {normalized_content}\n")
+
+    @staticmethod
+    def _parse_job_log_line(line_no: int, raw_line: str) -> AnalysisJobLogEntry:
+        matched = JOB_LOG_PATTERN.match(raw_line)
+        if not matched:
+            return AnalysisJobLogEntry(
+                line_no=line_no,
+                timestamp=None,
+                level="Raw",
+                content=raw_line,
+            )
+
+        return AnalysisJobLogEntry(
+            line_no=line_no,
+            timestamp=datetime.strptime(
+                matched.group("timestamp"),
+                "%Y-%m-%d %H:%M:%S",
+            ),
+            level=matched.group("level"),
+            content=matched.group("content"),
+        )
 
     @staticmethod
     def _normalize_selected_analysts(selected_analysts: list[Any]) -> list[Any]:

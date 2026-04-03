@@ -4,8 +4,8 @@ import {
   Button,
   Card,
   Col,
-  Collapse,
   Descriptions,
+  List,
   Progress,
   Result,
   Row,
@@ -18,12 +18,17 @@ import {
 import {
   ArrowLeftOutlined,
   DownloadOutlined,
+  FileTextOutlined,
   ReloadOutlined,
 } from "@ant-design/icons";
 import { useNavigate, useParams } from "react-router-dom";
 
-import { useAnalysisJob, useAnalysisReport } from "../api/hooks";
-import { AnalysisFinalState, DebateState } from "../api/types";
+import {
+  useAnalysisJob,
+  useAnalysisJobLogs,
+  useAnalysisReport,
+} from "../api/hooks";
+import { AnalysisFinalState, AnalysisJobLogEntry } from "../api/types";
 import { MarkdownPanel } from "../components/MarkdownPanel";
 import {
   extractErrorMessage,
@@ -33,10 +38,21 @@ import {
 } from "../utils/format";
 
 const analystNameMap: Record<string, string> = {
-  market: "市场技术分析",
-  social: "社交情绪分析",
-  news: "新闻分析",
-  fundamentals: "基本面分析",
+  market: "市场技术分析师",
+  social: "社交情绪分析师",
+  news: "新闻分析师",
+  fundamentals: "基本面分析师",
+};
+
+const logLevelColorMap: Record<string, string> = {
+  System: "blue",
+  Agent: "purple",
+  "Tool Call": "cyan",
+  Data: "green",
+  Control: "default",
+  User: "gold",
+  Error: "red",
+  Raw: "default",
 };
 
 function renderReportSections(finalState: AnalysisFinalState | null) {
@@ -45,7 +61,11 @@ function renderReportSections(finalState: AnalysisFinalState | null) {
   }
 
   const sections = [
-    { key: "market", label: "市场技术分析报告", value: finalState.market_report },
+    {
+      key: "market",
+      label: "市场技术分析报告",
+      value: finalState.market_report,
+    },
     {
       key: "sentiment",
       label: "社交情绪分析报告",
@@ -57,7 +77,11 @@ function renderReportSections(finalState: AnalysisFinalState | null) {
       label: "基本面分析报告",
       value: finalState.fundamentals_report,
     },
-    { key: "investment", label: "研究经理决策", value: finalState.investment_plan },
+    {
+      key: "investment",
+      label: "研究经理决策",
+      value: finalState.investment_plan,
+    },
     {
       key: "trader",
       label: "交易员方案",
@@ -75,47 +99,15 @@ function renderReportSections(finalState: AnalysisFinalState | null) {
       {sections.map((section) => (
         <Col xs={24} xl={12} key={section.key}>
           <Card className="section-card" title={section.label}>
-            <MarkdownPanel content={section.value} emptyText="本模块暂无返回内容" />
+            <MarkdownPanel
+              content={section.value}
+              emptyText="本模块暂无返回内容"
+            />
           </Card>
         </Col>
       ))}
     </Row>
   );
-}
-
-function buildDebateItems(title: string, debateState?: DebateState | null) {
-  if (!debateState) {
-    return [
-      {
-        key: title,
-        label: title,
-        children: <MarkdownPanel content="" emptyText="暂无辩论记录" />,
-      },
-    ];
-  }
-
-  const fields = Object.entries(debateState).filter(([, value]) =>
-    Boolean(value && String(value).trim()),
-  );
-
-  return [
-    {
-      key: title,
-      label: title,
-      children:
-        fields.length === 0 ? (
-          <MarkdownPanel content="" emptyText="暂无辩论记录" />
-        ) : (
-          <Space direction="vertical" size="middle" style={{ width: "100%" }}>
-            {fields.map(([key, value]) => (
-              <Card key={key} size="small" title={key}>
-                <MarkdownPanel content={String(value)} />
-              </Card>
-            ))}
-          </Space>
-        ),
-    },
-  ];
 }
 
 function downloadMarkdown(filename: string, content: string) {
@@ -128,15 +120,37 @@ function downloadMarkdown(filename: string, content: string) {
   URL.revokeObjectURL(url);
 }
 
+function renderExecutionLogItem(item: AnalysisJobLogEntry) {
+  return (
+    <List.Item>
+      <Space direction="vertical" size={6} style={{ width: "100%" }}>
+        <Space size={8} wrap>
+          <Tag color={logLevelColorMap[item.level] || "default"}>
+            {item.level}
+          </Tag>
+          <Typography.Text type="secondary">
+            #{item.line_no}
+          </Typography.Text>
+          <Typography.Text type="secondary">
+            {formatDateTime(item.timestamp)}
+          </Typography.Text>
+        </Space>
+        <Typography.Paragraph style={{ marginBottom: 0 }}>
+          {item.content || "-"}
+        </Typography.Paragraph>
+      </Space>
+    </List.Item>
+  );
+}
+
 export function JobDetailPage() {
   const { jobId = "" } = useParams();
   const navigate = useNavigate();
   const { message } = App.useApp();
   const jobQuery = useAnalysisJob(jobId);
-  const reportQuery = useAnalysisReport(
-    jobId,
-    jobQuery.data?.status === "completed",
-  );
+  const job = jobQuery.data;
+  const reportQuery = useAnalysisReport(jobId, false);
+  const logsQuery = useAnalysisJobLogs(jobId, job?.status);
 
   if (jobQuery.isLoading) {
     return (
@@ -146,7 +160,7 @@ export function JobDetailPage() {
     );
   }
 
-  if (jobQuery.isError || !jobQuery.data) {
+  if (jobQuery.isError || !job) {
     return (
       <Result
         status="error"
@@ -161,20 +175,25 @@ export function JobDetailPage() {
     );
   }
 
-  const job = jobQuery.data;
   const isCompleted = job.status === "completed";
   const isFailed = job.status === "failed";
+  const executionLogs = logsQuery.data || [];
 
   const handleDownload = async () => {
-    try {
-      const report = await reportQuery.refetch();
-      if (report.data) {
-        downloadMarkdown(`${job.job_id}-complete-report.md`, report.data);
-        message.success("报告下载已开始");
-      }
-    } catch (error) {
-      message.error(extractErrorMessage(error));
+    const report = await reportQuery.refetch();
+
+    if (report.isError) {
+      message.error(extractErrorMessage(report.error));
+      return;
     }
+
+    if (!report.data) {
+      message.warning("报告内容为空，暂时无法下载");
+      return;
+    }
+
+    downloadMarkdown(`${job.job_id}-complete-report.md`, report.data);
+    message.success("报告下载已开始");
   };
 
   return (
@@ -184,14 +203,31 @@ export function JobDetailPage() {
         title={
           <Space>
             <span>任务详情</span>
-            <Tag color={getStatusColor(job.status)}>{getStatusText(job.status)}</Tag>
+            <Tag color={getStatusColor(job.status)}>
+              {getStatusText(job.status)}
+            </Tag>
           </Space>
         }
         extra={
-          <Space>
-            <Button icon={<ReloadOutlined />} onClick={() => jobQuery.refetch()}>
+          <Space wrap>
+            <Button
+              icon={<ReloadOutlined />}
+              loading={jobQuery.isFetching}
+              onClick={() => {
+                jobQuery.refetch();
+                logsQuery.refetch();
+              }}
+            >
               刷新状态
             </Button>
+            {isCompleted ? (
+              <Button
+                icon={<FileTextOutlined />}
+                onClick={() => navigate(`/reports/${job.job_id}`)}
+              >
+                查看报告
+              </Button>
+            ) : null}
             <Button
               type="primary"
               icon={<DownloadOutlined />}
@@ -209,7 +245,9 @@ export function JobDetailPage() {
             <Statistic title="任务进度" value={job.progress} suffix="%" />
             <Progress
               percent={job.progress}
-              status={isFailed ? "exception" : isCompleted ? "success" : "active"}
+              status={
+                isFailed ? "exception" : isCompleted ? "success" : "active"
+              }
               style={{ marginTop: 12 }}
             />
           </Col>
@@ -256,7 +294,8 @@ export function JobDetailPage() {
                 {job.request.anthropic_effort || "-"}
               </Descriptions.Item>
               <Descriptions.Item label="Research Depth">
-                {job.request.max_debate_rounds === job.request.max_risk_discuss_rounds
+                {job.request.max_debate_rounds ===
+                job.request.max_risk_discuss_rounds
                   ? job.request.max_debate_rounds
                   : `${job.request.max_debate_rounds}/${job.request.max_risk_discuss_rounds}`}
               </Descriptions.Item>
@@ -269,15 +308,32 @@ export function JobDetailPage() {
               <Descriptions.Item label="结束时间">
                 {formatDateTime(job.finished_at)}
               </Descriptions.Item>
-              <Descriptions.Item label="服务端报告路径">
-                {job.report_path || "-"}
-              </Descriptions.Item>
-              <Descriptions.Item label="服务端日志路径" span={2}>
-                {job.log_path || "-"}
-              </Descriptions.Item>
             </Descriptions>
           </Col>
         </Row>
+      </Card>
+
+      <Card
+        className="page-card"
+        title="执行过程"
+        extra={
+          logsQuery.isFetching ? <Tag color="processing">日志更新中</Tag> : null
+        }
+      >
+        {logsQuery.isError ? (
+          <Alert
+            type="warning"
+            showIcon
+            message="执行日志加载失败"
+            description={extractErrorMessage(logsQuery.error)}
+          />
+        ) : (
+          <List
+            dataSource={executionLogs}
+            locale={{ emptyText: "暂无执行日志" }}
+            renderItem={renderExecutionLogItem}
+          />
+        )}
       </Card>
 
       {isFailed ? (
@@ -296,48 +352,6 @@ export function JobDetailPage() {
       ) : null}
 
       {renderReportSections(job.final_state)}
-
-      <Card className="page-card" title="辩论过程">
-        <Collapse
-          items={[
-            ...buildDebateItems(
-              "多空研究员辩论",
-              job.final_state?.investment_debate_state,
-            ),
-            ...buildDebateItems(
-              "风控团队辩论",
-              job.final_state?.risk_debate_state,
-            ),
-          ]}
-          defaultActiveKey={["多空研究员辩论"]}
-        />
-      </Card>
-
-      <Card
-        className="page-card"
-        title="完整 Markdown 报告预览"
-        extra={
-          reportQuery.isFetching && isCompleted ? (
-            <Tag color="processing">报告加载中</Tag>
-          ) : null
-        }
-      >
-        {reportQuery.isError ? (
-          <Alert
-            type="warning"
-            showIcon
-            message="报告暂不可用"
-            description={extractErrorMessage(reportQuery.error)}
-          />
-        ) : (
-          <MarkdownPanel
-            content={reportQuery.data}
-            emptyText={
-              isCompleted ? "报告内容为空" : "任务完成后自动加载完整 Markdown 报告"
-            }
-          />
-        )}
-      </Card>
     </Space>
   );
 }

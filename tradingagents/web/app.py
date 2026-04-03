@@ -9,6 +9,7 @@ from tradingagents.llm_clients.model_catalog import MODEL_OPTIONS
 from tradingagents.web.job_manager import AnalysisJobManager
 from tradingagents.web.schemas import (
     AnalysisJobCreateResponse,
+    AnalysisJobLogEntry,
     AnalysisJobRequest,
     AnalysisJobResponse,
     HistoricalReportDetail,
@@ -57,6 +58,17 @@ def get_analysis_report(job_id: str) -> FileResponse:
         media_type="text/markdown; charset=utf-8",
         filename=report_path.name,
     )
+
+
+@app.get(
+    "/api/analysis-jobs/{job_id}/logs",
+    response_model=list[AnalysisJobLogEntry],
+)
+def get_analysis_job_logs(job_id: str) -> list[AnalysisJobLogEntry]:
+    try:
+        return job_manager.list_job_logs(job_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="Analysis job not found") from exc
 
 
 @app.get("/api/historical-reports", response_model=list[HistoricalReportSummary])

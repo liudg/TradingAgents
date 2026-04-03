@@ -167,6 +167,12 @@ class WebApiTests(unittest.TestCase):
         self.assertEqual(response.status_code, 404)
         self.assertEqual(response.json()["detail"], "Analysis job not found")
 
+    def test_unknown_job_logs_returns_404(self):
+        response = self.client.get("/api/analysis-jobs/not-exist/logs")
+
+        self.assertEqual(response.status_code, 404)
+        self.assertEqual(response.json()["detail"], "Analysis job not found")
+
     def test_create_and_poll_job_until_completed(self):
         with patch(
             "tradingagents.web.job_manager.TradingAgentsGraph",
@@ -219,6 +225,24 @@ class WebApiTests(unittest.TestCase):
             self.assertIn("[Agent] Collecting market data", log_text)
             self.assertIn("[Tool Call] get_stock_data(symbol=NVDA)", log_text)
             self.assertIn("[Data] market payload", log_text)
+
+            logs_response = self.client.get(f"/api/analysis-jobs/{job_id}/logs")
+            self.assertEqual(logs_response.status_code, 200)
+            logs_payload = logs_response.json()
+            self.assertGreaterEqual(len(logs_payload), 4)
+            self.assertEqual(logs_payload[0]["line_no"], 1)
+            self.assertTrue(logs_payload[0]["timestamp"])
+            self.assertEqual(logs_payload[0]["level"], "System")
+            self.assertIn("Job", logs_payload[0]["content"])
+            self.assertTrue(
+                any(item["level"] == "Agent" for item in logs_payload)
+            )
+            self.assertTrue(
+                any(item["level"] == "Tool Call" for item in logs_payload)
+            )
+            self.assertTrue(
+                any(item["level"] == "Data" for item in logs_payload)
+            )
 
             report_response = self.client.get(f"/api/analysis-jobs/{job_id}/report")
             self.assertEqual(report_response.status_code, 200)
@@ -329,6 +353,11 @@ class WebApiTests(unittest.TestCase):
             log_text = log_path.read_text(encoding="utf-8")
             self.assertIn("Job", log_text)
             self.assertIn("RuntimeError: boom for MSFT", log_text)
+
+            logs_response = self.client.get(f"/api/analysis-jobs/{job_id}/logs")
+            self.assertEqual(logs_response.status_code, 200)
+            logs_payload = logs_response.json()
+            self.assertTrue(any(item["level"] == "Error" for item in logs_payload))
 
 
 if __name__ == "__main__":

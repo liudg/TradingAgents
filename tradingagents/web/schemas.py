@@ -100,6 +100,13 @@ class AnalysisJobResponse(BaseModel):
     finished_at: Optional[datetime] = None
 
 
+class AnalysisJobLogEntry(BaseModel):
+    line_no: int
+    timestamp: Optional[datetime] = None
+    level: str
+    content: str
+
+
 class HistoricalReportItem(BaseModel):
     report_key: str
     title: str
