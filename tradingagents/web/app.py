@@ -1,5 +1,3 @@
-from pathlib import Path
-
 import uvicorn
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse
@@ -12,6 +10,8 @@ from tradingagents.web.schemas import (
     AnalysisJobCreateResponse,
     AnalysisJobRequest,
     AnalysisJobResponse,
+    HistoricalReportDetail,
+    HistoricalReportSummary,
     MetadataOptionsResponse,
 )
 
@@ -54,6 +54,24 @@ def get_analysis_report(job_id: str) -> FileResponse:
         media_type="text/markdown; charset=utf-8",
         filename=report_path.name,
     )
+
+
+@app.get("/api/historical-reports", response_model=list[HistoricalReportSummary])
+def list_historical_reports() -> list[HistoricalReportSummary]:
+    return job_manager.list_historical_reports()
+
+
+@app.get(
+    "/api/historical-reports/{job_id}",
+    response_model=HistoricalReportDetail,
+)
+def get_historical_report(job_id: str) -> HistoricalReportDetail:
+    try:
+        return job_manager.get_historical_report(job_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="Historical report not found") from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
 
 
 @app.get("/api/metadata/options", response_model=MetadataOptionsResponse)

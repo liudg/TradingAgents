@@ -99,6 +99,37 @@ class AnalysisJobResponse(BaseModel):
     finished_at: Optional[datetime] = None
 
 
+class HistoricalReportItem(BaseModel):
+    report_key: str
+    title: str
+    content: Optional[str] = None
+
+
+class HistoricalReportAgentGroup(BaseModel):
+    agent_key: str
+    agent_name: str
+    reports: List[HistoricalReportItem]
+
+
+class HistoricalReportSummary(BaseModel):
+    job_id: str
+    ticker: str
+    trade_date: date
+    generated_at: datetime
+    selected_analysts: List[str]
+    llm_provider: str
+    deep_think_llm: str
+    quick_think_llm: str
+    max_debate_rounds: int
+    max_risk_discuss_rounds: int
+    max_recur_limit: int
+    report_path: Optional[str] = None
+
+
+class HistoricalReportDetail(HistoricalReportSummary):
+    agent_reports: List[HistoricalReportAgentGroup]
+
+
 class MetadataOptionsResponse(BaseModel):
     analysts: List[str]
     llm_providers: List[str]

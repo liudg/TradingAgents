@@ -8,6 +8,7 @@ from unittest.mock import patch
 from fastapi.testclient import TestClient
 
 from tradingagents.web.app import app, job_manager
+from tradingagents.web.job_manager import AnalysisJobManager
 
 
 class DummyTradingAgentsGraph:
@@ -113,6 +114,35 @@ class WebApiTests(unittest.TestCase):
             report_response = self.client.get(f"/api/analysis-jobs/{job_id}/report")
             self.assertEqual(report_response.status_code, 200)
             self.assertIn("Trading Analysis Report: NVDA", report_response.text)
+
+            history_response = self.client.get("/api/historical-reports")
+            self.assertEqual(history_response.status_code, 200)
+            history_payload = history_response.json()
+            self.assertGreaterEqual(len(history_payload), 1)
+            self.assertEqual(history_payload[0]["job_id"], job_id)
+            self.assertEqual(history_payload[0]["ticker"], "NVDA")
+            self.assertEqual(history_payload[0]["max_debate_rounds"], 1)
+
+            detail_response = self.client.get(f"/api/historical-reports/{job_id}")
+            self.assertEqual(detail_response.status_code, 200)
+            detail_payload = detail_response.json()
+            self.assertEqual(detail_payload["job_id"], job_id)
+            self.assertGreaterEqual(len(detail_payload["agent_reports"]), 1)
+            self.assertEqual(
+                detail_payload["agent_reports"][0]["reports"][0]["content"],
+                "Market report",
+            )
+
+            restored_manager = AnalysisJobManager(
+                reports_root=self.temp_dir,
+                max_workers=1,
+            )
+            restored_history = restored_manager.list_historical_reports()
+            self.assertEqual(len(restored_history), 1)
+            self.assertEqual(restored_history[0].job_id, job_id)
+            restored_detail = restored_manager.get_historical_report(job_id)
+            self.assertEqual(restored_detail.ticker, "NVDA")
+            self.assertGreaterEqual(len(restored_detail.agent_reports), 1)
 
 
 if __name__ == "__main__":
