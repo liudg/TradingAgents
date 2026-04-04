@@ -10,6 +10,7 @@ readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
     "fastapi>=0.115.0",
+    "futu-api>=10.2.6218",
     "httpx>=0.28.0",
     "langchain-core>=0.3.81",
     "backtrader>=1.9.78.123",

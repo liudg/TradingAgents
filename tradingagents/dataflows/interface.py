@@ -22,6 +22,10 @@ from .alpha_vantage import (
     get_news as get_alpha_vantage_news,
     get_global_news as get_alpha_vantage_global_news,
 )
+from .futu import (
+    get_indicator as get_futu_indicator,
+    get_stock as get_futu_stock,
+)
 from .alpha_vantage_common import AlphaVantageRateLimitError
 
 # Configuration and routing logic
@@ -63,6 +67,7 @@ TOOLS_CATEGORIES = {
 VENDOR_LIST = [
     "yfinance",
     "alpha_vantage",
+    "futu",
 ]
 
 # Mapping of methods to their vendor-specific implementations
@@ -70,11 +75,13 @@ VENDOR_METHODS = {
     # core_stock_apis
     "get_stock_data": {
         "alpha_vantage": get_alpha_vantage_stock,
+        "futu": get_futu_stock,
         "yfinance": get_YFin_data_online,
     },
     # technical_indicators
     "get_indicators": {
         "alpha_vantage": get_alpha_vantage_indicator,
+        "futu": get_futu_indicator,
         "yfinance": get_stock_stats_indicators_window,
     },
     # fundamental_data

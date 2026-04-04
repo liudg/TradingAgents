@@ -26,11 +26,14 @@ DEFAULT_CONFIG = {
     # Data vendor configuration
     # Category-level configuration (default for all tools in category)
     "data_vendors": {
-        "core_stock_apis": "yfinance",       # Options: alpha_vantage, yfinance
-        "technical_indicators": "yfinance",  # Options: alpha_vantage, yfinance
-        "fundamental_data": "yfinance",      # Options: alpha_vantage, yfinance
-        "news_data": "yfinance",             # Options: alpha_vantage, yfinance
+        "core_stock_apis": "futu",       # Options: alpha_vantage, futu, yfinance
+        "technical_indicators": "futu",  # Options: alpha_vantage, futu, yfinance
+        "fundamental_data": "alpha_vantage",      # Options: alpha_vantage, yfinance
+        "news_data": "alpha_vantage",             # Options: alpha_vantage, yfinance
     },
+    # Futu OpenD settings
+    "futu_opend_host": "127.0.0.1",
+    "futu_opend_port": 11111,
     # Tool-level configuration (takes precedence over category-level)
     "tool_vendors": {
         # Example: "get_stock_data": "alpha_vantage",  # Override category default
