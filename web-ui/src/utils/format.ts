@@ -31,6 +31,23 @@ export function formatDateTime(value?: string | null) {
   return dayjs(value).format("YYYY-MM-DD HH:mm:ss");
 }
 
+export function formatElapsedTime(startedAt?: string | null, finishedAt?: string | null) {
+  if (!startedAt) {
+    return "未开始";
+  }
+
+  const startTime = dayjs(startedAt);
+  const endTime = finishedAt ? dayjs(finishedAt) : dayjs();
+  const totalSeconds = Math.max(0, endTime.diff(startTime, "second"));
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = totalSeconds % 60;
+
+  return [hours, minutes, seconds]
+    .map((value) => String(value).padStart(2, "0"))
+    .join(":");
+}
+
 export function extractErrorMessage(error: unknown) {
   if (error instanceof ApiError) {
     if (error.status === 422) {

@@ -16,7 +16,6 @@ export interface AnalysisJobRequest {
   output_language: string;
   max_debate_rounds: number;
   max_risk_discuss_rounds: number;
-  max_recur_limit: number;
 }
 
 export interface AnalysisJobCreateResponse {
@@ -111,7 +110,6 @@ export interface HistoricalReportSummary {
   output_language: string;
   max_debate_rounds: number;
   max_risk_discuss_rounds: number;
-  max_recur_limit: number;
   report_path?: string | null;
 }
 

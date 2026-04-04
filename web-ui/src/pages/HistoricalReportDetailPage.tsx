@@ -61,6 +61,10 @@ export function HistoricalReportDetailPage() {
   );
 
   useEffect(() => {
+    setSelectedReportKey("");
+  }, [jobId]);
+
+  useEffect(() => {
     if (selectedReportKey || !detailQuery.data?.agent_reports.length) {
       return;
     }
@@ -113,7 +117,7 @@ export function HistoricalReportDetailPage() {
 
   return (
     <Row gutter={[16, 16]} className="report-detail-grid">
-      <Col xs={24} lg={6}>
+      <Col xs={24} lg={5}>
         <Card className="page-card report-sidebar-card" title="报告目录">
           <Menu
             mode="inline"
@@ -125,7 +129,7 @@ export function HistoricalReportDetailPage() {
         </Card>
       </Col>
 
-      <Col xs={24} lg={12}>
+      <Col xs={24} lg={14}>
         <Card
           className="page-card report-content-card"
           title={
@@ -146,7 +150,7 @@ export function HistoricalReportDetailPage() {
         </Card>
       </Col>
 
-      <Col xs={24} lg={6}>
+      <Col xs={24} lg={5}>
         <Card className="page-card report-meta-card" title="报告信息">
           <Descriptions bordered size="small" column={1}>
             <Descriptions.Item label="股票代码">
@@ -167,8 +171,7 @@ export function HistoricalReportDetailPage() {
             </Descriptions.Item>
             <Descriptions.Item label="研究深度">
               辩论轮数 {detail.max_debate_rounds} ｜ 风控轮数{" "}
-              {detail.max_risk_discuss_rounds} ｜ 递归上限{" "}
-              {detail.max_recur_limit}
+              {detail.max_risk_discuss_rounds}
             </Descriptions.Item>
             <Descriptions.Item label="LLM Provider">
               {detail.llm_provider}

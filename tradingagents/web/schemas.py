@@ -42,7 +42,6 @@ class AnalysisJobRequest(BaseModel):
     max_risk_discuss_rounds: int = Field(
         DEFAULT_CONFIG["max_risk_discuss_rounds"], ge=1, le=10
     )
-    max_recur_limit: int = Field(DEFAULT_CONFIG["max_recur_limit"], ge=1, le=300)
 
     @field_validator("ticker")
     @classmethod
@@ -135,7 +134,6 @@ class HistoricalReportSummary(BaseModel):
     output_language: str
     max_debate_rounds: int
     max_risk_discuss_rounds: int
-    max_recur_limit: int
     report_path: Optional[str] = None
 
 

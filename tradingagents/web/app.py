@@ -91,6 +91,8 @@ def get_historical_report(job_id: str) -> HistoricalReportDetail:
 
 @app.get("/api/metadata/options", response_model=MetadataOptionsResponse)
 def get_metadata_options() -> MetadataOptionsResponse:
+    default_config = DEFAULT_CONFIG.copy()
+    default_config.pop("max_recur_limit", None)
     return MetadataOptionsResponse(
         analysts=[item.value for item in AnalystType],
         llm_providers=sorted(MODEL_OPTIONS.keys()),
@@ -107,7 +109,7 @@ def get_metadata_options() -> MetadataOptionsResponse:
             }
             for provider, mode_options in MODEL_OPTIONS.items()
         },
-        default_config=DEFAULT_CONFIG.copy(),
+        default_config=default_config,
     )
 
 

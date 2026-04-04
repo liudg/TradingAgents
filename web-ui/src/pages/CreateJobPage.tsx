@@ -105,7 +105,6 @@ export function CreateJobPage() {
       ),
       max_debate_rounds: defaults.max_debate_rounds || 1,
       max_risk_discuss_rounds: defaults.max_risk_discuss_rounds || 1,
-      max_recur_limit: defaults.max_recur_limit || 100,
     });
   };
 
@@ -167,7 +166,6 @@ export function CreateJobPage() {
             : values.output_language,
         max_debate_rounds: values.max_debate_rounds,
         max_risk_discuss_rounds: values.max_risk_discuss_rounds,
-        max_recur_limit: values.max_recur_limit,
       };
       const result = await createJobMutation.mutateAsync(payload);
       message.success(`任务已创建：${result.job_id}`);
@@ -360,11 +358,6 @@ export function CreateJobPage() {
                   </Form.Item>
                 </Col>
               ) : null}
-              <Col xs={24} md={8}>
-                <Form.Item label="图递归上限" name="max_recur_limit">
-                  <InputNumber min={1} max={300} style={{ width: "100%" }} />
-                </Form.Item>
-              </Col>
             </Row>
 
             <Divider />

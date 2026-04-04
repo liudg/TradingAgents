@@ -302,7 +302,6 @@ class AnalysisJobManager:
         config["output_language"] = request.output_language
         config["max_debate_rounds"] = request.max_debate_rounds
         config["max_risk_discuss_rounds"] = request.max_risk_discuss_rounds
-        config["max_recur_limit"] = request.max_recur_limit
         return config
 
     @staticmethod
@@ -489,7 +488,6 @@ class AnalysisJobManager:
             output_language=request.output_language,
             max_debate_rounds=request.max_debate_rounds,
             max_risk_discuss_rounds=request.max_risk_discuss_rounds,
-            max_recur_limit=request.max_recur_limit,
             report_path=snapshot.get("report_path"),
         )
 
@@ -497,41 +495,54 @@ class AnalysisJobManager:
     def _build_agent_reports(final_state: Dict[str, Any]) -> list[HistoricalReportAgentGroup]:
         groups: list[HistoricalReportAgentGroup] = []
 
-        for agent_key, agent_name, field_name, title in ANALYST_REPORT_SECTIONS:
-            content = final_state.get(field_name)
-            if content and str(content).strip():
-                groups.append(
-                    HistoricalReportAgentGroup(
-                        agent_key=agent_key,
-                        agent_name=agent_name,
-                        reports=[
-                            HistoricalReportItem(
-                                report_key=field_name,
-                                title=title,
-                                content=str(content),
-                            )
-                        ],
+        analyst_reports = []
+        for field_name, title in [
+            ("market_report", "市场分析报告"),
+            ("sentiment_report", "社交情绪分析报告"),
+            ("news_report", "新闻分析报告"),
+            ("fundamentals_report", "基本面分析报告"),
+        ]:
+            content = str(final_state.get(field_name) or "").strip()
+            if content:
+                analyst_reports.append(
+                    HistoricalReportItem(
+                        report_key=field_name,
+                        title=title,
+                        content=content,
                     )
                 )
+        if analyst_reports:
+            groups.append(
+                HistoricalReportAgentGroup(
+                    agent_key="analyst_team",
+                    agent_name="分析师团队",
+                    reports=analyst_reports,
+                )
+            )
 
         research_reports = []
+        investment_plan = str(final_state.get("investment_plan") or "").strip()
         investment_debate_state = final_state.get("investment_debate_state") or {}
-        for report_key, _, field_name, title in RESEARCH_REPORT_SECTIONS:
-            content = investment_debate_state.get(field_name)
-            if content and str(content).strip():
+        for report_key, field_name, title in [
+            ("research_bull", "bull_history", "多方研究报告"),
+            ("research_bear", "bear_history", "空方研究报告"),
+            ("research_manager", "judge_decision", "研究经理决策报告"),
+        ]:
+            content = str(investment_debate_state.get(field_name) or "").strip()
+            if content and content != investment_plan:
                 research_reports.append(
                     HistoricalReportItem(
-                        report_key=f"research_{report_key}",
+                        report_key=report_key,
                         title=title,
-                        content=str(content),
+                        content=content,
                     )
                 )
-        if final_state.get("investment_plan"):
+        if investment_plan:
             research_reports.append(
                 HistoricalReportItem(
                     report_key="investment_plan",
                     title="研究经理投资计划",
-                    content=str(final_state["investment_plan"]),
+                    content=investment_plan,
                 )
             )
         if research_reports:
@@ -543,16 +554,17 @@ class AnalysisJobManager:
                 )
             )
 
-        if final_state.get("trader_investment_plan"):
+        trader_plan = str(final_state.get("trader_investment_plan") or "").strip()
+        if trader_plan:
             groups.append(
                 HistoricalReportAgentGroup(
-                    agent_key="trader",
-                    agent_name="交易员",
+                    agent_key="trading_desk",
+                    agent_name="交易台",
                     reports=[
                         HistoricalReportItem(
                             report_key="trader_investment_plan",
                             title="交易员执行方案",
-                            content=str(final_state["trader_investment_plan"]),
+                            content=trader_plan,
                         )
                     ],
                 )
@@ -560,30 +572,48 @@ class AnalysisJobManager:
 
         risk_reports = []
         risk_debate_state = final_state.get("risk_debate_state") or {}
-        for report_key, _, field_name, title in RISK_REPORT_SECTIONS:
-            content = risk_debate_state.get(field_name)
-            if content and str(content).strip():
+        final_trade_decision = str(
+            final_state.get("final_trade_decision") or ""
+        ).strip()
+        for report_key, field_name, title in [
+            ("risk_aggressive", "aggressive_history", "激进风险分析报告"),
+            ("risk_conservative", "conservative_history", "保守风险分析报告"),
+            ("risk_neutral", "neutral_history", "中性风险分析报告"),
+        ]:
+            content = str(risk_debate_state.get(field_name) or "").strip()
+            if content and content != final_trade_decision:
                 risk_reports.append(
                     HistoricalReportItem(
-                        report_key=f"risk_{report_key}",
+                        report_key=report_key,
                         title=title,
-                        content=str(content),
+                        content=content,
                     )
                 )
-        if final_state.get("final_trade_decision"):
-            risk_reports.append(
-                HistoricalReportItem(
-                    report_key="final_trade_decision",
-                    title="最终交易决策",
-                    content=str(final_state["final_trade_decision"]),
-                )
-            )
         if risk_reports:
             groups.append(
                 HistoricalReportAgentGroup(
                     agent_key="risk_team",
                     agent_name="风控团队",
                     reports=risk_reports,
+                )
+            )
+
+        portfolio_manager_decision = str(
+            risk_debate_state.get("judge_decision") or ""
+        ).strip()
+        verdict_content = final_trade_decision or portfolio_manager_decision
+        if verdict_content:
+            groups.append(
+                HistoricalReportAgentGroup(
+                    agent_key="final_verdict",
+                    agent_name="最终裁决",
+                    reports=[
+                        HistoricalReportItem(
+                            report_key="final_trade_decision",
+                            title="最终交易决策",
+                            content=verdict_content,
+                        )
+                    ],
                 )
             )
 
@@ -686,6 +716,7 @@ class _StreamingMessageLogger:
         return (
             f"{type(message).__name__}:"
             f"{repr(getattr(message, 'content', None))}:"
+            f"{repr(getattr(message, 'tool_call_id', None))}:"
             f"{repr(getattr(message, 'tool_calls', None))}"
         )
 

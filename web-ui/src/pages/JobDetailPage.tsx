@@ -33,6 +33,7 @@ import { MarkdownPanel } from "../components/MarkdownPanel";
 import {
   extractErrorMessage,
   formatDateTime,
+  formatElapsedTime,
   getStatusColor,
   getStatusText,
 } from "../utils/format";
@@ -177,7 +178,7 @@ export function JobDetailPage() {
 
   const isCompleted = job.status === "completed";
   const isFailed = job.status === "failed";
-  const executionLogs = logsQuery.data || [];
+  const executionLogs = [...(logsQuery.data || [])].reverse();
 
   const handleDownload = async () => {
     const report = await reportQuery.refetch();
@@ -242,14 +243,22 @@ export function JobDetailPage() {
       >
         <Row gutter={[24, 24]}>
           <Col xs={24} lg={8}>
-            <Statistic title="任务进度" value={job.progress} suffix="%" />
-            <Progress
-              percent={job.progress}
-              status={
-                isFailed ? "exception" : isCompleted ? "success" : "active"
-              }
-              style={{ marginTop: 12 }}
-            />
+            <Space direction="vertical" size="middle" style={{ width: "100%" }}>
+              <div>
+                <Statistic title="任务进度" value={job.progress} suffix="%" />
+                <Progress
+                  percent={job.progress}
+                  status={
+                    isFailed ? "exception" : isCompleted ? "success" : "active"
+                  }
+                  style={{ marginTop: 12 }}
+                />
+              </div>
+              <Statistic
+                title="已消耗时间"
+                value={formatElapsedTime(job.started_at, job.finished_at)}
+              />
+            </Space>
           </Col>
           <Col xs={24} lg={16}>
             <Descriptions bordered size="small" column={2}>
@@ -313,6 +322,25 @@ export function JobDetailPage() {
         </Row>
       </Card>
 
+      {isFailed ? (
+        <Alert
+          type="error"
+          showIcon
+          message="分析任务执行失败"
+          description={job.error_message || "后端未返回失败原因"}
+        />
+      ) : null}
+
+      {job.decision ? (
+        <Card className="page-card" title="提取后的交易决策">
+          <div className="decision-highlight-panel">
+            <MarkdownPanel content={job.decision} />
+          </div>
+        </Card>
+      ) : null}
+
+      {renderReportSections(job.final_state)}
+
       <Card
         className="page-card"
         title="执行过程"
@@ -335,23 +363,6 @@ export function JobDetailPage() {
           />
         )}
       </Card>
-
-      {isFailed ? (
-        <Alert
-          type="error"
-          showIcon
-          message="分析任务执行失败"
-          description={job.error_message || "后端未返回失败原因"}
-        />
-      ) : null}
-
-      {job.decision ? (
-        <Card className="page-card" title="提取后的交易决策">
-          <MarkdownPanel content={job.decision} />
-        </Card>
-      ) : null}
-
-      {renderReportSections(job.final_state)}
     </Space>
   );
 }

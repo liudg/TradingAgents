@@ -47,6 +47,7 @@ export function HistoricalReportsPage() {
   return (
     <Card className="page-card" title="历史分析报告">
       <List
+        className="history-report-list"
         dataSource={reportsQuery.data}
         locale={{ emptyText: "暂无历史分析报告" }}
         renderItem={(report) => (
@@ -78,7 +79,7 @@ export function HistoricalReportsPage() {
                   <Typography.Text type="secondary">
                     生成时间：{formatDateTime(report.generated_at)} ｜ 深度参数：
                     {report.max_debate_rounds}/
-                    {report.max_risk_discuss_rounds}/{report.max_recur_limit} ｜ 模型：
+                    {report.max_risk_discuss_rounds} ｜ 模型：
                     {report.deep_think_llm} / {report.quick_think_llm}
                   </Typography.Text>
                 </Space>

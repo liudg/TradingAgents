@@ -48,7 +48,7 @@ if ($Reload) {
     $apiArgs += "-Reload"
 }
 
-$webCommand = "Set-Location `"$webUiDir`"; `$env:VITE_PORT='$WebPort'; npm run dev -- --host 127.0.0.1 --port $WebPort"
+$webCommand = "Set-Location `"$webUiDir`"; `$env:VITE_DEV_HOST='$BindHost'; `$env:VITE_PORT='$WebPort'; `$env:VITE_API_TARGET='http://$BindHost`:$ApiPort'; npm run dev"
 $webArgs = @(
     "-NoExit",
     "-ExecutionPolicy", "Bypass",
@@ -58,7 +58,7 @@ $webArgs = @(
 Write-Host "Starting TradingAgents Web API on http://$BindHost`:$ApiPort"
 Start-Process powershell.exe -ArgumentList $apiArgs -WorkingDirectory $repoRoot
 
-Write-Host "Starting TradingAgents Web UI on http://127.0.0.1`:$WebPort"
+Write-Host "Starting TradingAgents Web UI on http://$BindHost`:$WebPort"
 Start-Process powershell.exe -ArgumentList $webArgs -WorkingDirectory $webUiDir
 
 Write-Host "Frontend and backend startup commands have been launched in separate PowerShell windows."

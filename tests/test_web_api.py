@@ -160,6 +160,7 @@ class WebApiTests(unittest.TestCase):
         self.assertIn("openai", payload["llm_providers"])
         self.assertIn("models", payload)
         self.assertIn("default_config", payload)
+        self.assertNotIn("max_recur_limit", payload["default_config"])
 
     def test_unknown_job_returns_404(self):
         response = self.client.get("/api/analysis-jobs/not-exist")
@@ -192,7 +193,6 @@ class WebApiTests(unittest.TestCase):
                     "output_language": "English",
                     "max_debate_rounds": 5,
                     "max_risk_discuss_rounds": 5,
-                    "max_recur_limit": 120,
                 },
             )
 
@@ -216,7 +216,6 @@ class WebApiTests(unittest.TestCase):
             self.assertEqual(detail["request"]["output_language"], "English")
             self.assertEqual(detail["request"]["max_debate_rounds"], 5)
             self.assertEqual(detail["request"]["max_risk_discuss_rounds"], 5)
-            self.assertEqual(detail["request"]["max_recur_limit"], 120)
             self.assertEqual(detail["decision"], "BUY")
             self.assertEqual(detail["final_state"]["market_report"], "Market report")
             self.assertTrue(str(detail["log_path"]).endswith(f"{job_id}\\message_tool.log") or str(detail["log_path"]).endswith(f"{job_id}/message_tool.log"))
@@ -265,7 +264,6 @@ class WebApiTests(unittest.TestCase):
             self.assertEqual(history_payload[0]["output_language"], "English")
             self.assertEqual(history_payload[0]["max_debate_rounds"], 5)
             self.assertEqual(history_payload[0]["max_risk_discuss_rounds"], 5)
-            self.assertEqual(history_payload[0]["max_recur_limit"], 120)
 
             detail_response = self.client.get(f"/api/historical-reports/{job_id}")
             self.assertEqual(detail_response.status_code, 200)
@@ -274,6 +272,28 @@ class WebApiTests(unittest.TestCase):
             self.assertEqual(detail_payload["output_language"], "English")
             self.assertEqual(detail_payload["openai_reasoning_effort"], "high")
             self.assertGreaterEqual(len(detail_payload["agent_reports"]), 1)
+            self.assertEqual(
+                [group["agent_key"] for group in detail_payload["agent_reports"]],
+                [
+                    "analyst_team",
+                    "research_team",
+                    "trading_desk",
+                    "risk_team",
+                    "final_verdict",
+                ],
+            )
+            report_titles_by_group = {
+                group["agent_key"]: [report["title"] for report in group["reports"]]
+                for group in detail_payload["agent_reports"]
+            }
+            self.assertEqual(
+                report_titles_by_group["final_verdict"],
+                ["最终交易决策"],
+            )
+            self.assertNotIn(
+                "最终交易决策",
+                report_titles_by_group["risk_team"],
+            )
             self.assertEqual(
                 detail_payload["agent_reports"][0]["reports"][0]["content"],
                 "Market report",
@@ -358,7 +378,6 @@ class WebApiTests(unittest.TestCase):
             self.assertEqual(logs_response.status_code, 200)
             logs_payload = logs_response.json()
             self.assertTrue(any(item["level"] == "Error" for item in logs_payload))
-
 
 if __name__ == "__main__":
     unittest.main()

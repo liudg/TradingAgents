@@ -40,12 +40,14 @@ body {
 }
 
 .content-wrap {
+  width: 100%;
   max-width: 1440px;
   margin: 0 auto;
   padding: 24px;
 }
 
 .page-card {
+  width: 100%;
   border-radius: 18px;
   box-shadow: 0 12px 30px rgba(15, 23, 42, 0.08);
 }
@@ -84,6 +86,33 @@ body {
   color: #64748b;
 }
 
+.decision-highlight-panel {
+  padding: 0;
+  border: none;
+  background: transparent;
+}
+
+.decision-highlight-panel .markdown-body > p:first-child {
+  color: #1677ff;
+  font-size: 16px;
+  font-weight: 800;
+  line-height: 1.8;
+}
+
+.history-report-list .ant-list-item {
+  align-items: flex-start;
+}
+
+.history-report-list .ant-list-item-meta {
+  width: 100%;
+  min-width: 0;
+}
+
+.history-report-list .ant-list-item-meta-content {
+  width: 100%;
+  min-width: 0;
+}
+
 .history-report-item {
   cursor: pointer;
   border-radius: 12px;
@@ -115,6 +144,8 @@ body {
 }
 
 .report-sidebar-card .ant-card-body {
+  max-height: 78vh;
+  overflow: auto;
   padding: 8px;
 }
 
