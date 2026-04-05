@@ -1,5 +1,13 @@
 import os
 
+try:
+    from dotenv import load_dotenv
+except ImportError:  # pragma: no cover - optional helper for local runs
+    load_dotenv = None
+
+if load_dotenv is not None:
+    load_dotenv()
+
 DEFAULT_CONFIG = {
     "project_dir": os.path.abspath(os.path.join(os.path.dirname(__file__), ".")),
     "results_dir": os.getenv("TRADINGAGENTS_RESULTS_DIR", "./results"),
@@ -8,10 +16,10 @@ DEFAULT_CONFIG = {
         "dataflows/data_cache",
     ),
     # LLM settings
-    "llm_provider": "openai",
-    "deep_think_llm": "gpt-5.4",
-    "quick_think_llm": "gpt-5.4-mini",
-    "backend_url": "https://api.openai.com/v1",
+    "llm_provider": os.getenv("TRADINGAGENTS_LLM_PROVIDER", "openai"),
+    "deep_think_llm": os.getenv("TRADINGAGENTS_DEEP_MODEL", "gpt-5.4"),
+    "quick_think_llm": os.getenv("TRADINGAGENTS_QUICK_MODEL", "gpt-5.4-mini"),
+    "backend_url": os.getenv("TRADINGAGENTS_BACKEND_URL", "https://api.openai.com/v1"),
     # Provider-specific thinking configuration
     "google_thinking_level": None,      # "high", "minimal", etc.
     "openai_reasoning_effort": None,    # "medium", "high", "low"
@@ -26,10 +34,10 @@ DEFAULT_CONFIG = {
     # Data vendor configuration
     # Category-level configuration (default for all tools in category)
     "data_vendors": {
-        "core_stock_apis": "futu",       # Options: alpha_vantage, futu, yfinance
-        "technical_indicators": "futu",  # Options: alpha_vantage, futu, yfinance
-        "fundamental_data": "alpha_vantage",      # Options: alpha_vantage, yfinance
-        "news_data": "alpha_vantage",             # Options: alpha_vantage, yfinance
+        "core_stock_apis": "alpha_vantage",       # Options: alpha_vantage, futu, yfinance
+        "technical_indicators": "alpha_vantage",  # Options: alpha_vantage, futu, yfinance
+        "fundamental_data": "yfinance",      # Options: alpha_vantage, yfinance
+        "news_data": "yfinance",             # Options: alpha_vantage, yfinance
     },
     # Futu OpenD settings
     "futu_opend_host": "127.0.0.1",

@@ -13,6 +13,7 @@ $venvPython = Join-Path $repoRoot ".venv\Scripts\python.exe"
 $webUiDir = Join-Path $repoRoot "web-ui"
 $webPackageJson = Join-Path $webUiDir "package.json"
 $webNodeModules = Join-Path $webUiDir "node_modules"
+$syncCodexScript = Join-Path $PSScriptRoot "sync_codex_to_cliproxy.ps1"
 
 if (-not (Test-Path -LiteralPath $venvPython)) {
     throw "Missing .venv interpreter. Run scripts\create_venv.ps1 and scripts\install_deps.ps1 first."
@@ -26,6 +27,10 @@ if (-not (Get-Command npm -ErrorAction SilentlyContinue)) {
     throw "npm is not available in PATH. Please install Node.js first."
 }
 
+if (-not (Test-Path -LiteralPath $syncCodexScript)) {
+    throw "Missing scripts\sync_codex_to_cliproxy.ps1."
+}
+
 if (-not (Test-Path -LiteralPath $webNodeModules)) {
     Write-Host "Installing frontend dependencies under web-ui"
     Push-Location $webUiDir
@@ -35,6 +40,9 @@ if (-not (Test-Path -LiteralPath $webNodeModules)) {
         Pop-Location
     }
 }
+
+Write-Host "Syncing Codex auth and restarting CLIProxyAPI"
+& powershell.exe -ExecutionPolicy Bypass -File $syncCodexScript
 
 $apiArgs = @(
     "-NoExit",
@@ -61,4 +69,4 @@ Start-Process powershell.exe -ArgumentList $apiArgs -WorkingDirectory $repoRoot
 Write-Host "Starting TradingAgents Web UI on http://$BindHost`:$WebPort"
 Start-Process powershell.exe -ArgumentList $webArgs -WorkingDirectory $webUiDir
 
-Write-Host "Frontend and backend startup commands have been launched in separate PowerShell windows."
+Write-Host "CLIProxyAPI, frontend, and backend startup commands have been launched."
