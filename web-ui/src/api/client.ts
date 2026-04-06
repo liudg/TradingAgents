@@ -4,6 +4,11 @@ import {
   AnalysisJobRequest,
   AnalysisJobResponse,
   ApiError,
+  BacktestJobCreateResponse,
+  BacktestJobRequest,
+  BacktestJobResponse,
+  HistoricalBacktestDetail,
+  HistoricalBacktestSummary,
   HistoricalReportDetail,
   HistoricalReportSummary,
   MetadataOptionsResponse,
@@ -76,5 +81,30 @@ export async function fetchHistoricalReports() {
 export async function fetchHistoricalReport(jobId: string) {
   return requestJson<HistoricalReportDetail>(
     `/api/historical-reports/${jobId}`,
+  );
+}
+
+export async function createBacktestJob(payload: BacktestJobRequest) {
+  return requestJson<BacktestJobCreateResponse>("/api/backtest-jobs", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function fetchBacktestJob(jobId: string) {
+  return requestJson<BacktestJobResponse>(`/api/backtest-jobs/${jobId}`);
+}
+
+export async function fetchBacktestJobLogs(jobId: string) {
+  return requestJson<AnalysisJobLogEntry[]>(`/api/backtest-jobs/${jobId}/logs`);
+}
+
+export async function fetchHistoricalBacktests() {
+  return requestJson<HistoricalBacktestSummary[]>("/api/historical-backtests");
+}
+
+export async function fetchHistoricalBacktest(jobId: string) {
+  return requestJson<HistoricalBacktestDetail>(
+    `/api/historical-backtests/${jobId}`,
   );
 }

@@ -5,6 +5,7 @@ from fastapi.responses import FileResponse
 
 from cli.models import AnalystType
 from tradingagents.default_config import DEFAULT_CONFIG
+from tradingagents.web.backtest_manager import BacktestJobManager
 from tradingagents.llm_clients.model_catalog import MODEL_OPTIONS
 from tradingagents.web.job_manager import AnalysisJobManager
 from tradingagents.web.schemas import (
@@ -12,6 +13,11 @@ from tradingagents.web.schemas import (
     AnalysisJobLogEntry,
     AnalysisJobRequest,
     AnalysisJobResponse,
+    BacktestJobCreateResponse,
+    BacktestJobRequest,
+    BacktestJobResponse,
+    HistoricalBacktestDetail,
+    HistoricalBacktestSummary,
     HistoricalReportDetail,
     HistoricalReportSummary,
     MetadataOptionsResponse,
@@ -26,6 +32,7 @@ app = FastAPI(
     version="0.2.3",
 )
 job_manager = AnalysisJobManager()
+backtest_manager = BacktestJobManager()
 
 
 @app.post("/api/analysis-jobs", response_model=AnalysisJobCreateResponse)
@@ -111,6 +118,42 @@ def get_metadata_options() -> MetadataOptionsResponse:
         },
         default_config=default_config,
     )
+
+
+@app.post("/api/backtest-jobs", response_model=BacktestJobCreateResponse)
+def create_backtest_job(request: BacktestJobRequest) -> BacktestJobCreateResponse:
+    return backtest_manager.create_job(request)
+
+
+@app.get("/api/backtest-jobs/{job_id}", response_model=BacktestJobResponse)
+def get_backtest_job(job_id: str) -> BacktestJobResponse:
+    try:
+        return backtest_manager.get_job(job_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="Backtest job not found") from exc
+
+
+@app.get("/api/backtest-jobs/{job_id}/logs", response_model=list[AnalysisJobLogEntry])
+def get_backtest_job_logs(job_id: str) -> list[AnalysisJobLogEntry]:
+    try:
+        return backtest_manager.list_job_logs(job_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="Backtest job not found") from exc
+
+
+@app.get("/api/historical-backtests", response_model=list[HistoricalBacktestSummary])
+def list_historical_backtests() -> list[HistoricalBacktestSummary]:
+    return backtest_manager.list_historical_backtests()
+
+
+@app.get("/api/historical-backtests/{job_id}", response_model=HistoricalBacktestDetail)
+def get_historical_backtest(job_id: str) -> HistoricalBacktestDetail:
+    try:
+        return backtest_manager.get_historical_backtest(job_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="Historical backtest not found") from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
 
 
 def run_api() -> None:

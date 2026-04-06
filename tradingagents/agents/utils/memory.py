@@ -4,9 +4,13 @@ Uses BM25 (Best Matching 25) algorithm for retrieval - no API calls,
 no token limits, works offline with any LLM provider.
 """
 
-from rank_bm25 import BM25Okapi
-from typing import List, Tuple
+import json
+import os
 import re
+from pathlib import Path
+from typing import List, Tuple
+
+from rank_bm25 import BM25Okapi
 
 
 class FinancialSituationMemory:
@@ -20,9 +24,59 @@ class FinancialSituationMemory:
             config: Configuration dict (kept for API compatibility, not used for BM25)
         """
         self.name = name
+        self.config = config or {}
         self.documents: List[str] = []
         self.recommendations: List[str] = []
         self.bm25 = None
+        self.storage_path = self._resolve_storage_path()
+        self._load()
+
+    def _resolve_storage_path(self) -> Path | None:
+        memory_dir = self.config.get("memory_dir")
+        if not memory_dir:
+            return None
+        return Path(memory_dir) / f"{self.name}.json"
+
+    def _load(self):
+        if self.storage_path is None or not self.storage_path.exists():
+            return
+
+        try:
+            payload = json.loads(self.storage_path.read_text(encoding="utf-8"))
+        except Exception:
+            return
+
+        items = payload.get("items", [])
+        for item in items:
+            situation = item.get("situation")
+            recommendation = item.get("recommendation")
+            if situation and recommendation:
+                self.documents.append(situation)
+                self.recommendations.append(recommendation)
+
+        self._rebuild_index()
+
+    def _persist(self):
+        if self.storage_path is None:
+            return
+
+        self.storage_path.parent.mkdir(parents=True, exist_ok=True)
+        payload = {
+            "name": self.name,
+            "items": [
+                {
+                    "situation": situation,
+                    "recommendation": recommendation,
+                }
+                for situation, recommendation in zip(
+                    self.documents, self.recommendations
+                )
+            ],
+        }
+        self.storage_path.write_text(
+            json.dumps(payload, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
 
     def _tokenize(self, text: str) -> List[str]:
         """Tokenize text for BM25 indexing.
@@ -53,6 +107,7 @@ class FinancialSituationMemory:
 
         # Rebuild BM25 index with new documents
         self._rebuild_index()
+        self._persist()
 
     def get_memories(self, current_situation: str, n_matches: int = 1) -> List[dict]:
         """Find matching recommendations using BM25 similarity.
@@ -96,6 +151,11 @@ class FinancialSituationMemory:
         self.documents = []
         self.recommendations = []
         self.bm25 = None
+        if self.storage_path and self.storage_path.exists():
+            try:
+                os.remove(self.storage_path)
+            except OSError:
+                pass
 
 
 if __name__ == "__main__":

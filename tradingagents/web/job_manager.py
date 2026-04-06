@@ -3,21 +3,31 @@ import re
 import traceback
 from concurrent.futures import ThreadPoolExecutor
 from copy import deepcopy
-from datetime import datetime
+from datetime import date, datetime, timedelta
 from pathlib import Path
 from threading import Lock
 from typing import Any, Dict, Optional
 from uuid import uuid4
 
+import pandas as pd
+import yfinance as yf
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 
 from tradingagents.default_config import DEFAULT_CONFIG
+from tradingagents.agents.utils.memory import FinancialSituationMemory
 from tradingagents.graph.trading_graph import TradingAgentsGraph
 from tradingagents.reporting import save_report_to_disk
 from tradingagents.web.schemas import (
     AnalysisJobLogEntry,
     AnalysisJobRequest,
     AnalysisJobResponse,
+    BacktestJobRequest,
+    BacktestJobResponse,
+    BacktestMemoryEntry,
+    BacktestSampleEvaluation,
+    BacktestSummary,
+    HistoricalBacktestDetail,
+    HistoricalBacktestSummary,
     HistoricalReportAgentGroup,
     HistoricalReportDetail,
     HistoricalReportItem,

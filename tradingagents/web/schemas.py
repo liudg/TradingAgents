@@ -146,3 +146,172 @@ class MetadataOptionsResponse(BaseModel):
     llm_providers: List[str]
     models: Dict[str, Dict[str, List[Dict[str, str]]]]
     default_config: Dict[str, Any]
+
+
+class BacktestJobRequest(BaseModel):
+    ticker: str = Field(..., min_length=1, description="Ticker symbol, e.g. AAPL")
+    start_date: date
+    end_date: date
+    selected_analysts: List[AnalystType] = Field(
+        default_factory=lambda: [
+            AnalystType.MARKET,
+            AnalystType.SOCIAL,
+            AnalystType.NEWS,
+            AnalystType.FUNDAMENTALS,
+        ]
+    )
+    llm_provider: str = DEFAULT_CONFIG["llm_provider"]
+    deep_think_llm: str = DEFAULT_CONFIG["deep_think_llm"]
+    quick_think_llm: str = DEFAULT_CONFIG["quick_think_llm"]
+    backend_url: Optional[str] = DEFAULT_CONFIG["backend_url"]
+    google_thinking_level: Optional[str] = DEFAULT_CONFIG["google_thinking_level"]
+    openai_reasoning_effort: Optional[str] = DEFAULT_CONFIG["openai_reasoning_effort"]
+    anthropic_effort: Optional[str] = DEFAULT_CONFIG["anthropic_effort"]
+    output_language: str = DEFAULT_CONFIG["output_language"]
+    max_debate_rounds: int = Field(
+        DEFAULT_CONFIG["max_debate_rounds"], ge=1, le=10
+    )
+    max_risk_discuss_rounds: int = Field(
+        DEFAULT_CONFIG["max_risk_discuss_rounds"], ge=1, le=10
+    )
+    holding_period: int = Field(5, ge=1, le=60)
+    reflection_enabled: bool = True
+    writeback_enabled: bool = True
+
+    @field_validator("ticker")
+    @classmethod
+    def normalize_backtest_ticker(cls, value: str) -> str:
+        return value.strip().upper()
+
+    @field_validator("start_date", "end_date")
+    @classmethod
+    def validate_backtest_date(cls, value: date) -> date:
+        if value > date.today():
+            raise ValueError("backtest dates cannot be in the future")
+        return value
+
+    @field_validator("llm_provider")
+    @classmethod
+    def validate_backtest_provider(cls, value: str) -> str:
+        provider = value.strip().lower()
+        if provider not in MODEL_OPTIONS:
+            raise ValueError(
+                f"Unsupported llm_provider '{value}'. "
+                f"Expected one of: {', '.join(sorted(MODEL_OPTIONS.keys()))}"
+            )
+        return provider
+
+    def model_post_init(self, __context: Any) -> None:
+        if self.start_date > self.end_date:
+            raise ValueError("start_date cannot be after end_date")
+        if not validate_model(self.llm_provider, self.deep_think_llm):
+            raise ValueError(
+                f"Unknown deep_think_llm '{self.deep_think_llm}' for provider "
+                f"'{self.llm_provider}'"
+            )
+        if not validate_model(self.llm_provider, self.quick_think_llm):
+            raise ValueError(
+                f"Unknown quick_think_llm '{self.quick_think_llm}' for provider "
+                f"'{self.llm_provider}'"
+            )
+
+
+class BacktestJobCreateResponse(BaseModel):
+    job_id: str
+    status: JobStatus
+
+
+class BacktestSampleEvaluation(BaseModel):
+    trade_date: date
+    signal: str
+    raw_decision: str
+    full_state_path: Optional[str] = None
+    report_path: Optional[str] = None
+    entry_date: Optional[date] = None
+    exit_date: Optional[date] = None
+    entry_price: Optional[float] = None
+    exit_price: Optional[float] = None
+    holding_period: int
+    return_pct: Optional[float] = None
+    benchmark_return_pct: Optional[float] = None
+    excess_return_pct: Optional[float] = None
+    max_drawdown_pct: Optional[float] = None
+    outcome_label: str
+    evaluation_status: str
+    notes: Optional[str] = None
+    reflection_text: Optional[str] = None
+    reflection_payload: Optional[Dict[str, Any]] = None
+    memory_written: bool = False
+
+
+class BacktestSummary(BaseModel):
+    ticker: str
+    sample_count: int
+    evaluated_count: int
+    buy_count: int
+    hold_count: int
+    sell_count: int
+    win_rate: Optional[float] = None
+    avg_return_pct: Optional[float] = None
+    benchmark_avg_return_pct: Optional[float] = None
+    excess_return_pct: Optional[float] = None
+    cumulative_return_pct: Optional[float] = None
+    max_drawdown_pct: Optional[float] = None
+    reflection_count: int = 0
+    memory_write_count: int = 0
+
+
+class BacktestMemoryEntry(BaseModel):
+    memory_type: str
+    trade_date: date
+    signal: str
+    return_pct: Optional[float] = None
+    outcome_label: str
+    memory_query: str
+    recommendation: str
+
+
+class BacktestJobResponse(BaseModel):
+    job_id: str
+    status: JobStatus
+    progress: int = Field(..., ge=0, le=100)
+    stage: str
+    memory_commit_status: str = "not_requested"
+    request: BacktestJobRequest
+    summary: Optional[BacktestSummary] = None
+    samples: List[BacktestSampleEvaluation] = Field(default_factory=list)
+    memory_entries: List[BacktestMemoryEntry] = Field(default_factory=list)
+    error_message: Optional[str] = None
+    log_path: Optional[str] = None
+    results_dir: Optional[str] = None
+    created_at: datetime
+    started_at: Optional[datetime] = None
+    finished_at: Optional[datetime] = None
+
+
+class HistoricalBacktestSummary(BaseModel):
+    job_id: str
+    ticker: str
+    start_date: date
+    end_date: date
+    generated_at: datetime
+    memory_commit_status: str = "not_requested"
+    holding_period: int
+    selected_analysts: List[str]
+    llm_provider: str
+    deep_think_llm: str
+    quick_think_llm: str
+    output_language: str
+    sample_count: int
+    evaluated_count: int
+    win_rate: Optional[float] = None
+    avg_return_pct: Optional[float] = None
+    excess_return_pct: Optional[float] = None
+    reflection_count: int = 0
+    memory_write_count: int = 0
+
+
+class HistoricalBacktestDetail(HistoricalBacktestSummary):
+    summary: Optional[BacktestSummary] = None
+    samples: List[BacktestSampleEvaluation] = Field(default_factory=list)
+    memory_entries: List[BacktestMemoryEntry] = Field(default_factory=list)

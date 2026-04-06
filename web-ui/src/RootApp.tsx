@@ -2,7 +2,10 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
 
 import { AppLayout } from "./components/AppLayout";
+import { BacktestCreatePage } from "./pages/BacktestCreatePage";
+import { BacktestDetailPage } from "./pages/BacktestDetailPage";
 import { CreateJobPage } from "./pages/CreateJobPage";
+import { HistoricalBacktestsPage } from "./pages/HistoricalBacktestsPage";
 import { HistoricalReportDetailPage } from "./pages/HistoricalReportDetailPage";
 import { HistoricalReportsPage } from "./pages/HistoricalReportsPage";
 import { JobDetailPage } from "./pages/JobDetailPage";
@@ -24,6 +27,9 @@ export function RootApp() {
           <Routes>
             <Route path="/" element={<CreateJobPage />} />
             <Route path="/jobs/:jobId" element={<JobDetailPage />} />
+            <Route path="/backtests" element={<BacktestCreatePage />} />
+            <Route path="/backtests/:jobId" element={<BacktestDetailPage />} />
+            <Route path="/backtests/history" element={<HistoricalBacktestsPage />} />
             <Route path="/reports" element={<HistoricalReportsPage />} />
             <Route
               path="/reports/:jobId"

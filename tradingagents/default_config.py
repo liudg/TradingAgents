@@ -11,6 +11,7 @@ if load_dotenv is not None:
 DEFAULT_CONFIG = {
     "project_dir": os.path.abspath(os.path.join(os.path.dirname(__file__), ".")),
     "results_dir": os.getenv("TRADINGAGENTS_RESULTS_DIR", "./results"),
+    "memory_dir": os.getenv("TRADINGAGENTS_MEMORY_DIR", "./results/memory"),
     "data_cache_dir": os.path.join(
         os.path.abspath(os.path.join(os.path.dirname(__file__), ".")),
         "dataflows/data_cache",
@@ -34,8 +35,8 @@ DEFAULT_CONFIG = {
     # Data vendor configuration
     # Category-level configuration (default for all tools in category)
     "data_vendors": {
-        "core_stock_apis": "alpha_vantage",       # Options: alpha_vantage, futu, yfinance
-        "technical_indicators": "alpha_vantage",  # Options: alpha_vantage, futu, yfinance
+        "core_stock_apis": "yfinance",       # Options: alpha_vantage, futu, yfinance
+        "technical_indicators": "yfinance",  # Options: alpha_vantage, futu, yfinance
         "fundamental_data": "yfinance",      # Options: alpha_vantage, yfinance
         "news_data": "yfinance",             # Options: alpha_vantage, yfinance
     },

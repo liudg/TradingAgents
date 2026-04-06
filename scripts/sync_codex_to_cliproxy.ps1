@@ -30,6 +30,16 @@ if ($proxy) {
 }
 
 & $pythonCmd @argsList
+$syncExitCode = $LASTEXITCODE
+
+if ($syncExitCode -eq 10) {
+    Write-Host "Codex token and CLIProxyAPI auth are still valid. Skipping CLIProxyAPI restart."
+    exit 0
+}
+
+if ($syncExitCode -ne 0) {
+    exit $syncExitCode
+}
 
 if (-not (Test-Path $cliProxyExe)) {
     Write-Warning "CLIProxyAPI executable not found at $cliProxyExe. Skipping restart."

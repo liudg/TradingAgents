@@ -4,11 +4,13 @@ import json
 import os
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from urllib import error
 from urllib import parse, request
 
 
 OPENAI_CLIENT_ID = "app_EMoamEEZ73f0CkXaXp7hrann"
 OPENAI_TOKEN_URL = "https://auth.openai.com/oauth/token"
+EXIT_NO_CHANGES = 10
 
 
 def parse_args() -> argparse.Namespace:
@@ -61,6 +63,14 @@ def build_opener(proxy_url: str | None):
     return request.build_opener()
 
 
+def parse_token_expiry(token: str) -> datetime | None:
+    claims = decode_jwt_payload(token)
+    exp = claims.get("exp")
+    if exp is None:
+        return None
+    return datetime.fromtimestamp(int(exp), tz=timezone.utc)
+
+
 def refresh_codex_tokens(refresh_token: str, proxy_url: str | None) -> dict:
     body = parse.urlencode(
         {
@@ -79,8 +89,15 @@ def refresh_codex_tokens(refresh_token: str, proxy_url: str | None) -> dict:
         },
     )
     opener = build_opener(proxy_url)
-    with opener.open(req, timeout=60) as resp:
-        return json.loads(resp.read().decode("utf-8"))
+    try:
+        with opener.open(req, timeout=60) as resp:
+            return json.loads(resp.read().decode("utf-8"))
+    except error.HTTPError as exc:
+        details = exc.read().decode("utf-8", errors="replace").strip()
+        message = f"Failed to refresh Codex tokens: HTTP {exc.code} {exc.reason}"
+        if details:
+            message = f"{message}; response={details}"
+        raise RuntimeError(message) from exc
 
 
 def format_ts(dt: datetime) -> str:
@@ -97,6 +114,45 @@ def build_output_filename(email: str, plan_type: str) -> str:
     return f"codex-{email}.json"
 
 
+def build_cliproxy_auth(tokens: dict, now: datetime) -> tuple[dict, str]:
+    id_claims = decode_jwt_payload(tokens["id_token"])
+    auth_info = id_claims.get("https://api.openai.com/auth", {})
+    email = id_claims["email"]
+    account_id = tokens.get("account_id") or auth_info.get("chatgpt_account_id", "")
+    plan_type = auth_info.get("chatgpt_plan_type", "")
+
+    access_expires_at = parse_token_expiry(tokens["access_token"])
+    if access_expires_at is None:
+        expires_at = now + timedelta(seconds=int(tokens.get("expires_in", 0)))
+    else:
+        expires_at = access_expires_at
+
+    output = {
+        "id_token": tokens["id_token"],
+        "access_token": tokens["access_token"],
+        "refresh_token": tokens["refresh_token"],
+        "account_id": account_id,
+        "last_refresh": format_ts(now),
+        "email": email,
+        "type": "codex",
+        "expired": format_ts(expires_at),
+    }
+    return output, plan_type
+
+
+def auth_payload_changed(existing: dict, desired: dict) -> bool:
+    keys = (
+        "id_token",
+        "access_token",
+        "refresh_token",
+        "account_id",
+        "email",
+        "type",
+        "expired",
+    )
+    return any(existing.get(key) != desired.get(key) for key in keys)
+
+
 def main() -> int:
     args = parse_args()
 
@@ -107,34 +163,43 @@ def main() -> int:
         raise FileNotFoundError(f"Codex auth file not found: {codex_auth_path}")
 
     local_auth = read_json(codex_auth_path)
-    refresh_token = local_auth["tokens"]["refresh_token"]
-    refreshed = refresh_codex_tokens(refresh_token, args.proxy)
-
-    claims = decode_jwt_payload(refreshed["id_token"])
-    auth_info = claims.get("https://api.openai.com/auth", {})
-    email = claims["email"]
-    account_id = auth_info.get("chatgpt_account_id", "")
-    plan_type = auth_info.get("chatgpt_plan_type", "")
-
     now = datetime.now(timezone.utc)
-    expires_at = now + timedelta(seconds=int(refreshed.get("expires_in", 0)))
+    local_tokens = local_auth["tokens"]
+    access_expires_at = parse_token_expiry(local_tokens["access_token"])
 
-    output = {
-        "id_token": refreshed["id_token"],
-        "access_token": refreshed["access_token"],
-        "refresh_token": refreshed["refresh_token"],
-        "account_id": account_id,
-        "last_refresh": format_ts(now),
-        "email": email,
-        "type": "codex",
-        "expired": format_ts(expires_at),
-    }
+    token_source = "refreshed"
+    if access_expires_at and access_expires_at > now:
+        tokens = local_tokens
+        token_source = "cached"
+    else:
+        refresh_token = local_tokens["refresh_token"]
+        try:
+            tokens = refresh_codex_tokens(refresh_token, args.proxy)
+        except RuntimeError as exc:
+            raise RuntimeError(
+                f"{exc}\nLocal cached access token is also expired. "
+                "Please run `codex login` and retry."
+            ) from exc
+
+    output, plan_type = build_cliproxy_auth(tokens, now)
+    email = output["email"]
 
     cliproxy_auth_dir.mkdir(parents=True, exist_ok=True)
     output_path = cliproxy_auth_dir / build_output_filename(email, plan_type)
+    if output_path.exists():
+        existing_output = read_json(output_path)
+        if not auth_payload_changed(existing_output, output):
+            print(f"CLIProxyAPI auth is already up to date: {output_path}")
+            print(f"Token source: {token_source}")
+            print(f"Email: {email}")
+            print(f"Plan: {plan_type or 'unknown'}")
+            print(f"Expires: {output['expired']}")
+            return EXIT_NO_CHANGES
+
     output_path.write_text(json.dumps(output, ensure_ascii=False, indent=2), encoding="utf-8")
 
     print(f"Wrote CLIProxyAPI Codex auth file: {output_path}")
+    print(f"Token source: {token_source}")
     print(f"Email: {email}")
     print(f"Plan: {plan_type or 'unknown'}")
     print(f"Expires: {output['expired']}")

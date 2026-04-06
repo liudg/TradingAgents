@@ -1,4 +1,5 @@
 import {
+  ExperimentOutlined,
   FileTextOutlined,
   PlusCircleOutlined,
 } from "@ant-design/icons";
@@ -21,6 +22,18 @@ export function AppLayout({ children }: PropsWithChildren) {
         </div>
 
         <Space>
+          {!location.pathname.startsWith("/backtests") ? (
+            <Link to="/backtests">
+              <Button icon={<ExperimentOutlined />}>回测复盘</Button>
+            </Link>
+          ) : null}
+
+          {location.pathname !== "/backtests/history" ? (
+            <Link to="/backtests/history">
+              <Button icon={<ExperimentOutlined />}>历史回测</Button>
+            </Link>
+          ) : null}
+
           {location.pathname !== "/reports" ? (
             <Link to="/reports">
               <Button icon={<FileTextOutlined />}>历史分析报告</Button>
