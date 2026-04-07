@@ -25,14 +25,13 @@ MODEL_OPTIONS: ProviderModeOptions = {
     },
     "codex": {
         "quick": [
-            ("GPT-5 Codex Mini - Faster coding-oriented model", "gpt-5-codex-mini"),
-            ("GPT-5 Codex - Strong coding and tool use", "gpt-5-codex"),
-            ("GPT-5 - General GPT fallback via Codex route", "gpt-5"),
+            ("GPT-5.4 Mini - Fast, strong coding and tool use", "gpt-5.4-mini"),
+            ("GPT-5.4 - Latest frontier, 1M context", "gpt-5.4"),
         ],
         "deep": [
-            ("GPT-5 Codex - Strong coding and tool use", "gpt-5-codex"),
-            ("GPT-5 - General GPT fallback via Codex route", "gpt-5"),
-            ("GPT-5 Codex Mini - Faster coding-oriented model", "gpt-5-codex-mini"),
+            ("GPT-5.4 - Latest frontier, 1M context", "gpt-5.4"),
+            ("GPT-5.2 - Strong reasoning, cost-effective", "gpt-5.2"),
+            ("GPT-5.4 Mini - Fast, strong coding and tool use", "gpt-5.4-mini"),
         ],
     },
     "anthropic": {
