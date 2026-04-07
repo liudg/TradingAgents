@@ -31,10 +31,15 @@ if ($proxy) {
 
 & $pythonCmd @argsList
 $syncExitCode = $LASTEXITCODE
+$runningProcess = Get-Process -Name "cli-proxy-api" -ErrorAction SilentlyContinue
 
 if ($syncExitCode -eq 10) {
-    Write-Host "Codex token and CLIProxyAPI auth are still valid. Skipping CLIProxyAPI restart."
-    exit 0
+    if ($runningProcess) {
+        Write-Host "Codex token and CLIProxyAPI auth are still valid, and CLIProxyAPI is already running. Skipping restart."
+        exit 0
+    }
+    Write-Host "Codex token and CLIProxyAPI auth are still valid, but CLIProxyAPI is not running. Starting it now."
+    $syncExitCode = 0
 }
 
 if ($syncExitCode -ne 0) {
@@ -58,7 +63,9 @@ if (-not (Test-Path $cliProxyLogDir)) {
 $stdoutLog = Join-Path $cliProxyLogDir "stdout.log"
 $stderrLog = Join-Path $cliProxyLogDir "stderr.log"
 
-Get-Process -Name "cli-proxy-api" -ErrorAction SilentlyContinue | Stop-Process -Force
+if ($runningProcess) {
+    $runningProcess | Stop-Process -Force
+}
 
 $proc = Start-Process `
     -FilePath $cliProxyExe `
@@ -73,8 +80,10 @@ Start-Sleep -Seconds 4
 
 if (Get-Process -Id $proc.Id -ErrorAction SilentlyContinue) {
     Write-Host "CLIProxyAPI restarted successfully. PID: $($proc.Id)"
+    exit 0
 } else {
     Write-Warning "CLIProxyAPI restart may have failed. Check logs:"
     Write-Warning "  $stdoutLog"
     Write-Warning "  $stderrLog"
+    exit 1
 }

@@ -13,6 +13,7 @@ $venvPython = Join-Path $repoRoot ".venv\Scripts\python.exe"
 $webUiDir = Join-Path $repoRoot "web-ui"
 $webPackageJson = Join-Path $webUiDir "package.json"
 $webNodeModules = Join-Path $webUiDir "node_modules"
+$syncCliProxyScript = Join-Path $PSScriptRoot "sync_codex_to_cliproxy.ps1"
 
 if (-not (Test-Path -LiteralPath $venvPython)) {
     throw "Missing .venv interpreter. Run scripts\create_venv.ps1 and scripts\install_deps.ps1 first."
@@ -36,7 +37,15 @@ if (-not (Test-Path -LiteralPath $webNodeModules)) {
     }
 }
 
-Write-Host "Restarting CLIProxyAPI"
+if (Test-Path -LiteralPath $syncCliProxyScript) {
+    Write-Host "Syncing Codex token and restarting CLIProxyAPI"
+    & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $syncCliProxyScript
+    if ($LASTEXITCODE -ne 0) {
+        Write-Warning "sync_codex_to_cliproxy.ps1 exited with code $LASTEXITCODE. Continue starting Web API and Web UI."
+    }
+} else {
+    Write-Warning "Missing $syncCliProxyScript. Skipping CLIProxyAPI restart."
+}
 
 $apiArgs = @(
     "-NoExit",
