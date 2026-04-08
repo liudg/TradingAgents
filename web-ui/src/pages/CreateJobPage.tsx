@@ -95,6 +95,9 @@ export function CreateJobPage() {
       openai_reasoning_effort:
         defaults.openai_reasoning_effort ??
         resetProviderSpecificConfig(initialProvider).openai_reasoning_effort,
+      codex_reasoning_effort:
+        defaults.codex_reasoning_effort ??
+        resetProviderSpecificConfig(initialProvider).codex_reasoning_effort,
       anthropic_effort:
         defaults.anthropic_effort ??
         resetProviderSpecificConfig(initialProvider).anthropic_effort,
@@ -155,6 +158,10 @@ export function CreateJobPage() {
         openai_reasoning_effort:
           values.llm_provider === "openai"
             ? values.openai_reasoning_effort?.trim() || null
+            : null,
+        codex_reasoning_effort:
+          values.llm_provider === "codex"
+            ? values.codex_reasoning_effort?.trim() || null
             : null,
         anthropic_effort:
           values.llm_provider === "anthropic"
@@ -346,6 +353,16 @@ export function CreateJobPage() {
                   <Form.Item
                     label="OpenAI Reasoning Effort"
                     name="openai_reasoning_effort"
+                  >
+                    <Select options={openaiReasoningEffortOptions} />
+                  </Form.Item>
+                </Col>
+              ) : null}
+              {provider === "codex" ? (
+                <Col xs={24} md={8}>
+                  <Form.Item
+                    label="Codex Reasoning Effort"
+                    name="codex_reasoning_effort"
                   >
                     <Select options={openaiReasoningEffortOptions} />
                   </Form.Item>

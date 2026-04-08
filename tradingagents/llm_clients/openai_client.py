@@ -31,6 +31,13 @@ _PROVIDER_CONFIG = {
     "ollama": ("http://localhost:11434/v1", None),
 }
 
+_PROVIDER_API_KEY_ENV = {
+    "openai": "OPENAI_API_KEY",
+    "codex": "CODEX_API_KEY",
+    "xai": "XAI_API_KEY",
+    "openrouter": "OPENROUTER_API_KEY",
+}
+
 
 class OpenAIClient(BaseLLMClient):
     """Client for OpenAI-compatible providers.
@@ -68,6 +75,14 @@ class OpenAIClient(BaseLLMClient):
                 llm_kwargs["api_key"] = "ollama"
         elif self.base_url:
             llm_kwargs["base_url"] = self.base_url
+
+        # Fill provider-native API key from env when not explicitly supplied.
+        if "api_key" not in llm_kwargs:
+            api_key_env = _PROVIDER_API_KEY_ENV.get(self.provider)
+            if api_key_env:
+                api_key = os.environ.get(api_key_env)
+                if api_key:
+                    llm_kwargs["api_key"] = api_key
 
         # Forward user-provided kwargs
         for key in _PASSTHROUGH_KWARGS:

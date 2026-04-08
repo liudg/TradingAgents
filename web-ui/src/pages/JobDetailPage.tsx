@@ -296,6 +296,9 @@ export function JobDetailPage() {
               <Descriptions.Item label="OpenAI Reasoning Effort">
                 {job.request.openai_reasoning_effort || "-"}
               </Descriptions.Item>
+              <Descriptions.Item label="Codex Reasoning Effort">
+                {job.request.codex_reasoning_effort || "-"}
+              </Descriptions.Item>
               <Descriptions.Item label="Google Thinking Level">
                 {job.request.google_thinking_level || "-"}
               </Descriptions.Item>

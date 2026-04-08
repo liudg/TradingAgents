@@ -19,6 +19,7 @@ describe("jobConfig", () => {
     expect(resolveBackendUrl("openai", "https://proxy.example/v1")).toBe(
       "https://proxy.example/v1",
     );
+    expect(resolveBackendUrl("codex", null)).toBe("http://127.0.0.1:8317/v1");
     expect(resolveBackendUrl("google", null)).toBe(
       "https://generativelanguage.googleapis.com/v1",
     );
@@ -27,11 +28,19 @@ describe("jobConfig", () => {
   it("keeps only the selected provider specific effort field", () => {
     expect(resetProviderSpecificConfig("openai")).toEqual({
       anthropic_effort: "",
+      codex_reasoning_effort: "",
       google_thinking_level: "",
       openai_reasoning_effort: "medium",
     });
+    expect(resetProviderSpecificConfig("codex")).toEqual({
+      anthropic_effort: "",
+      codex_reasoning_effort: "medium",
+      google_thinking_level: "",
+      openai_reasoning_effort: "",
+    });
     expect(resetProviderSpecificConfig("google")).toEqual({
       anthropic_effort: "",
+      codex_reasoning_effort: "",
       google_thinking_level: "high",
       openai_reasoning_effort: "",
     });

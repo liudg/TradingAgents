@@ -12,6 +12,7 @@ export interface AnalysisJobRequest {
   backend_url?: string | null;
   google_thinking_level?: string | null;
   openai_reasoning_effort?: string | null;
+  codex_reasoning_effort?: string | null;
   anthropic_effort?: string | null;
   output_language: string;
   max_debate_rounds: number;
@@ -106,6 +107,7 @@ export interface HistoricalReportSummary {
   backend_url?: string | null;
   google_thinking_level?: string | null;
   openai_reasoning_effort?: string | null;
+  codex_reasoning_effort?: string | null;
   anthropic_effort?: string | null;
   output_language: string;
   max_debate_rounds: number;
@@ -128,6 +130,7 @@ export interface BacktestJobRequest {
   backend_url?: string | null;
   google_thinking_level?: string | null;
   openai_reasoning_effort?: string | null;
+  codex_reasoning_effort?: string | null;
   anthropic_effort?: string | null;
   output_language: string;
   max_debate_rounds: number;

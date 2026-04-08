@@ -29,6 +29,7 @@ export const presetOutputLanguageValues = new Set(
 
 export const backendUrlByProvider: Record<string, string> = {
   anthropic: "https://api.anthropic.com/",
+  codex: "http://127.0.0.1:8317/v1",
   google: "https://generativelanguage.googleapis.com/v1",
   ollama: "http://localhost:11434/v1",
   openai: "https://api.openai.com/v1",
@@ -75,6 +76,7 @@ export function resolveBackendUrl(provider: string, explicitUrl?: string | null)
 export function resetProviderSpecificConfig(nextProvider: string) {
   return {
     anthropic_effort: nextProvider === "anthropic" ? "high" : "",
+    codex_reasoning_effort: nextProvider === "codex" ? "medium" : "",
     google_thinking_level: nextProvider === "google" ? "high" : "",
     openai_reasoning_effort: nextProvider === "openai" ? "medium" : "",
   };

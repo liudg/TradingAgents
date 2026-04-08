@@ -78,6 +78,7 @@ export function BacktestCreatePage() {
       writeback_enabled: true,
       google_thinking_level: defaults.google_thinking_level,
       openai_reasoning_effort: defaults.openai_reasoning_effort,
+      codex_reasoning_effort: defaults.codex_reasoning_effort,
       anthropic_effort: defaults.anthropic_effort,
     });
   }, [form, metadataQuery.data]);
@@ -102,9 +103,22 @@ export function BacktestCreatePage() {
         deep_think_llm: values.deep_think_llm,
         quick_think_llm: values.quick_think_llm,
         backend_url: values.backend_url?.trim() || null,
-        google_thinking_level: values.google_thinking_level?.trim() || null,
-        openai_reasoning_effort: values.openai_reasoning_effort?.trim() || null,
-        anthropic_effort: values.anthropic_effort?.trim() || null,
+        google_thinking_level:
+          values.llm_provider === "google"
+            ? values.google_thinking_level?.trim() || null
+            : null,
+        openai_reasoning_effort:
+          values.llm_provider === "openai"
+            ? values.openai_reasoning_effort?.trim() || null
+            : null,
+        codex_reasoning_effort:
+          values.llm_provider === "codex"
+            ? values.codex_reasoning_effort?.trim() || null
+            : null,
+        anthropic_effort:
+          values.llm_provider === "anthropic"
+            ? values.anthropic_effort?.trim() || null
+            : null,
         output_language: values.output_language,
         max_debate_rounds: values.max_debate_rounds,
         max_risk_discuss_rounds: values.max_risk_discuss_rounds,

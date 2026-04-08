@@ -335,6 +335,7 @@ class AnalysisJobManager:
         config["backend_url"] = request.backend_url
         config["google_thinking_level"] = request.google_thinking_level
         config["openai_reasoning_effort"] = request.openai_reasoning_effort
+        config["codex_reasoning_effort"] = request.codex_reasoning_effort
         config["anthropic_effort"] = request.anthropic_effort
         config["output_language"] = request.output_language
         config["max_debate_rounds"] = request.max_debate_rounds
@@ -555,6 +556,7 @@ class AnalysisJobManager:
             backend_url=None,
             google_thinking_level=None,
             openai_reasoning_effort=None,
+            codex_reasoning_effort=None,
             anthropic_effort=None,
             output_language="unknown",
             max_debate_rounds=0,
@@ -588,6 +590,7 @@ class AnalysisJobManager:
             backend_url=request.backend_url,
             google_thinking_level=request.google_thinking_level,
             openai_reasoning_effort=request.openai_reasoning_effort,
+            codex_reasoning_effort=request.codex_reasoning_effort,
             anthropic_effort=request.anthropic_effort,
             output_language=request.output_language,
             max_debate_rounds=request.max_debate_rounds,

@@ -191,6 +191,9 @@ export function HistoricalReportDetailPage() {
             <Descriptions.Item label="OpenAI Reasoning Effort">
               {detail.openai_reasoning_effort || "-"}
             </Descriptions.Item>
+            <Descriptions.Item label="Codex Reasoning Effort">
+              {detail.codex_reasoning_effort || "-"}
+            </Descriptions.Item>
             <Descriptions.Item label="Google Thinking Level">
               {detail.google_thinking_level || "-"}
             </Descriptions.Item>

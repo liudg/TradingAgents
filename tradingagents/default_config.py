@@ -17,13 +17,14 @@ DEFAULT_CONFIG = {
         "dataflows/data_cache",
     ),
     # LLM settings
-    "llm_provider": os.getenv("TRADINGAGENTS_LLM_PROVIDER", "openai"),
-    "deep_think_llm": os.getenv("TRADINGAGENTS_DEEP_MODEL", "gpt-5.4"),
-    "quick_think_llm": os.getenv("TRADINGAGENTS_QUICK_MODEL", "gpt-5.4-mini"),
-    "backend_url": os.getenv("TRADINGAGENTS_BACKEND_URL", "https://api.openai.com/v1"),
+    "llm_provider": "codex",
+    "deep_think_llm": "gpt-5.4",
+    "quick_think_llm": "gpt-5.4-mini",
+    "backend_url": "http://127.0.0.1:8317/v1",
     # Provider-specific thinking configuration
     "google_thinking_level": None,      # "high", "minimal", etc.
     "openai_reasoning_effort": None,    # "medium", "high", "low"
+    "codex_reasoning_effort": None,     # "medium", "high", "low"
     "anthropic_effort": None,           # "high", "medium", "low"
     # Output language for analyst reports and final decision
     # Internal agent debate stays in English for reasoning quality

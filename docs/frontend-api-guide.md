@@ -16,12 +16,13 @@
 | ticker | string | 是 | 股票代码，例如 `AAPL` |
 | trade_date | string | 是 | 分析日期，格式 `YYYY-MM-DD`，不能晚于当前日期 |
 | selected_analysts | string[] | 否 | `market`、`social`、`news`、`fundamentals` |
-| llm_provider | string | 否 | `openai`、`anthropic`、`google`、`xai`、`openrouter`、`ollama` |
+| llm_provider | string | 否 | `openai`、`codex`、`anthropic`、`google`、`xai`、`openrouter`、`ollama` |
 | deep_think_llm | string | 否 | 深度推理模型名称 |
 | quick_think_llm | string | 否 | 快速推理模型名称 |
 | backend_url | string | 否 | 自定义模型网关地址 |
 | google_thinking_level | string | 否 | Google 模型 thinking 配置 |
 | openai_reasoning_effort | string | 否 | OpenAI reasoning effort |
+| codex_reasoning_effort | string | 否 | Codex reasoning effort |
 | anthropic_effort | string | 否 | Anthropic effort |
 | output_language | string | 否 | 报告输出语言 |
 | max_debate_rounds | integer | 否 | 研究员辩论轮数，范围 1-10 |

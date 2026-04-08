@@ -358,6 +358,7 @@ class BacktestJobManager:
         config["backend_url"] = request.backend_url
         config["google_thinking_level"] = request.google_thinking_level
         config["openai_reasoning_effort"] = request.openai_reasoning_effort
+        config["codex_reasoning_effort"] = request.codex_reasoning_effort
         config["anthropic_effort"] = request.anthropic_effort
         config["output_language"] = request.output_language
         config["max_debate_rounds"] = request.max_debate_rounds

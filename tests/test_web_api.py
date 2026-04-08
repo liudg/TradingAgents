@@ -343,6 +343,47 @@ class WebApiTests(unittest.TestCase):
             self.assertIn(first_job_id, first_detail["report_path"])
             self.assertIn(second_job_id, second_detail["report_path"])
 
+    def test_create_job_with_codex_provider_keeps_codex_reasoning_effort(self):
+        with patch(
+            "tradingagents.web.job_manager.TradingAgentsGraph",
+            DummyTradingAgentsGraph,
+        ):
+            create_response = self.client.post(
+                "/api/analysis-jobs",
+                json={
+                    "ticker": "nvda",
+                    "trade_date": date.today().isoformat(),
+                    "selected_analysts": ["market", "news"],
+                    "llm_provider": "codex",
+                    "deep_think_llm": "gpt-5.4",
+                    "quick_think_llm": "gpt-5.4-mini",
+                    "backend_url": "http://127.0.0.1:8317/v1",
+                    "codex_reasoning_effort": "high",
+                    "output_language": "English",
+                    "max_debate_rounds": 3,
+                    "max_risk_discuss_rounds": 3,
+                },
+            )
+
+            self.assertEqual(create_response.status_code, 200)
+            job_id = create_response.json()["job_id"]
+
+            detail = self._wait_for_status(job_id, "completed")
+            self.assertEqual(detail["request"]["llm_provider"], "codex")
+            self.assertEqual(
+                detail["request"]["codex_reasoning_effort"],
+                "high",
+            )
+
+            history_response = self.client.get("/api/historical-reports")
+            self.assertEqual(history_response.status_code, 200)
+            history_payload = history_response.json()
+            self.assertEqual(history_payload[0]["job_id"], job_id)
+            self.assertEqual(
+                history_payload[0]["codex_reasoning_effort"],
+                "high",
+            )
+
     def test_failed_job_persists_log_and_snapshot(self):
         with patch(
             "tradingagents.web.job_manager.TradingAgentsGraph",

@@ -34,6 +34,7 @@ class AnalysisJobRequest(BaseModel):
     backend_url: Optional[str] = DEFAULT_CONFIG["backend_url"]
     google_thinking_level: Optional[str] = DEFAULT_CONFIG["google_thinking_level"]
     openai_reasoning_effort: Optional[str] = DEFAULT_CONFIG["openai_reasoning_effort"]
+    codex_reasoning_effort: Optional[str] = DEFAULT_CONFIG["codex_reasoning_effort"]
     anthropic_effort: Optional[str] = DEFAULT_CONFIG["anthropic_effort"]
     output_language: str = DEFAULT_CONFIG["output_language"]
     max_debate_rounds: int = Field(
@@ -130,6 +131,7 @@ class HistoricalReportSummary(BaseModel):
     backend_url: Optional[str] = None
     google_thinking_level: Optional[str] = None
     openai_reasoning_effort: Optional[str] = None
+    codex_reasoning_effort: Optional[str] = None
     anthropic_effort: Optional[str] = None
     output_language: str
     max_debate_rounds: int
@@ -166,6 +168,7 @@ class BacktestJobRequest(BaseModel):
     backend_url: Optional[str] = DEFAULT_CONFIG["backend_url"]
     google_thinking_level: Optional[str] = DEFAULT_CONFIG["google_thinking_level"]
     openai_reasoning_effort: Optional[str] = DEFAULT_CONFIG["openai_reasoning_effort"]
+    codex_reasoning_effort: Optional[str] = DEFAULT_CONFIG["codex_reasoning_effort"]
     anthropic_effort: Optional[str] = DEFAULT_CONFIG["anthropic_effort"]
     output_language: str = DEFAULT_CONFIG["output_language"]
     max_debate_rounds: int = Field(
