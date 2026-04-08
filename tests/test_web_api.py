@@ -1,7 +1,8 @@
+import json
 import shutil
 import time
 import unittest
-from datetime import date
+from datetime import date, datetime
 from pathlib import Path
 from unittest.mock import patch
 
@@ -378,6 +379,78 @@ class WebApiTests(unittest.TestCase):
             self.assertEqual(logs_response.status_code, 200)
             logs_payload = logs_response.json()
             self.assertTrue(any(item["level"] == "Error" for item in logs_payload))
+
+    def test_filesystem_report_without_snapshot_is_listed_and_readable(self):
+        report_dir = (
+            self.temp_dir / "TSLA" / "2026-04-01" / "legacy-run" / "reports"
+        )
+        report_dir.mkdir(parents=True, exist_ok=True)
+        report_path = report_dir / "complete_report.md"
+        report_path.write_text("# legacy report", encoding="utf-8")
+
+        restored_manager = AnalysisJobManager(
+            reports_root=self.temp_dir,
+            max_workers=1,
+        )
+        reports = restored_manager.list_historical_reports()
+        self.assertEqual(len(reports), 1)
+        self.assertEqual(reports[0].ticker, "TSLA")
+        self.assertEqual(str(reports[0].trade_date), "2026-04-01")
+        self.assertTrue(reports[0].job_id.startswith("fs_"))
+
+        detail = restored_manager.get_historical_report(reports[0].job_id)
+        self.assertEqual(detail.job_id, reports[0].job_id)
+        self.assertEqual(detail.agent_reports, [])
+
+    def test_snapshot_and_filesystem_scan_do_not_duplicate_same_report(self):
+        job_id = "a" * 32
+        snapshot_dir = self.temp_dir / "NVDA" / "2026-04-02" / job_id
+        report_dir = snapshot_dir / "reports"
+        report_dir.mkdir(parents=True, exist_ok=True)
+        report_path = report_dir / "complete_report.md"
+        report_path.write_text("# report", encoding="utf-8")
+
+        payload = {
+            "job_id": job_id,
+            "status": "completed",
+            "progress": 100,
+            "request": {
+                "ticker": "NVDA",
+                "trade_date": "2026-04-02",
+                "selected_analysts": ["market", "news"],
+                "llm_provider": "openai",
+                "deep_think_llm": "gpt-5.4",
+                "quick_think_llm": "gpt-5.4-mini",
+                "backend_url": "https://api.openai.com/v1",
+                "google_thinking_level": None,
+                "openai_reasoning_effort": None,
+                "anthropic_effort": None,
+                "output_language": "Chinese",
+                "max_debate_rounds": 2,
+                "max_risk_discuss_rounds": 2,
+            },
+            "final_state": {"market_report": "ok"},
+            "decision": "BUY",
+            "error_message": None,
+            "report_path": str(report_path),
+            "log_path": str(snapshot_dir / "message_tool.log"),
+            "results_dir": str(snapshot_dir),
+            "created_at": datetime.now().isoformat(),
+            "started_at": datetime.now().isoformat(),
+            "finished_at": datetime.now().isoformat(),
+        }
+        (snapshot_dir / "job_snapshot.json").write_text(
+            json.dumps(payload, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+
+        restored_manager = AnalysisJobManager(
+            reports_root=self.temp_dir,
+            max_workers=1,
+        )
+        reports = restored_manager.list_historical_reports()
+        self.assertEqual(len(reports), 1)
+        self.assertEqual(reports[0].job_id, job_id)
 
 if __name__ == "__main__":
     unittest.main()

@@ -1,4 +1,5 @@
 import json
+import hashlib
 import re
 import traceback
 from concurrent.futures import ThreadPoolExecutor
@@ -167,28 +168,54 @@ class AnalysisJobManager:
             ]
 
         reports = [self._build_report_summary(snapshot) for snapshot in snapshots]
+        known_job_ids = {report.job_id for report in reports}
+        known_report_paths = {
+            str(Path(report.report_path).resolve())
+            for report in reports
+            if report.report_path
+        }
+        for fallback in self._scan_filesystem_report_summaries():
+            resolved_report_path = (
+                str(Path(fallback.report_path).resolve()) if fallback.report_path else None
+            )
+            if fallback.job_id in known_job_ids:
+                continue
+            if resolved_report_path and resolved_report_path in known_report_paths:
+                continue
+            known_job_ids.add(fallback.job_id)
+            if resolved_report_path:
+                known_report_paths.add(resolved_report_path)
+            reports.append(fallback)
+
         return sorted(reports, key=lambda item: item.generated_at, reverse=True)
 
     def get_historical_report(self, job_id: str) -> HistoricalReportDetail:
         with self._lock:
             job_data = self._jobs.get(job_id)
-            if job_data is None:
-                raise KeyError(job_id)
-            snapshot = dict(job_data)
+            snapshot = dict(job_data) if job_data is not None else None
 
-        if (
-            snapshot.get("status") != JobStatus.COMPLETED
-            or not snapshot.get("report_path")
-        ):
-            raise ValueError(
-                f"Report for job '{job_id}' is not ready. Current status: {snapshot.get('status')}"
+        if snapshot is not None:
+            if (
+                snapshot.get("status") != JobStatus.COMPLETED
+                or not snapshot.get("report_path")
+            ):
+                raise ValueError(
+                    f"Report for job '{job_id}' is not ready. Current status: {snapshot.get('status')}"
+                )
+
+            summary = self._build_report_summary(snapshot)
+            return HistoricalReportDetail(
+                **summary.model_dump(),
+                agent_reports=self._build_agent_reports(snapshot.get("final_state") or {}),
             )
 
-        summary = self._build_report_summary(snapshot)
-        return HistoricalReportDetail(
-            **summary.model_dump(),
-            agent_reports=self._build_agent_reports(snapshot.get("final_state") or {}),
-        )
+        for fallback in self._scan_filesystem_report_summaries():
+            if fallback.job_id == job_id:
+                return HistoricalReportDetail(
+                    **fallback.model_dump(),
+                    agent_reports=[],
+                )
+        raise KeyError(job_id)
 
     def _run_job(self, job_id: str) -> None:
         snapshot = self._get_job_snapshot(job_id)
@@ -476,6 +503,73 @@ class AnalysisJobManager:
             / request.trade_date.isoformat()
             / job_id
         )
+
+    def _scan_filesystem_report_summaries(self) -> list[HistoricalReportSummary]:
+        self.reports_root.mkdir(parents=True, exist_ok=True)
+        summaries: list[HistoricalReportSummary] = []
+        for report_path in self.reports_root.rglob("reports/complete_report.md"):
+            summary = self._build_report_summary_from_file(report_path)
+            if summary is not None:
+                summaries.append(summary)
+        return summaries
+
+    def _build_report_summary_from_file(
+        self,
+        report_path: Path,
+    ) -> Optional[HistoricalReportSummary]:
+        try:
+            reports_dir = report_path.parent
+            job_dir = reports_dir.parent
+            trade_date_dir = job_dir.parent
+            ticker_dir = trade_date_dir.parent
+        except IndexError:
+            return None
+
+        if reports_dir.name != "reports":
+            return None
+
+        ticker = ticker_dir.name.strip().upper()
+        if not ticker:
+            return None
+
+        try:
+            trade_date_value = date.fromisoformat(trade_date_dir.name)
+        except ValueError:
+            return None
+
+        job_id = self._normalize_filesystem_job_id(job_dir.name, job_dir)
+        try:
+            generated_at = datetime.fromtimestamp(report_path.stat().st_mtime)
+        except OSError:
+            generated_at = datetime.now()
+
+        return HistoricalReportSummary(
+            job_id=job_id,
+            ticker=ticker,
+            trade_date=trade_date_value,
+            generated_at=generated_at,
+            selected_analysts=[],
+            llm_provider="unknown",
+            deep_think_llm="unknown",
+            quick_think_llm="unknown",
+            backend_url=None,
+            google_thinking_level=None,
+            openai_reasoning_effort=None,
+            anthropic_effort=None,
+            output_language="unknown",
+            max_debate_rounds=0,
+            max_risk_discuss_rounds=0,
+            report_path=str(report_path),
+        )
+
+    @staticmethod
+    def _normalize_filesystem_job_id(raw_job_dir_name: str, job_dir: Path) -> str:
+        candidate = raw_job_dir_name.strip()
+        if re.fullmatch(r"[0-9a-fA-F]{32}", candidate):
+            return candidate.lower()
+
+        stable_digest = hashlib.md5(str(job_dir.resolve()).encode("utf-8")).hexdigest()
+        return f"fs_{stable_digest}"
 
     @staticmethod
     def _build_report_summary(snapshot: Dict[str, Any]) -> HistoricalReportSummary:
