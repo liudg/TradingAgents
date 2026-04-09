@@ -17,13 +17,24 @@ body {
 }
 
 .app-header {
+  padding: 0 24px;
+  background: rgba(255, 255, 255, 0.98);
+  border-bottom: 1px solid #e5e7eb;
+  backdrop-filter: blur(12px);
+}
+
+.app-header-inner {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  padding: 0 32px;
-  background: rgba(255, 255, 255, 0.94);
-  border-bottom: 1px solid #e8edf5;
-  backdrop-filter: blur(10px);
+  gap: 32px;
+  min-height: 64px;
+  flex-wrap: wrap;
+}
+
+.brand-link {
+  display: inline-flex;
+  align-items: center;
+  text-decoration: none;
 }
 
 .brand-title {
@@ -33,10 +44,52 @@ body {
   font-weight: 700;
 }
 
-.brand-subtitle {
-  margin-left: 12px;
-  color: #64748b;
-  font-size: 13px;
+.module-tabs {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.module-tab {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 44px;
+  padding: 0 26px;
+  border: 1px solid #d0d7de;
+  border-radius: 12px;
+  background: #ffffff;
+  color: #374151;
+  font-size: 16px;
+  font-weight: 700;
+  line-height: 1;
+  text-decoration: none;
+  transition:
+    transform 0.2s ease,
+    box-shadow 0.2s ease,
+    background-color 0.2s ease,
+    border-color 0.2s ease,
+    color 0.2s ease;
+}
+
+.module-tab:hover {
+  transform: translateY(-1px);
+  border-color: #84cc16;
+  color: #3f6212;
+  box-shadow: 0 10px 24px rgba(132, 204, 22, 0.16);
+}
+
+.module-tab.is-active {
+  border-color: #65a30d;
+  background: linear-gradient(180deg, #f7fee7 0%, #ecfccb 100%);
+  color: #3f6212;
+  box-shadow: 0 12px 28px rgba(101, 163, 13, 0.22);
+}
+
+.module-tab.is-active:hover {
+  color: #365314;
+  border-color: #4d7c0f;
 }
 
 .content-wrap {
@@ -50,6 +103,21 @@ body {
   width: 100%;
   border-radius: 18px;
   box-shadow: 0 12px 30px rgba(15, 23, 42, 0.08);
+}
+
+.page-card-extra-button {
+  border-color: #bfdbfe !important;
+  background: linear-gradient(180deg, #eff6ff 0%, #dbeafe 100%) !important;
+  color: #1d4ed8 !important;
+  font-weight: 600;
+  box-shadow: 0 8px 18px rgba(59, 130, 246, 0.14);
+}
+
+.page-card-extra-button:hover,
+.page-card-extra-button:focus {
+  border-color: #93c5fd !important;
+  background: linear-gradient(180deg, #dbeafe 0%, #bfdbfe 100%) !important;
+  color: #1e40af !important;
 }
 
 .section-card {
@@ -155,4 +223,28 @@ body {
 
 .report-content-card .ant-card-body {
   min-height: 70vh;
+}
+
+@media (max-width: 768px) {
+  .app-header {
+    height: auto;
+    padding-top: 12px;
+    padding-bottom: 12px;
+  }
+
+  .app-header-inner {
+    align-items: flex-start;
+    gap: 16px;
+  }
+
+  .module-tabs {
+    width: 100%;
+  }
+
+  .module-tab {
+    flex: 1 1 140px;
+    min-height: 42px;
+    padding: 0 14px;
+    font-size: 15px;
+  }
 }

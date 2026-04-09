@@ -204,7 +204,18 @@ export function CreateJobPage() {
   return (
     <Row gutter={[24, 24]}>
       <Col xs={24}>
-        <Card className="page-card" title="新建投研分析任务">
+        <Card
+          className="page-card"
+          title="新建投研分析任务"
+          extra={
+            <Button
+              className="page-card-extra-button"
+              onClick={() => navigate("/reports")}
+            >
+              历史分析报告
+            </Button>
+          }
+        >
           <Form
             form={form}
             layout="vertical"

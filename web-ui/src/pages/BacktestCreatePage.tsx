@@ -154,7 +154,18 @@ export function BacktestCreatePage() {
   }
 
   return (
-    <Card className="page-card" title="新建回测复盘任务">
+    <Card
+      className="page-card"
+      title="新建回测复盘任务"
+      extra={
+        <Button
+          className="page-card-extra-button"
+          onClick={() => navigate("/backtests/history")}
+        >
+          历史回测
+        </Button>
+      }
+    >
       <Form form={form} layout="vertical" onFinish={handleSubmit} requiredMark={false}>
         <Row gutter={16}>
           <Col xs={24} md={8}>
@@ -248,10 +259,13 @@ export function BacktestCreatePage() {
 
         <Form.Item style={{ marginTop: 24, marginBottom: 0 }}>
           <Space>
-            <Button type="primary" htmlType="submit" loading={createBacktestMutation.isPending}>
+            <Button
+              type="primary"
+              htmlType="submit"
+              loading={createBacktestMutation.isPending}
+            >
               启动回测
             </Button>
-            <Button onClick={() => navigate("/backtests/history")}>查看历史回测</Button>
           </Space>
         </Form.Item>
       </Form>

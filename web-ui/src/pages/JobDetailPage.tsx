@@ -168,7 +168,10 @@ export function JobDetailPage() {
         title="任务加载失败"
         subTitle={extractErrorMessage(jobQuery.error)}
         extra={
-          <Button icon={<ArrowLeftOutlined />} onClick={() => navigate("/")}>
+          <Button
+            icon={<ArrowLeftOutlined />}
+            onClick={() => navigate("/analysis")}
+          >
             返回新建任务
           </Button>
         }

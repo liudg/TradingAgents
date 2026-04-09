@@ -1,13 +1,32 @@
-import {
-  ExperimentOutlined,
-  FileTextOutlined,
-  PlusCircleOutlined,
-} from "@ant-design/icons";
-import { Button, Layout, Space } from "antd";
+import { Layout } from "antd";
 import { PropsWithChildren } from "react";
 import { Link, useLocation } from "react-router-dom";
 
 const { Header, Content } = Layout;
+
+const moduleTabs = [
+  {
+    key: "monitor",
+    label: "市场监控",
+    to: "/monitor",
+    match: (pathname: string) => pathname.startsWith("/monitor"),
+  },
+  {
+    key: "analysis",
+    label: "个股分析",
+    to: "/analysis",
+    match: (pathname: string) =>
+      pathname === "/analysis" ||
+      pathname.startsWith("/jobs/") ||
+      pathname.startsWith("/reports"),
+  },
+  {
+    key: "backtest",
+    label: "回测复盘",
+    to: "/backtests",
+    match: (pathname: string) => pathname.startsWith("/backtests"),
+  },
+];
 
 export function AppLayout({ children }: PropsWithChildren) {
   const location = useLocation();
@@ -15,39 +34,28 @@ export function AppLayout({ children }: PropsWithChildren) {
   return (
     <Layout className="app-shell">
       <Header className="app-header">
-        <div>
-          <Link to="/">
+        <div className="app-header-inner">
+          <Link to="/monitor" className="brand-link">
             <span className="brand-title">TradingAgents 投研分析控制台</span>
           </Link>
+
+          <nav className="module-tabs" aria-label="主导航">
+            {moduleTabs.map((tab) => {
+              const isActive = tab.match(location.pathname);
+
+              return (
+                <Link
+                  key={tab.key}
+                  to={tab.to}
+                  className={`module-tab${isActive ? " is-active" : ""}`}
+                  aria-current={isActive ? "page" : undefined}
+                >
+                  {tab.label}
+                </Link>
+              );
+            })}
+          </nav>
         </div>
-
-        <Space>
-          {!location.pathname.startsWith("/backtests") ? (
-            <Link to="/backtests">
-              <Button icon={<ExperimentOutlined />}>回测复盘</Button>
-            </Link>
-          ) : null}
-
-          {location.pathname !== "/backtests/history" ? (
-            <Link to="/backtests/history">
-              <Button icon={<ExperimentOutlined />}>历史回测</Button>
-            </Link>
-          ) : null}
-
-          {location.pathname !== "/reports" ? (
-            <Link to="/reports">
-              <Button icon={<FileTextOutlined />}>历史分析报告</Button>
-            </Link>
-          ) : null}
-
-          {location.pathname !== "/" ? (
-            <Link to="/">
-              <Button type="primary" icon={<PlusCircleOutlined />}>
-                新建分析任务
-              </Button>
-            </Link>
-          ) : null}
-        </Space>
       </Header>
 
       <Content className="content-wrap">{children}</Content>

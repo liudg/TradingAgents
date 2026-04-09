@@ -9,6 +9,7 @@ import { HistoricalBacktestsPage } from "./pages/HistoricalBacktestsPage";
 import { HistoricalReportDetailPage } from "./pages/HistoricalReportDetailPage";
 import { HistoricalReportsPage } from "./pages/HistoricalReportsPage";
 import { JobDetailPage } from "./pages/JobDetailPage";
+import { MarketMonitorPage } from "./pages/MarketMonitorPage";
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -25,17 +26,22 @@ export function RootApp() {
       <BrowserRouter>
         <AppLayout>
           <Routes>
-            <Route path="/" element={<CreateJobPage />} />
+            <Route path="/" element={<Navigate to="/monitor" replace />} />
+            <Route path="/analysis" element={<CreateJobPage />} />
+            <Route path="/monitor" element={<MarketMonitorPage />} />
             <Route path="/jobs/:jobId" element={<JobDetailPage />} />
             <Route path="/backtests" element={<BacktestCreatePage />} />
             <Route path="/backtests/:jobId" element={<BacktestDetailPage />} />
-            <Route path="/backtests/history" element={<HistoricalBacktestsPage />} />
+            <Route
+              path="/backtests/history"
+              element={<HistoricalBacktestsPage />}
+            />
             <Route path="/reports" element={<HistoricalReportsPage />} />
             <Route
               path="/reports/:jobId"
               element={<HistoricalReportDetailPage />}
             />
-            <Route path="*" element={<Navigate to="/" replace />} />
+            <Route path="*" element={<Navigate to="/monitor" replace />} />
           </Routes>
         </AppLayout>
       </BrowserRouter>
