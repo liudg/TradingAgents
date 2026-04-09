@@ -4,13 +4,39 @@ from dateutil.relativedelta import relativedelta
 import pandas as pd
 import yfinance as yf
 import os
+from dotenv import load_dotenv
 from .stockstats_utils import StockstatsUtils, _clean_dataframe, yf_retry, load_ohlcv, filter_financials_by_date
+
+load_dotenv()
+
+
+def _configure_yfinance_proxy():
+    proxy_url = os.getenv("YFINANCE_PROXY", "").strip()
+    http_proxy = os.getenv("YFINANCE_HTTP_PROXY", "").strip()
+    https_proxy = os.getenv("YFINANCE_HTTPS_PROXY", "").strip()
+
+    if proxy_url:
+        yf.config.network.proxy = {
+            "http": proxy_url,
+            "https": proxy_url,
+        }
+        return
+
+    if http_proxy or https_proxy:
+        yf.config.network.proxy = {
+            "http": http_proxy or https_proxy,
+            "https": https_proxy or http_proxy,
+        }
+        return
+
+    yf.config.network.proxy = None
 
 def get_YFin_data_online(
     symbol: Annotated[str, "ticker symbol of the company"],
     start_date: Annotated[str, "Start date in yyyy-mm-dd format"],
     end_date: Annotated[str, "End date in yyyy-mm-dd format"],
 ):
+    _configure_yfinance_proxy()
 
     datetime.strptime(start_date, "%Y-%m-%d")
     datetime.strptime(end_date, "%Y-%m-%d")
@@ -251,6 +277,7 @@ def get_fundamentals(
 ):
     """Get company fundamentals overview from yfinance."""
     try:
+        _configure_yfinance_proxy()
         ticker_obj = yf.Ticker(ticker.upper())
         info = yf_retry(lambda: ticker_obj.info)
 
@@ -309,6 +336,7 @@ def get_balance_sheet(
 ):
     """Get balance sheet data from yfinance."""
     try:
+        _configure_yfinance_proxy()
         ticker_obj = yf.Ticker(ticker.upper())
 
         if freq.lower() == "quarterly":
@@ -341,6 +369,7 @@ def get_cashflow(
 ):
     """Get cash flow data from yfinance."""
     try:
+        _configure_yfinance_proxy()
         ticker_obj = yf.Ticker(ticker.upper())
 
         if freq.lower() == "quarterly":
@@ -373,6 +402,7 @@ def get_income_statement(
 ):
     """Get income statement data from yfinance."""
     try:
+        _configure_yfinance_proxy()
         ticker_obj = yf.Ticker(ticker.upper())
 
         if freq.lower() == "quarterly":
@@ -403,6 +433,7 @@ def get_insider_transactions(
 ):
     """Get insider transactions data from yfinance."""
     try:
+        _configure_yfinance_proxy()
         ticker_obj = yf.Ticker(ticker.upper())
         data = yf_retry(lambda: ticker_obj.insider_transactions)
         
