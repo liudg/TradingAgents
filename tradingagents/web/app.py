@@ -2,6 +2,7 @@ import uvicorn
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse
+from datetime import date
 
 from cli.models import AnalystType
 from tradingagents.default_config import DEFAULT_CONFIG
@@ -22,6 +23,13 @@ from tradingagents.web.schemas import (
     HistoricalReportSummary,
     MetadataOptionsResponse,
 )
+from tradingagents.web.market_monitor_schemas import (
+    MarketMonitorDataStatusResponse,
+    MarketMonitorHistoryResponse,
+    MarketMonitorSnapshotRequest,
+    MarketMonitorSnapshotResponse,
+)
+from tradingagents.web.market_monitor_service import MarketMonitorService
 
 
 load_dotenv()
@@ -33,6 +41,7 @@ app = FastAPI(
 )
 job_manager = AnalysisJobManager()
 backtest_manager = BacktestJobManager()
+market_monitor_service = MarketMonitorService()
 
 
 @app.post("/api/analysis-jobs", response_model=AnalysisJobCreateResponse)
@@ -154,6 +163,45 @@ def get_historical_backtest(job_id: str) -> HistoricalBacktestDetail:
         raise HTTPException(status_code=404, detail="Historical backtest not found") from exc
     except ValueError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
+@app.get("/api/market-monitor/snapshot", response_model=MarketMonitorSnapshotResponse)
+def get_market_monitor_snapshot(
+    as_of_date: str | None = None, force_refresh: bool = False
+) -> MarketMonitorSnapshotResponse:
+    request = MarketMonitorSnapshotRequest(
+        as_of_date=as_of_date,
+        force_refresh=force_refresh,
+    )
+    return market_monitor_service.get_snapshot(request)
+
+
+@app.post("/api/market-monitor/snapshot", response_model=MarketMonitorSnapshotResponse)
+def create_market_monitor_snapshot(
+    request: MarketMonitorSnapshotRequest,
+) -> MarketMonitorSnapshotResponse:
+    return market_monitor_service.get_snapshot(request)
+
+
+@app.get("/api/market-monitor/history", response_model=MarketMonitorHistoryResponse)
+def get_market_monitor_history(
+    as_of_date: str | None = None, days: int = 10
+) -> MarketMonitorHistoryResponse:
+    request = MarketMonitorSnapshotRequest(as_of_date=as_of_date)
+    target_date = request.as_of_date or date.today()
+    return market_monitor_service.get_history(target_date, days)
+
+
+@app.get(
+    "/api/market-monitor/data-status",
+    response_model=MarketMonitorDataStatusResponse,
+)
+def get_market_monitor_data_status(
+    as_of_date: str | None = None,
+) -> MarketMonitorDataStatusResponse:
+    request = MarketMonitorSnapshotRequest(as_of_date=as_of_date)
+    target_date = request.as_of_date or date.today()
+    return market_monitor_service.get_data_status(target_date)
 
 
 def run_api() -> None:

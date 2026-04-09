@@ -239,6 +239,139 @@ export interface HistoricalBacktestDetail extends HistoricalBacktestSummary {
   memory_entries: BacktestMemoryEntry[];
 }
 
+export interface MarketScoreCard {
+  score: number;
+  zone: string;
+  delta_1d: number;
+  delta_5d: number;
+  slope_state: string;
+  action: string;
+}
+
+export interface MarketStyleSignal {
+  score: number;
+  preferred?: boolean | null;
+  valid?: boolean | null;
+  delta_5d: number;
+}
+
+export interface MarketStyleEffectiveness {
+  tactic_layer: {
+    trend_breakout: MarketStyleSignal;
+    dip_buy: MarketStyleSignal;
+    oversold_bounce: MarketStyleSignal;
+    top_tactic: string;
+    avoid_tactic: string;
+  };
+  asset_layer: {
+    large_cap_tech: MarketStyleSignal;
+    small_cap_momentum: MarketStyleSignal;
+    defensive: MarketStyleSignal;
+    energy_cyclical: MarketStyleSignal;
+    financials: MarketStyleSignal;
+    preferred_assets: string[];
+    avoid_assets: string[];
+  };
+}
+
+export interface MarketEventRiskFlag {
+  index_level: {
+    active: boolean;
+    type?: string | null;
+    days_to_event?: number | null;
+    action_modifier?: {
+      new_position_allowed?: boolean | null;
+      overnight_allowed?: boolean | null;
+      single_position_cap_multiplier?: number | null;
+      note?: string | null;
+    } | null;
+  };
+  stock_level: {
+    earnings_stocks: string[];
+    rule?: string | null;
+  };
+}
+
+export interface MarketExecutionCard {
+  regime_label: "绿灯" | "黄灯" | "黄绿灯-Swing" | "橙灯" | "红灯";
+  conflict_mode: string;
+  total_exposure_range: string;
+  new_position_allowed: boolean;
+  chase_breakout_allowed: boolean;
+  dip_buy_allowed: boolean;
+  overnight_allowed: boolean;
+  leverage_allowed: boolean;
+  single_position_cap: string;
+  daily_risk_budget: string;
+  tactic_preference: string;
+  preferred_assets: string[];
+  avoid_assets: string[];
+  signal_confirmation: {
+    current_regime_days: number;
+    downgrade_unlock_in_days: number;
+    note: string;
+  };
+  event_risk_flag: MarketEventRiskFlag;
+}
+
+export interface MarketPanicReversalCard {
+  score: number;
+  zone: string;
+  state: "无信号" | "panic_watch" | "panic_confirmed";
+  panic_extreme_score: number;
+  selling_exhaustion_score: number;
+  intraday_reversal_score: number;
+  followthrough_confirmation_score: number;
+  action: string;
+  system_risk_override?: string | null;
+  stop_loss: string;
+  profit_rule: string;
+  timeout_warning: boolean;
+  days_held: number;
+  early_entry_allowed: boolean;
+}
+
+export interface MarketSourceCoverage {
+  status: "full" | "partial" | "degraded";
+  data_freshness: string;
+  degraded_factors: string[];
+  notes: string[];
+}
+
+export interface MarketMonitorSnapshotResponse {
+  timestamp: string;
+  as_of_date: string;
+  long_term_score: MarketScoreCard;
+  short_term_score: MarketScoreCard;
+  system_risk_score: MarketScoreCard;
+  style_effectiveness: MarketStyleEffectiveness;
+  execution_card: MarketExecutionCard;
+  panic_reversal_score: MarketPanicReversalCard;
+  event_risk_flag: MarketEventRiskFlag;
+  source_coverage: MarketSourceCoverage;
+}
+
+export interface MarketMonitorHistoryPoint {
+  trade_date: string;
+  regime_label: "绿灯" | "黄灯" | "黄绿灯-Swing" | "橙灯" | "红灯";
+  long_term_score: number;
+  short_term_score: number;
+  system_risk_score: number;
+  panic_reversal_score: number;
+}
+
+export interface MarketMonitorHistoryResponse {
+  as_of_date: string;
+  points: MarketMonitorHistoryPoint[];
+}
+
+export interface MarketMonitorDataStatusResponse {
+  as_of_date: string;
+  source_coverage: MarketSourceCoverage;
+  available_sources: string[];
+  pending_sources: string[];
+}
+
 export class ApiError extends Error {
   status: number;
   detail: string;

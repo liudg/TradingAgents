@@ -225,6 +225,14 @@ body {
   min-height: 70vh;
 }
 
+.market-score-card .ant-statistic {
+  margin-bottom: 4px;
+}
+
+.market-score-card .ant-card-head-title {
+  font-weight: 700;
+}
+
 @media (max-width: 768px) {
   .app-header {
     height: auto;

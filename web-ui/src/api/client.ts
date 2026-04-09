@@ -11,6 +11,9 @@ import {
   HistoricalBacktestSummary,
   HistoricalReportDetail,
   HistoricalReportSummary,
+  MarketMonitorDataStatusResponse,
+  MarketMonitorHistoryResponse,
+  MarketMonitorSnapshotResponse,
   MetadataOptionsResponse,
 } from "./types";
 
@@ -106,5 +109,28 @@ export async function fetchHistoricalBacktests() {
 export async function fetchHistoricalBacktest(jobId: string) {
   return requestJson<HistoricalBacktestDetail>(
     `/api/historical-backtests/${jobId}`,
+  );
+}
+
+export async function fetchMarketMonitorSnapshot(forceRefresh = false) {
+  const params = new URLSearchParams();
+  if (forceRefresh) {
+    params.set("force_refresh", "true");
+  }
+  const suffix = params.toString() ? `?${params.toString()}` : "";
+  return requestJson<MarketMonitorSnapshotResponse>(
+    `/api/market-monitor/snapshot${suffix}`,
+  );
+}
+
+export async function fetchMarketMonitorHistory() {
+  return requestJson<MarketMonitorHistoryResponse>(
+    "/api/market-monitor/history",
+  );
+}
+
+export async function fetchMarketMonitorDataStatus() {
+  return requestJson<MarketMonitorDataStatusResponse>(
+    "/api/market-monitor/data-status",
   );
 }

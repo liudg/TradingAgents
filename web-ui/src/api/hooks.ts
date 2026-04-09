@@ -12,6 +12,9 @@ import {
   fetchHistoricalBacktests,
   fetchHistoricalReport,
   fetchHistoricalReports,
+  fetchMarketMonitorDataStatus,
+  fetchMarketMonitorHistory,
+  fetchMarketMonitorSnapshot,
   fetchMetadataOptions,
 } from "./client";
 import { AnalysisJobRequest, BacktestJobRequest, JobStatus } from "./types";
@@ -116,5 +119,29 @@ export function useHistoricalBacktest(jobId: string) {
     queryKey: ["historical-backtest", jobId],
     queryFn: () => fetchHistoricalBacktest(jobId),
     enabled: Boolean(jobId),
+  });
+}
+
+export function useMarketMonitorSnapshot(forceRefresh = false) {
+  return useQuery({
+    queryKey: ["market-monitor-snapshot", forceRefresh],
+    queryFn: () => fetchMarketMonitorSnapshot(forceRefresh),
+    refetchInterval: 30000,
+  });
+}
+
+export function useMarketMonitorHistory() {
+  return useQuery({
+    queryKey: ["market-monitor-history"],
+    queryFn: fetchMarketMonitorHistory,
+    refetchInterval: 60000,
+  });
+}
+
+export function useMarketMonitorDataStatus() {
+  return useQuery({
+    queryKey: ["market-monitor-data-status"],
+    queryFn: fetchMarketMonitorDataStatus,
+    refetchInterval: 60000,
   });
 }
