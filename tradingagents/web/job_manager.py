@@ -11,7 +11,6 @@ from typing import Any, Dict, Optional
 from uuid import uuid4
 
 import pandas as pd
-import yfinance as yf
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 
 from tradingagents.default_config import DEFAULT_CONFIG

@@ -10,9 +10,9 @@ from typing import Any, Dict, Optional
 from uuid import uuid4
 
 import pandas as pd
-import yfinance as yf
 
 from tradingagents.agents.utils.memory import FinancialSituationMemory
+from tradingagents.dataflows.yfinance_proxy import get_yf
 from tradingagents.default_config import DEFAULT_CONFIG
 from tradingagents.graph.trading_graph import TradingAgentsGraph
 from tradingagents.reporting import save_report_to_disk
@@ -367,6 +367,7 @@ class BacktestJobManager:
 
     @staticmethod
     def _fetch_price_history(ticker: str, start_date: date, end_date: date) -> pd.DataFrame:
+        yf = get_yf()
         frame = yf.download(
             ticker,
             start=start_date.isoformat(),

@@ -1,13 +1,13 @@
 from __future__ import annotations
 
 from datetime import date, timedelta
-import os
 import time
 from typing import Dict, Iterable
 
 import pandas as pd
-import yfinance as yf
 from yfinance.exceptions import YFRateLimitError
+
+from tradingagents.dataflows.yfinance_proxy import get_yf
 
 
 def _normalize_ohlcv_frame(frame: pd.DataFrame) -> pd.DataFrame:
@@ -23,30 +23,12 @@ def _normalize_ohlcv_frame(frame: pd.DataFrame) -> pd.DataFrame:
     return result
 
 
-def _configure_yfinance_proxy() -> None:
-    proxy_url = os.getenv("YFINANCE_PROXY", "").strip()
-    http_proxy = os.getenv("YFINANCE_HTTP_PROXY", "").strip()
-    https_proxy = os.getenv("YFINANCE_HTTPS_PROXY", "").strip()
-
-    if proxy_url:
-        yf.config.network.proxy = {"http": proxy_url, "https": proxy_url}
-        return
-    if http_proxy or https_proxy:
-        yf.config.network.proxy = {
-            "http": http_proxy or https_proxy,
-            "https": https_proxy or http_proxy,
-        }
-        return
-    yf.config.network.proxy = None
-
-
 def fetch_daily_history(
     symbols: Iterable[str],
     as_of_date: date,
     lookback_days: int = 420,
 ) -> Dict[str, pd.DataFrame]:
     symbol_list = list(dict.fromkeys(symbols))
-    _configure_yfinance_proxy()
 
     result: Dict[str, pd.DataFrame] = {}
     for symbol in symbol_list:
@@ -56,6 +38,7 @@ def fetch_daily_history(
 
 
 def _download_single_symbol(symbol: str, as_of_date: date, lookback_days: int) -> pd.DataFrame:
+    yf = get_yf()
     start = as_of_date - timedelta(days=lookback_days)
     end = as_of_date + timedelta(days=1)
     for attempt in range(3):

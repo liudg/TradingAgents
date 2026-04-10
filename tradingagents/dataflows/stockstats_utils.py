@@ -2,12 +2,12 @@ import time
 import logging
 
 import pandas as pd
-import yfinance as yf
 from yfinance.exceptions import YFRateLimitError
 from stockstats import wrap
 from typing import Annotated
 import os
 from .config import get_config
+from .yfinance_proxy import get_yf
 
 logger = logging.getLogger(__name__)
 
@@ -69,6 +69,7 @@ def load_ohlcv(symbol: str, curr_date: str) -> pd.DataFrame:
     if os.path.exists(data_file):
         data = pd.read_csv(data_file, on_bad_lines="skip")
     else:
+        yf = get_yf()
         data = yf_retry(lambda: yf.download(
             symbol,
             start=start_str,
