@@ -4,6 +4,8 @@ import json
 import os
 from datetime import date, datetime
 from pathlib import Path
+from tempfile import NamedTemporaryFile
+from typing import Iterable
 from typing import Any
 
 import pandas as pd
@@ -49,7 +51,14 @@ def save_symbol_daily_cache(symbol: str, frame: pd.DataFrame) -> None:
     serializable = frame.copy().reset_index()
     if "index" in serializable.columns and "Date" not in serializable.columns:
         serializable = serializable.rename(columns={"index": "Date"})
-    serializable.to_csv(path, index=False)
+    with NamedTemporaryFile("w", encoding="utf-8", delete=False, dir=path.parent, suffix=".tmp") as handle:
+        temp_path = Path(handle.name)
+    try:
+        serializable.to_csv(temp_path, index=False)
+        temp_path.replace(path)
+    finally:
+        if temp_path.exists():
+            temp_path.unlink(missing_ok=True)
 
 
 def load_snapshot_cache(as_of_date: date) -> dict[str, Any] | None:
@@ -64,10 +73,14 @@ def load_snapshot_cache(as_of_date: date) -> dict[str, Any] | None:
 
 def save_snapshot_cache(as_of_date: date, payload: dict[str, Any]) -> None:
     path = _snapshot_cache_path(as_of_date)
-    path.write_text(
-        json.dumps(payload, ensure_ascii=False, indent=2, default=_json_default),
-        encoding="utf-8",
-    )
+    with NamedTemporaryFile("w", encoding="utf-8", delete=False, dir=path.parent, suffix=".tmp") as handle:
+        temp_path = Path(handle.name)
+        handle.write(json.dumps(payload, ensure_ascii=False, indent=2, default=_json_default))
+    try:
+        temp_path.replace(path)
+    finally:
+        if temp_path.exists():
+            temp_path.unlink(missing_ok=True)
 
 
 def _json_default(value: Any) -> Any:
@@ -85,6 +98,20 @@ def symbol_cache_status(symbol: str) -> dict[str, Any]:
         "path": str(path),
         "updated_at": datetime.fromtimestamp(os.path.getmtime(path)).isoformat(),
     }
+
+
+def latest_symbol_cache_mtime(symbols: Iterable[str]) -> datetime | None:
+    latest: float | None = None
+    for symbol in symbols:
+        path = _symbol_cache_path(symbol)
+        if not path.exists():
+            continue
+        modified = os.path.getmtime(path)
+        if latest is None or modified > latest:
+            latest = modified
+    if latest is None:
+        return None
+    return datetime.fromtimestamp(latest)
 
 
 def _load_legacy_symbol_cache(symbol: str) -> pd.DataFrame:

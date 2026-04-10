@@ -29,8 +29,7 @@ def _dataset_missing_spy() -> dict[str, dict[str, pd.DataFrame]]:
     core.update({symbol: _make_frame(70 + idx * 2) for idx, symbol in enumerate(universe["sector_etfs"])})
     core["SPY"] = pd.DataFrame(columns=["Open", "High", "Low", "Close", "Volume"])
     core["^VIX"] = _make_frame(22)
-    nasdaq = {symbol: _make_frame(40 + idx) for idx, symbol in enumerate(universe["nasdaq_100"][:20])}
-    return {"core": core, "nasdaq_100": nasdaq}
+    return {"core": core}
 
 
 class MarketMonitorNoCacheTests(unittest.TestCase):
@@ -45,7 +44,12 @@ class MarketMonitorNoCacheTests(unittest.TestCase):
             service._overlay_service,
             "create_overlay",
             return_value=MarketMonitorModelOverlay(status="skipped", notes=["test"]),
-        ):
+        ), patch(
+            "tradingagents.web.market_monitor_service.load_snapshot_cache",
+            return_value=None,
+        ), patch(
+            "tradingagents.web.market_monitor_service.save_snapshot_cache",
+        ) as mocked_save_cache:
             response = service.get_snapshot(MarketMonitorSnapshotRequest(as_of_date=date(2026, 4, 10)))
 
         self.assertFalse(response.rule_snapshot.ready)
@@ -53,6 +57,7 @@ class MarketMonitorNoCacheTests(unittest.TestCase):
         self.assertIsNone(response.rule_snapshot.long_term_score)
         self.assertEqual(response.rule_snapshot.source_coverage.data_freshness, "live_request_yfinance_daily")
         self.assertNotIn("fallback_placeholder", response.rule_snapshot.source_coverage.data_freshness)
+        mocked_save_cache.assert_not_called()
 
 
 if __name__ == "__main__":

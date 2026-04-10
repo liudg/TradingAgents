@@ -6,7 +6,12 @@ from typing import Any
 
 import pandas as pd
 
-from tradingagents.web.market_monitor_data import build_market_dataset
+from tradingagents.web.market_monitor_cache import (
+    latest_symbol_cache_mtime,
+    load_snapshot_cache,
+    save_snapshot_cache,
+)
+from tradingagents.web.market_monitor_data import _expected_market_close_date, build_market_dataset
 from tradingagents.web.market_monitor_llm import MarketMonitorLLMService
 from tradingagents.web.market_monitor_schemas import (
     MarketEventRiskFlag,
@@ -47,35 +52,47 @@ from tradingagents.web.market_monitor_universe import get_market_monitor_univers
 class MarketMonitorService:
     """Market monitor service using live yfinance data and optional model overlay."""
 
+    _LIVE_CACHE_TTL_SECONDS = 300
+
     def __init__(self) -> None:
         self._overlay_service = MarketMonitorLLMService()
+        self._dataset_cache: dict[date, dict[str, Any]] = {}
 
     def get_snapshot(self, request: MarketMonitorSnapshotRequest) -> MarketMonitorSnapshotResponse:
         as_of_date = request.as_of_date or date.today()
         universe = get_market_monitor_universe()
-        dataset = build_market_dataset(universe, as_of_date)
+        if not request.force_refresh:
+            cached_snapshot = load_snapshot_cache(as_of_date)
+            if cached_snapshot is not None and self._is_snapshot_cache_usable(cached_snapshot, as_of_date, universe):
+                snapshot = MarketMonitorSnapshotResponse.model_validate(cached_snapshot)
+                return snapshot
+
+        dataset = self._get_dataset(universe, as_of_date, force_refresh=request.force_refresh)
         rule_snapshot = self._build_rule_snapshot(dataset, universe)
         context_queries = self._build_context_queries(rule_snapshot)
         model_overlay = self._overlay_service.create_overlay(rule_snapshot, as_of_date.isoformat(), context_queries)
         final_execution_card = self._merge_overlay(rule_snapshot, model_overlay)
 
-        return MarketMonitorSnapshotResponse(
+        response = MarketMonitorSnapshotResponse(
             timestamp=datetime.now(),
             as_of_date=as_of_date,
             rule_snapshot=rule_snapshot,
             model_overlay=model_overlay,
             final_execution_card=final_execution_card,
         )
+        if self._is_snapshot_cacheable(response):
+            save_snapshot_cache(as_of_date, response.model_dump(mode="json"))
+        return response
 
     def get_history(self, as_of_date: date, days: int = 10) -> MarketMonitorHistoryResponse:
         universe = get_market_monitor_universe()
-        dataset = build_market_dataset(universe, as_of_date)
+        dataset = self._get_dataset(universe, as_of_date)
         core_data = dataset["core"]
         missing_required = self._missing_required_symbols(core_data)
         if missing_required:
             return MarketMonitorHistoryResponse(as_of_date=as_of_date, points=[])
 
-        breadth_ratio = build_breadth_ratio(dataset["nasdaq_100"])
+        breadth_ratio = build_breadth_ratio(core_data, universe["market_proxies"])
         sector_data = {symbol: core_data[symbol] for symbol in universe["sector_etfs"] if symbol in core_data}
 
         long_term_series = build_long_term_series(core_data, breadth_ratio).dropna().tail(days)
@@ -110,15 +127,35 @@ class MarketMonitorService:
         return MarketMonitorHistoryResponse(as_of_date=as_of_date, points=points)
 
     def get_data_status(self, as_of_date: date) -> MarketMonitorDataStatusResponse:
+        cached_snapshot = load_snapshot_cache(as_of_date)
         universe = get_market_monitor_universe()
-        dataset = build_market_dataset(universe, as_of_date)
+        if cached_snapshot is not None and self._is_snapshot_cache_usable(cached_snapshot, as_of_date, universe):
+            snapshot = MarketMonitorSnapshotResponse.model_validate(cached_snapshot)
+            return MarketMonitorDataStatusResponse(
+                as_of_date=as_of_date,
+                source_coverage=snapshot.rule_snapshot.source_coverage,
+                available_sources=[
+                    "live_yfinance_daily",
+                    "etf_index_proxy_universe",
+                    "fastapi_market_monitor",
+                ],
+                pending_sources=[
+                    "intraday_panic_confirmation",
+                    "put_call_ratio",
+                    "vix_term_structure",
+                    "calendar_events",
+                    "web_search_overlay",
+                ],
+            )
+
+        dataset = self._get_dataset(universe, as_of_date)
         rule_snapshot = self._build_rule_snapshot(dataset, universe)
         return MarketMonitorDataStatusResponse(
             as_of_date=as_of_date,
             source_coverage=rule_snapshot.source_coverage,
             available_sources=[
                 "live_yfinance_daily",
-                "nasdaq_100_static_universe",
+                "etf_index_proxy_universe",
                 "fastapi_market_monitor",
             ],
             pending_sources=[
@@ -130,6 +167,100 @@ class MarketMonitorService:
             ],
         )
 
+    def _get_dataset(
+        self,
+        universe: dict[str, list[str]],
+        as_of_date: date,
+        force_refresh: bool = False,
+    ) -> dict[str, dict[str, pd.DataFrame]]:
+        if force_refresh:
+            dataset = build_market_dataset(universe, as_of_date, force_refresh=True)
+            self._save_dataset_cache(as_of_date, dataset, universe)
+            return dataset
+
+        cached_entry = self._dataset_cache.get(as_of_date)
+        if cached_entry is not None and self._is_dataset_cache_usable(cached_entry, as_of_date, universe):
+            return cached_entry["dataset"]
+
+        dataset = build_market_dataset(universe, as_of_date, force_refresh=False)
+        self._save_dataset_cache(as_of_date, dataset, universe)
+        return dataset
+
+    def _save_dataset_cache(
+        self,
+        as_of_date: date,
+        dataset: dict[str, dict[str, pd.DataFrame]],
+        universe: dict[str, list[str]],
+    ) -> None:
+        if not self._is_dataset_cacheable(dataset):
+            return
+        self._dataset_cache[as_of_date] = {
+            "dataset": dataset,
+            "cached_at": datetime.now(),
+            "symbol_cache_mtime": latest_symbol_cache_mtime(universe["all_symbols"]),
+        }
+
+    def _is_dataset_cacheable(self, dataset: dict[str, dict[str, pd.DataFrame]]) -> bool:
+        core_data = dataset.get("core", {})
+        return not self._missing_required_symbols(core_data)
+
+    def _is_dataset_cache_usable(
+        self,
+        cache_entry: dict[str, Any],
+        as_of_date: date,
+        universe: dict[str, list[str]],
+    ) -> bool:
+        dataset = cache_entry.get("dataset")
+        cached_at = cache_entry.get("cached_at")
+        if dataset is None or cached_at is None:
+            return False
+        if not self._is_dataset_cacheable(dataset):
+            return False
+        if not self._is_live_market_date(as_of_date):
+            return True
+        age = (datetime.now() - cached_at).total_seconds()
+        if age > self._LIVE_CACHE_TTL_SECONDS:
+            return False
+        latest_mtime = latest_symbol_cache_mtime(universe["all_symbols"])
+        cached_mtime = cache_entry.get("symbol_cache_mtime")
+        if latest_mtime and (cached_mtime is None or latest_mtime > cached_mtime):
+            return False
+        return True
+
+    def _is_snapshot_cache_usable(
+        self,
+        payload: dict[str, Any],
+        as_of_date: date,
+        universe: dict[str, list[str]],
+    ) -> bool:
+        try:
+            snapshot = MarketMonitorSnapshotResponse.model_validate(payload)
+        except Exception:
+            return False
+        if not self._is_snapshot_cacheable(snapshot):
+            return False
+        if snapshot.as_of_date != as_of_date:
+            return False
+        if not self._is_live_market_date(as_of_date):
+            return True
+        age = (datetime.now() - snapshot.timestamp).total_seconds()
+        if age > self._LIVE_CACHE_TTL_SECONDS:
+            return False
+        latest_mtime = latest_symbol_cache_mtime(universe["all_symbols"])
+        return latest_mtime is None or latest_mtime <= snapshot.timestamp
+
+    def _is_snapshot_cacheable(self, snapshot: MarketMonitorSnapshotResponse) -> bool:
+        return (
+            snapshot.model_overlay.status != "error"
+            and snapshot.rule_snapshot.ready
+            and not snapshot.rule_snapshot.missing_inputs
+            and snapshot.final_execution_card is not None
+        )
+
+    def _is_live_market_date(self, as_of_date: date) -> bool:
+        today = date.today()
+        return as_of_date == today and _expected_market_close_date(as_of_date).date() == today
+
     def _build_rule_snapshot(
         self,
         dataset: dict[str, dict[str, pd.DataFrame]],
@@ -137,7 +268,7 @@ class MarketMonitorService:
     ) -> MarketMonitorRuleSnapshot:
         core_data = dataset["core"]
         missing_required = self._missing_required_symbols(core_data)
-        source_coverage = self._build_source_coverage(core_data, dataset["nasdaq_100"], missing_required)
+        source_coverage = self._build_source_coverage(core_data, universe["market_proxies"], missing_required)
         base_event_risk_flag = self._build_base_event_risk_flag()
 
         if missing_required:
@@ -150,12 +281,12 @@ class MarketMonitorService:
                 key_indicators={},
             )
 
-        breadth_ratio = build_breadth_ratio(dataset["nasdaq_100"])
+        breadth_ratio = build_breadth_ratio(core_data, universe["market_proxies"])
         sector_data = {symbol: core_data[symbol] for symbol in universe["sector_etfs"] if symbol in core_data}
         long_term = summarize_score(build_long_term_series(core_data, breadth_ratio), LONG_TERM_ZONES)
         short_term = summarize_score(build_short_term_series(core_data, sector_data, breadth_ratio), SHORT_TERM_ZONES)
         system_risk = summarize_score(build_system_risk_series(core_data, breadth_ratio), SYSTEM_RISK_ZONES)
-        style_effectiveness = self._build_style_effectiveness(core_data, dataset["nasdaq_100"])
+        style_effectiveness = self._build_style_effectiveness(core_data, universe["market_proxies"])
         base_execution_card = self._build_execution_card(
             long_term["score"],
             short_term["score"],
@@ -210,16 +341,20 @@ class MarketMonitorService:
     def _build_source_coverage(
         self,
         core_data: dict[str, pd.DataFrame],
-        nasdaq_frames: dict[str, pd.DataFrame],
+        proxy_symbols: list[str],
         missing_required: list[str],
     ) -> MarketSourceCoverage:
         available_core = sorted(symbol for symbol, frame in core_data.items() if frame is not None and not frame.empty)
-        nasdaq_available = sum(1 for frame in nasdaq_frames.values() if frame is not None and not frame.empty)
+        proxy_available = sum(
+            1
+            for symbol in proxy_symbols
+            if core_data.get(symbol) is not None and not core_data[symbol].empty
+        )
         degraded_factors = []
         notes = [
             f"Live yfinance request completed for {len(available_core)} core/sector symbols.",
-            f"Live yfinance request completed for {nasdaq_available} Nasdaq-100 symbols.",
-            "Deterministic scorecards are built only from live-request data in this phase.",
+            f"Proxy coverage is available for {proxy_available}/{len(proxy_symbols)} ETF/index breadth symbols.",
+            "Deterministic scorecards use ETF/index proxy breadth instead of a full Nasdaq-100 stock scan.",
         ]
         if missing_required:
             degraded_factors.append(f"missing_required_symbols:{','.join(missing_required)}")
@@ -252,9 +387,9 @@ class MarketMonitorService:
     def _build_style_effectiveness(
         self,
         core_data: dict[str, pd.DataFrame],
-        nasdaq_frames: dict[str, pd.DataFrame],
+        proxy_symbols: list[str],
     ) -> MarketStyleEffectiveness:
-        tactic_scores = score_tactic_layer(nasdaq_frames)
+        tactic_scores = score_tactic_layer(core_data, proxy_symbols)
         asset_scores = score_asset_layer(core_data)
 
         top_tactic = max(tactic_scores, key=tactic_scores.get)

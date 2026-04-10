@@ -34,8 +34,7 @@ def _complete_dataset() -> dict[str, dict[str, pd.DataFrame]]:
     core = {symbol: _make_frame(110 + idx * 2) for idx, symbol in enumerate(universe["core_index_etfs"])}
     core.update({symbol: _make_frame(85 + idx * 2) for idx, symbol in enumerate(universe["sector_etfs"])})
     core["^VIX"] = _make_frame(19)
-    nasdaq = {symbol: _make_frame(45 + idx) for idx, symbol in enumerate(universe["nasdaq_100"][:30])}
-    return {"core": core, "nasdaq_100": nasdaq}
+    return {"core": core}
 
 
 class MarketMonitorOverlayTests(unittest.TestCase):
@@ -71,7 +70,16 @@ class MarketMonitorOverlayTests(unittest.TestCase):
         with patch(
             "tradingagents.web.market_monitor_service.build_market_dataset",
             return_value=dataset,
-        ), patch.object(service._overlay_service, "create_overlay", return_value=overlay):
+        ), patch.object(
+            service._overlay_service,
+            "create_overlay",
+            return_value=overlay,
+        ), patch(
+            "tradingagents.web.market_monitor_service.load_snapshot_cache",
+            return_value=None,
+        ), patch(
+            "tradingagents.web.market_monitor_service.save_snapshot_cache",
+        ):
             response = service.get_snapshot(MarketMonitorSnapshotRequest(as_of_date=date(2026, 4, 10)))
 
         self.assertTrue(response.rule_snapshot.ready)

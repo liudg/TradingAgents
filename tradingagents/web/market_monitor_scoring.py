@@ -163,14 +163,19 @@ def build_system_risk_series(core_data: dict[str, pd.DataFrame], breadth_ratio: 
     return score.apply(bounded_score)
 
 
-def build_breadth_ratio(nasdaq_frames: dict[str, pd.DataFrame]) -> pd.Series:
+def build_breadth_ratio(
+    core_data: dict[str, pd.DataFrame],
+    breadth_symbols: list[str],
+    ma_window: int = 200,
+) -> pd.Series:
     closes = []
-    for symbol, frame in nasdaq_frames.items():
+    for symbol in breadth_symbols:
+        frame = core_data.get(symbol, pd.DataFrame())
         close = frame.get("Close", pd.Series(dtype=float)).dropna()
         if close.empty:
             continue
-        ma200 = sma(close, 200)
-        closes.append((close > ma200).astype(float).rename(symbol))
+        moving_average = sma(close, ma_window)
+        closes.append((close > moving_average).astype(float).rename(symbol))
     if not closes:
         return pd.Series(dtype=float)
     panel = pd.concat(closes, axis=1)
@@ -188,12 +193,16 @@ def summarize_score(series: pd.Series, zones: list[tuple[float, str]]) -> dict[s
     }
 
 
-def score_tactic_layer(nasdaq_frames: dict[str, pd.DataFrame]) -> dict[str, float]:
+def score_tactic_layer(
+    core_data: dict[str, pd.DataFrame],
+    proxy_symbols: list[str],
+) -> dict[str, float]:
     breakout_successes = []
     dip_buy_scores = []
     oversold_bounce_scores = []
 
-    for frame in nasdaq_frames.values():
+    for symbol in proxy_symbols:
+        frame = core_data.get(symbol, pd.DataFrame())
         close = frame.get("Close", pd.Series(dtype=float)).dropna()
         if len(close) < 30:
             continue

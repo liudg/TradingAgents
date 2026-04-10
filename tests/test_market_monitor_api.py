@@ -29,8 +29,7 @@ def _complete_dataset() -> dict[str, dict[str, pd.DataFrame]]:
     core = {symbol: _make_frame(100 + idx * 2) for idx, symbol in enumerate(universe["core_index_etfs"])}
     core.update({symbol: _make_frame(80 + idx * 2) for idx, symbol in enumerate(universe["sector_etfs"])})
     core["^VIX"] = _make_frame(20)
-    nasdaq = {symbol: _make_frame(50 + idx) for idx, symbol in enumerate(universe["nasdaq_100"][:18])}
-    return {"core": core, "nasdaq_100": nasdaq}
+    return {"core": core}
 
 
 class MarketMonitorApiTests(unittest.TestCase):

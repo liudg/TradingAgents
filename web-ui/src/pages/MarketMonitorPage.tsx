@@ -88,6 +88,13 @@ export function MarketMonitorPage() {
   const [historyEnabled, setHistoryEnabled] = useState(false);
   const snapshotQuery = useMarketMonitorSnapshot();
   const historyQuery = useMarketMonitorHistory(historyEnabled);
+  const ruleSnapshotReady = snapshotQuery.data?.rule_snapshot.ready;
+  const overlayStatus = snapshotQuery.data?.model_overlay.status;
+  const topStatus = useMemo(() => {
+    if (!ruleSnapshotReady) return "Rule snapshot incomplete";
+    if (overlayStatus === "applied") return "Rule snapshot + model overlay";
+    return "Rule snapshot only";
+  }, [overlayStatus, ruleSnapshotReady]);
 
   useEffect(() => {
     if (snapshotQuery.data?.rule_snapshot.ready) {
@@ -119,11 +126,6 @@ export function MarketMonitorPage() {
   const overlay = snapshot.model_overlay;
   const finalExecutionCard = snapshot.final_execution_card;
   const sourceCoverage = ruleSnapshot.source_coverage;
-  const topStatus = useMemo(() => {
-    if (!ruleSnapshot.ready) return "Rule snapshot incomplete";
-    if (overlay.status === "applied") return "Rule snapshot + model overlay";
-    return "Rule snapshot only";
-  }, [overlay.status, ruleSnapshot.ready]);
 
   return (
     <Space direction="vertical" size="large" style={{ width: "100%" }}>
@@ -343,7 +345,7 @@ export function MarketMonitorPage() {
           </Tag>
           <Typography.Text strong>Available sources</Typography.Text>
           <Space wrap>
-            {["live_yfinance_daily", "nasdaq_100_static_universe", "fastapi_market_monitor"].map((item) => (
+            {["live_yfinance_daily", "etf_index_proxy_universe", "fastapi_market_monitor"].map((item) => (
               <Tag key={item}>{item}</Tag>
             ))}
           </Space>
