@@ -112,15 +112,8 @@ export async function fetchHistoricalBacktest(jobId: string) {
   );
 }
 
-export async function fetchMarketMonitorSnapshot(forceRefresh = false) {
-  const params = new URLSearchParams();
-  if (forceRefresh) {
-    params.set("force_refresh", "true");
-  }
-  const suffix = params.toString() ? `?${params.toString()}` : "";
-  return requestJson<MarketMonitorSnapshotResponse>(
-    `/api/market-monitor/snapshot${suffix}`,
-  );
+export async function fetchMarketMonitorSnapshot() {
+  return requestJson<MarketMonitorSnapshotResponse>("/api/market-monitor/snapshot");
 }
 
 export async function fetchMarketMonitorHistory() {

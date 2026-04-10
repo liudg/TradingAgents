@@ -122,19 +122,18 @@ export function useHistoricalBacktest(jobId: string) {
   });
 }
 
-export function useMarketMonitorSnapshot(forceRefresh = false) {
+export function useMarketMonitorSnapshot() {
   return useQuery({
-    queryKey: ["market-monitor-snapshot", forceRefresh],
-    queryFn: () => fetchMarketMonitorSnapshot(forceRefresh),
-    refetchInterval: 30000,
+    queryKey: ["market-monitor-snapshot"],
+    queryFn: fetchMarketMonitorSnapshot,
   });
 }
 
-export function useMarketMonitorHistory() {
+export function useMarketMonitorHistory(enabled = true) {
   return useQuery({
     queryKey: ["market-monitor-history"],
     queryFn: fetchMarketMonitorHistory,
-    refetchInterval: 60000,
+    enabled,
   });
 }
 
@@ -142,6 +141,5 @@ export function useMarketMonitorDataStatus() {
   return useQuery({
     queryKey: ["market-monitor-data-status"],
     queryFn: fetchMarketMonitorDataStatus,
-    refetchInterval: 60000,
   });
 }

@@ -292,8 +292,15 @@ export interface MarketEventRiskFlag {
   };
 }
 
+export type MarketRegimeLabel =
+  | "green"
+  | "yellow"
+  | "yellow_green_swing"
+  | "orange"
+  | "red";
+
 export interface MarketExecutionCard {
-  regime_label: "绿灯" | "黄灯" | "黄绿灯-Swing" | "橙灯" | "红灯";
+  regime_label: MarketRegimeLabel;
   conflict_mode: string;
   total_exposure_range: string;
   new_position_allowed: boolean;
@@ -312,12 +319,13 @@ export interface MarketExecutionCard {
     note: string;
   };
   event_risk_flag: MarketEventRiskFlag;
+  summary: string;
 }
 
 export interface MarketPanicReversalCard {
   score: number;
   zone: string;
-  state: "无信号" | "panic_watch" | "panic_confirmed";
+  state: "none" | "watch" | "confirmed";
   panic_extreme_score: number;
   selling_exhaustion_score: number;
   intraday_reversal_score: number;
@@ -338,22 +346,55 @@ export interface MarketSourceCoverage {
   notes: string[];
 }
 
+export interface MarketMonitorRuleSnapshot {
+  ready: boolean;
+  long_term_score?: MarketScoreCard | null;
+  short_term_score?: MarketScoreCard | null;
+  system_risk_score?: MarketScoreCard | null;
+  style_effectiveness?: MarketStyleEffectiveness | null;
+  panic_reversal_score?: MarketPanicReversalCard | null;
+  base_regime_label?: MarketRegimeLabel | null;
+  base_execution_card?: MarketExecutionCard | null;
+  base_event_risk_flag: MarketEventRiskFlag;
+  source_coverage: MarketSourceCoverage;
+  missing_inputs: string[];
+  degraded_factors: string[];
+  key_indicators: Record<string, unknown>;
+}
+
+export interface MarketMonitorModelOverlay {
+  status: "skipped" | "applied" | "error";
+  regime_override?: MarketRegimeLabel | null;
+  execution_adjustments?: {
+    regime_label?: MarketRegimeLabel | null;
+    conflict_mode?: string | null;
+    new_position_allowed?: boolean | null;
+    chase_breakout_allowed?: boolean | null;
+    dip_buy_allowed?: boolean | null;
+    overnight_allowed?: boolean | null;
+    daily_risk_budget?: string | null;
+    summary?: string | null;
+  } | null;
+  event_risk_override?: MarketEventRiskFlag | null;
+  market_narrative: string;
+  risk_narrative: string;
+  panic_narrative: string;
+  evidence_sources: string[];
+  model_confidence?: number | null;
+  notes: string[];
+}
+
 export interface MarketMonitorSnapshotResponse {
   timestamp: string;
   as_of_date: string;
-  long_term_score: MarketScoreCard;
-  short_term_score: MarketScoreCard;
-  system_risk_score: MarketScoreCard;
-  style_effectiveness: MarketStyleEffectiveness;
-  execution_card: MarketExecutionCard;
-  panic_reversal_score: MarketPanicReversalCard;
-  event_risk_flag: MarketEventRiskFlag;
-  source_coverage: MarketSourceCoverage;
+  rule_snapshot: MarketMonitorRuleSnapshot;
+  model_overlay: MarketMonitorModelOverlay;
+  final_execution_card?: MarketExecutionCard | null;
 }
 
 export interface MarketMonitorHistoryPoint {
   trade_date: string;
-  regime_label: "绿灯" | "黄灯" | "黄绿灯-Swing" | "橙灯" | "红灯";
+  regime_label: MarketRegimeLabel;
   long_term_score: number;
   short_term_score: number;
   system_risk_score: number;

@@ -1,18 +1,13 @@
 from __future__ import annotations
 
 from datetime import date, timedelta
-import time
 import os
+import time
 from typing import Dict, Iterable
 
 import pandas as pd
 import yfinance as yf
 from yfinance.exceptions import YFRateLimitError
-
-from tradingagents.web.market_monitor_cache import (
-    load_symbol_daily_cache,
-    save_symbol_daily_cache,
-)
 
 
 def _normalize_ohlcv_frame(frame: pd.DataFrame) -> pd.DataFrame:
@@ -55,40 +50,9 @@ def fetch_daily_history(
 
     result: Dict[str, pd.DataFrame] = {}
     for symbol in symbol_list:
-        cached = load_symbol_daily_cache(symbol, as_of_date)
-        if _cache_covers_date(cached, as_of_date, lookback_days):
-            result[symbol] = cached
-            continue
-
-        fetched = _download_single_symbol(symbol, as_of_date, lookback_days)
-        if not fetched.empty:
-            save_symbol_daily_cache(symbol, fetched)
-            result[symbol] = fetched
-        else:
-            result[symbol] = cached if not cached.empty else pd.DataFrame(
-                columns=["Open", "High", "Low", "Close", "Volume"]
-            )
+        result[symbol] = _download_single_symbol(symbol, as_of_date, lookback_days)
         time.sleep(0.25)
-
     return result
-
-
-def _cache_covers_date(frame: pd.DataFrame, as_of_date: date, lookback_days: int) -> bool:
-    if frame.empty:
-        return False
-    max_needed = pd.Timestamp(as_of_date)
-    relevant = frame[frame.index <= max_needed]
-    if relevant.empty:
-        return False
-
-    min_needed = pd.Timestamp(as_of_date - timedelta(days=lookback_days))
-    min_tolerated = min_needed + timedelta(days=7)
-    enough_rows = len(relevant) >= max(120, int(lookback_days * 0.55))
-    return (
-        relevant.index.min() <= min_tolerated
-        and relevant.index.max() >= max_needed - timedelta(days=7)
-        and enough_rows
-    )
 
 
 def _download_single_symbol(symbol: str, as_of_date: date, lookback_days: int) -> pd.DataFrame:
@@ -112,8 +76,8 @@ def _download_single_symbol(symbol: str, as_of_date: date, lookback_days: int) -
         except YFRateLimitError:
             time.sleep(1.5 * (attempt + 1))
         except Exception:
-            return pd.DataFrame()
-    return pd.DataFrame()
+            return pd.DataFrame(columns=["Open", "High", "Low", "Close", "Volume"])
+    return pd.DataFrame(columns=["Open", "High", "Low", "Close", "Volume"])
 
 
 def build_market_dataset(universe: dict[str, list[str]], as_of_date: date) -> dict[str, Dict[str, pd.DataFrame]]:

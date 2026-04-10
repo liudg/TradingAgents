@@ -88,7 +88,7 @@ def build_long_term_series(core_data: dict[str, pd.DataFrame], breadth_ratio: pd
     score += (((aligned["spy"] - range_low) / (range_high - range_low + 1e-9)) * 25).fillna(0)
     trend_sync = ((aligned["spy"].pct_change(20) > 0) & (aligned["qqq"].pct_change(20) > 0)).astype(float) * 15
     score += trend_sync.fillna(0)
-    score += breadth_ratio.reindex(aligned.index).fillna(method="ffill").fillna(0) * 0.25
+    score += breadth_ratio.reindex(aligned.index).ffill().fillna(0) * 0.25
     if not vix_aligned.empty:
         score += (100 - expanding_percentile(vix_aligned)) * 0.15
     return score.apply(bounded_score)
@@ -119,7 +119,7 @@ def build_short_term_series(
     ) / core_data["SPY"]["Close"].shift(1).reindex(aligned.index) * 100
     gap_score = (gap_quality > 0).rolling(5, min_periods=3).mean().fillna(0) * 100
 
-    breadth_component = breadth_ratio.reindex(aligned.index).fillna(method="ffill").fillna(0)
+    breadth_component = breadth_ratio.reindex(aligned.index).ffill().fillna(0)
     score = positive_ratio * 0.35 + bounded_score_series(atr_score) * 0.2 + gap_score * 0.15 + breadth_component * 0.3
     return score.apply(bounded_score)
 
@@ -155,10 +155,10 @@ def build_system_risk_series(core_data: dict[str, pd.DataFrame], breadth_ratio: 
 
     iwm_rel = ((aligned["iwm"].pct_change(5) - aligned["spy"].pct_change(5)) * -100).fillna(0)
     xlu_rel = ((aligned["xlu"].pct_change(5) - aligned["spy"].pct_change(5)) * 100).fillna(0)
-    breadth_stress = (100 - breadth_ratio.reindex(aligned.index).fillna(method="ffill").fillna(50))
+    breadth_stress = (100 - breadth_ratio.reindex(aligned.index).ffill().fillna(50))
     score = iwm_rel.clip(-10, 10) * 2 + xlu_rel.clip(-10, 10) * 2 + breadth_stress * 0.35
     if not vix.empty:
-        vix_aligned = vix.reindex(aligned.index).ffill().fillna(method="bfill")
+        vix_aligned = vix.reindex(aligned.index).ffill().bfill()
         score += expanding_percentile(vix_aligned) * 0.35
     return score.apply(bounded_score)
 

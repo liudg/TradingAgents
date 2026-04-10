@@ -2,6 +2,7 @@ import {
   Alert,
   Card,
   Col,
+  Descriptions,
   List,
   Progress,
   Result,
@@ -13,14 +14,22 @@ import {
   Typography,
 } from "antd";
 import { ReloadOutlined } from "@ant-design/icons";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 import {
-  useMarketMonitorDataStatus,
   useMarketMonitorHistory,
   useMarketMonitorSnapshot,
 } from "../api/hooks";
+import { MarketRegimeLabel, MarketScoreCard } from "../api/types";
 import { extractErrorMessage, formatDateTime } from "../utils/format";
+
+const regimeLabelMap: Record<MarketRegimeLabel, string> = {
+  green: "Green",
+  yellow: "Yellow",
+  yellow_green_swing: "Yellow-Green Swing",
+  orange: "Orange",
+  red: "Red",
+};
 
 function scoreColor(score: number) {
   if (score >= 65) return "#389e0d";
@@ -28,63 +37,67 @@ function scoreColor(score: number) {
   return "#cf1322";
 }
 
-function regimeTagColor(label: string) {
-  if (label === "绿灯") return "success";
-  if (label === "黄灯" || label === "黄绿灯-Swing") return "warning";
-  if (label === "橙灯") return "orange";
+function regimeTagColor(label?: string | null) {
+  if (label === "green") return "success";
+  if (label === "yellow" || label === "yellow_green_swing") return "warning";
+  if (label === "orange") return "orange";
   return "error";
 }
 
-function ScoreCardBlock(props: {
-  title: string;
-  score: number;
-  zone: string;
-  delta1d: number;
-  delta5d: number;
-  slope: string;
-  action: string;
-}) {
+function displayRegime(label?: string | null) {
+  if (!label) return "N/A";
+  return regimeLabelMap[label as MarketRegimeLabel] ?? label;
+}
+
+function ScoreCardBlock(props: { title: string; card?: MarketScoreCard | null }) {
+  if (!props.card) {
+    return (
+      <Card className="section-card market-score-card" title={props.title}>
+        <Alert type="warning" showIcon message="Rule score unavailable for this request." />
+      </Card>
+    );
+  }
+
   return (
     <Card className="section-card market-score-card" title={props.title}>
       <Space direction="vertical" size={12} style={{ width: "100%" }}>
         <Statistic
-          title="当前评分"
-          value={props.score}
+          title="Score"
+          value={props.card.score}
           precision={1}
-          valueStyle={{ color: scoreColor(props.score) }}
+          valueStyle={{ color: scoreColor(props.card.score) }}
         />
         <Space wrap>
-          <Tag color="blue">{props.zone}</Tag>
-          <Tag>1日 {props.delta1d >= 0 ? "+" : ""}{props.delta1d.toFixed(1)}</Tag>
-          <Tag>5日 {props.delta5d >= 0 ? "+" : ""}{props.delta5d.toFixed(1)}</Tag>
-          <Tag>{props.slope}</Tag>
+          <Tag color="blue">{props.card.zone}</Tag>
+          <Tag>1D {props.card.delta_1d >= 0 ? "+" : ""}{props.card.delta_1d.toFixed(1)}</Tag>
+          <Tag>5D {props.card.delta_5d >= 0 ? "+" : ""}{props.card.delta_5d.toFixed(1)}</Tag>
+          <Tag>{props.card.slope_state}</Tag>
         </Space>
         <Progress
-          percent={Math.round(props.score)}
+          percent={Math.round(props.card.score)}
           showInfo={false}
-          strokeColor={scoreColor(props.score)}
+          strokeColor={scoreColor(props.card.score)}
         />
-        <Typography.Text>{props.action}</Typography.Text>
+        <Typography.Text>{props.card.action}</Typography.Text>
       </Space>
     </Card>
   );
 }
 
 export function MarketMonitorPage() {
-  const [forceRefresh, setForceRefresh] = useState(false);
-  const snapshotQuery = useMarketMonitorSnapshot(forceRefresh);
-  const historyQuery = useMarketMonitorHistory();
-  const dataStatusQuery = useMarketMonitorDataStatus();
+  const [historyEnabled, setHistoryEnabled] = useState(false);
+  const snapshotQuery = useMarketMonitorSnapshot();
+  const historyQuery = useMarketMonitorHistory(historyEnabled);
 
   useEffect(() => {
-    if (forceRefresh && !snapshotQuery.isFetching) {
-      setForceRefresh(false);
+    if (snapshotQuery.data?.rule_snapshot.ready) {
+      setHistoryEnabled(true);
     }
-  }, [forceRefresh, snapshotQuery.isFetching]);
+  }, [snapshotQuery.data?.rule_snapshot.ready]);
 
   if (snapshotQuery.isLoading) {
     return (
-      <Card className="page-card" title="市场监控">
+      <Card className="page-card" title="Market Monitor">
         <Skeleton active paragraph={{ rows: 14 }} />
       </Card>
     );
@@ -94,15 +107,23 @@ export function MarketMonitorPage() {
     return (
       <Result
         status="error"
-        title="市场监控加载失败"
+        title="Market monitor failed to load"
         subTitle={extractErrorMessage(snapshotQuery.error)}
       />
     );
   }
 
   const snapshot = snapshotQuery.data;
-  const history = historyQuery.data;
-  const dataStatus = dataStatusQuery.data;
+  const history = historyEnabled ? historyQuery.data : undefined;
+  const ruleSnapshot = snapshot.rule_snapshot;
+  const overlay = snapshot.model_overlay;
+  const finalExecutionCard = snapshot.final_execution_card;
+  const sourceCoverage = ruleSnapshot.source_coverage;
+  const topStatus = useMemo(() => {
+    if (!ruleSnapshot.ready) return "Rule snapshot incomplete";
+    if (overlay.status === "applied") return "Rule snapshot + model overlay";
+    return "Rule snapshot only";
+  }, [overlay.status, ruleSnapshot.ready]);
 
   return (
     <Space direction="vertical" size="large" style={{ width: "100%" }}>
@@ -110,11 +131,11 @@ export function MarketMonitorPage() {
         className="page-card"
         title={
           <Space>
-            <span>市场监控</span>
-            <Tag color={regimeTagColor(snapshot.execution_card.regime_label)}>
-              {snapshot.execution_card.regime_label}
+            <span>Market Monitor</span>
+            <Tag color={regimeTagColor(finalExecutionCard?.regime_label ?? ruleSnapshot.base_regime_label)}>
+              {displayRegime(finalExecutionCard?.regime_label ?? ruleSnapshot.base_regime_label)}
             </Tag>
-            <Tag>{snapshot.execution_card.conflict_mode}</Tag>
+            <Tag>{topStatus}</Tag>
           </Space>
         }
         extra={
@@ -122,30 +143,43 @@ export function MarketMonitorPage() {
             className="page-card-extra-button ant-btn ant-btn-default"
             onClick={(event) => {
               event.preventDefault();
-              setForceRefresh(true);
               snapshotQuery.refetch();
-              historyQuery.refetch();
-              dataStatusQuery.refetch();
+              if (historyEnabled) {
+                historyQuery.refetch();
+              }
             }}
           >
-            <ReloadOutlined /> 刷新
+            <ReloadOutlined /> Refresh
           </a>
         }
       >
         <Space direction="vertical" size={12} style={{ width: "100%" }}>
           <Space wrap>
-            <Tag color="processing">数据时间 {formatDateTime(snapshot.timestamp)}</Tag>
-            <Tag color={snapshot.source_coverage.status === "full" ? "success" : "warning"}>
-              数据完整度 {snapshot.source_coverage.status}
+            <Tag color="processing">As of {formatDateTime(snapshot.timestamp)}</Tag>
+            <Tag color={sourceCoverage.status === "full" ? "success" : sourceCoverage.status === "partial" ? "warning" : "error"}>
+              Coverage {sourceCoverage.status}
             </Tag>
-            <Tag>观察日 {snapshot.as_of_date}</Tag>
+            <Tag>Trade date {snapshot.as_of_date}</Tag>
+            <Tag>Overlay {overlay.status}</Tag>
           </Space>
-          {snapshot.source_coverage.notes.length ? (
+          {!ruleSnapshot.ready ? (
+            <Alert
+              type="warning"
+              showIcon
+              message="Rule snapshot is incomplete"
+              description={
+                ruleSnapshot.missing_inputs.length
+                  ? `Missing inputs: ${ruleSnapshot.missing_inputs.join(", ")}`
+                  : "Required inputs are incomplete."
+              }
+            />
+          ) : null}
+          {sourceCoverage.notes.length ? (
             <Alert
               type="info"
               showIcon
-              message="当前为骨架版本"
-              description={snapshot.source_coverage.notes.join(" ")}
+              message="Source coverage notes"
+              description={sourceCoverage.notes.join(" ")}
             />
           ) : null}
         </Space>
@@ -153,98 +187,82 @@ export function MarketMonitorPage() {
 
       <Row gutter={[16, 16]}>
         <Col xs={24} lg={8}>
-          <ScoreCardBlock
-            title="长线环境卡"
-            score={snapshot.long_term_score.score}
-            zone={snapshot.long_term_score.zone}
-            delta1d={snapshot.long_term_score.delta_1d}
-            delta5d={snapshot.long_term_score.delta_5d}
-            slope={snapshot.long_term_score.slope_state}
-            action={snapshot.long_term_score.action}
-          />
+          <ScoreCardBlock title="Long-Term Rule Card" card={ruleSnapshot.long_term_score} />
         </Col>
         <Col xs={24} lg={8}>
-          <ScoreCardBlock
-            title="短线环境卡"
-            score={snapshot.short_term_score.score}
-            zone={snapshot.short_term_score.zone}
-            delta1d={snapshot.short_term_score.delta_1d}
-            delta5d={snapshot.short_term_score.delta_5d}
-            slope={snapshot.short_term_score.slope_state}
-            action={snapshot.short_term_score.action}
-          />
+          <ScoreCardBlock title="Short-Term Rule Card" card={ruleSnapshot.short_term_score} />
         </Col>
         <Col xs={24} lg={8}>
-          <ScoreCardBlock
-            title="系统风险卡"
-            score={snapshot.system_risk_score.score}
-            zone={snapshot.system_risk_score.zone}
-            delta1d={snapshot.system_risk_score.delta_1d}
-            delta5d={snapshot.system_risk_score.delta_5d}
-            slope={snapshot.system_risk_score.slope_state}
-            action={snapshot.system_risk_score.action}
-          />
+          <ScoreCardBlock title="System Risk Rule Card" card={ruleSnapshot.system_risk_score} />
         </Col>
       </Row>
 
       <Row gutter={[16, 16]}>
         <Col xs={24} xl={12}>
-          <Card className="page-card" title="风格有效性">
-            <Space direction="vertical" size={14} style={{ width: "100%" }}>
-              <div>
-                <Typography.Title level={5}>策略手法层</Typography.Title>
-                <Space wrap>
-                  <Tag color="success">
-                    最佳手法 {snapshot.style_effectiveness.tactic_layer.top_tactic}
-                  </Tag>
-                  <Tag color="error">
-                    回避手法 {snapshot.style_effectiveness.tactic_layer.avoid_tactic}
-                  </Tag>
-                </Space>
-              </div>
-              <div>
-                <Typography.Title level={5}>资产风格层</Typography.Title>
-                <Space wrap>
-                  {snapshot.style_effectiveness.asset_layer.preferred_assets.map((item) => (
-                    <Tag key={item} color="blue">{item}</Tag>
-                  ))}
-                  {snapshot.style_effectiveness.asset_layer.avoid_assets.map((item) => (
-                    <Tag key={item}>{item}</Tag>
-                  ))}
-                </Space>
-              </div>
+          <Card className="page-card" title="Rule Snapshot">
+            <Space direction="vertical" size={12} style={{ width: "100%" }}>
+              <Space wrap>
+                <Tag color={regimeTagColor(ruleSnapshot.base_regime_label)}>
+                  Base regime {displayRegime(ruleSnapshot.base_regime_label)}
+                </Tag>
+                <Tag>Ready {ruleSnapshot.ready ? "yes" : "no"}</Tag>
+              </Space>
+              <Descriptions size="small" column={1}>
+                <Descriptions.Item label="Exposure">
+                  {ruleSnapshot.base_execution_card?.total_exposure_range ?? "N/A"}
+                </Descriptions.Item>
+                <Descriptions.Item label="Conflict mode">
+                  {ruleSnapshot.base_execution_card?.conflict_mode ?? "N/A"}
+                </Descriptions.Item>
+                <Descriptions.Item label="Risk budget">
+                  {ruleSnapshot.base_execution_card?.daily_risk_budget ?? "N/A"}
+                </Descriptions.Item>
+                <Descriptions.Item label="Rule summary">
+                  {ruleSnapshot.base_execution_card?.summary ?? "N/A"}
+                </Descriptions.Item>
+              </Descriptions>
+              <Typography.Text strong>Missing inputs</Typography.Text>
+              <Space wrap>
+                {ruleSnapshot.missing_inputs.length ? (
+                  ruleSnapshot.missing_inputs.map((item) => <Tag key={item}>{item}</Tag>)
+                ) : (
+                  <Tag color="success">None</Tag>
+                )}
+              </Space>
+              <Typography.Text strong>Degraded factors</Typography.Text>
+              <List
+                size="small"
+                dataSource={ruleSnapshot.degraded_factors}
+                locale={{ emptyText: "None" }}
+                renderItem={(item) => <List.Item>{item}</List.Item>}
+              />
             </Space>
           </Card>
         </Col>
         <Col xs={24} xl={12}>
-          <Card className="page-card" title="执行动作卡">
+          <Card className="page-card" title="Model Overlay">
             <Space direction="vertical" size={12} style={{ width: "100%" }}>
               <Space wrap>
-                <Tag color={regimeTagColor(snapshot.execution_card.regime_label)}>
-                  {snapshot.execution_card.regime_label}
+                <Tag color={overlay.status === "applied" ? "success" : overlay.status === "error" ? "error" : "default"}>
+                  {overlay.status}
                 </Tag>
-                <Tag>{snapshot.execution_card.total_exposure_range}</Tag>
-                <Tag>单票上限 {snapshot.execution_card.single_position_cap}</Tag>
-                <Tag>风险预算 {snapshot.execution_card.daily_risk_budget}</Tag>
+                <Tag>Confidence {overlay.model_confidence ?? "N/A"}</Tag>
+                <Tag>Regime override {displayRegime(overlay.regime_override)}</Tag>
               </Space>
-              <Typography.Text>{snapshot.execution_card.tactic_preference}</Typography.Text>
+              <Typography.Text>{overlay.market_narrative || "No market narrative."}</Typography.Text>
+              <Typography.Text>{overlay.risk_narrative || "No risk narrative."}</Typography.Text>
+              <Typography.Text>{overlay.panic_narrative || "No panic narrative."}</Typography.Text>
+              <Typography.Text strong>Evidence sources</Typography.Text>
               <Space wrap>
-                <Tag color={snapshot.execution_card.new_position_allowed ? "success" : "error"}>
-                  新开仓 {snapshot.execution_card.new_position_allowed ? "允许" : "禁止"}
-                </Tag>
-                <Tag color={snapshot.execution_card.chase_breakout_allowed ? "success" : "error"}>
-                  追强势 {snapshot.execution_card.chase_breakout_allowed ? "允许" : "禁止"}
-                </Tag>
-                <Tag color={snapshot.execution_card.dip_buy_allowed ? "success" : "error"}>
-                  低吸 {snapshot.execution_card.dip_buy_allowed ? "允许" : "禁止"}
-                </Tag>
-                <Tag color={snapshot.execution_card.leverage_allowed ? "success" : "error"}>
-                  杠杆 {snapshot.execution_card.leverage_allowed ? "允许" : "禁止"}
-                </Tag>
+                {overlay.evidence_sources.length ? (
+                  overlay.evidence_sources.map((item) => <Tag key={item}>{item}</Tag>)
+                ) : (
+                  <Tag>None</Tag>
+                )}
               </Space>
-              <Typography.Text type="secondary">
-                {snapshot.execution_card.signal_confirmation.note}
-              </Typography.Text>
+              {overlay.notes.length ? (
+                <Alert type="info" showIcon message={overlay.notes.join(" ")} />
+              ) : null}
             </Space>
           </Card>
         </Col>
@@ -252,77 +270,131 @@ export function MarketMonitorPage() {
 
       <Row gutter={[16, 16]}>
         <Col xs={24} xl={14}>
-          <Card className="page-card" title="恐慌反转模块">
+          <Card className="page-card" title="Final Decision">
             <Space direction="vertical" size={12} style={{ width: "100%" }}>
               <Space wrap>
-                <Tag
-                  color={
-                    snapshot.panic_reversal_score.state === "panic_confirmed"
-                      ? "success"
-                      : snapshot.panic_reversal_score.state === "panic_watch"
-                        ? "warning"
-                        : "default"
-                  }
-                >
-                  {snapshot.panic_reversal_score.state}
+                <Tag color={regimeTagColor(finalExecutionCard?.regime_label)}>
+                  Final regime {displayRegime(finalExecutionCard?.regime_label)}
                 </Tag>
-                <Tag>{snapshot.panic_reversal_score.zone}</Tag>
-                <Tag>
-                  early entry {snapshot.panic_reversal_score.early_entry_allowed ? "允许" : "关闭"}
-                </Tag>
+                <Tag>Exposure {finalExecutionCard?.total_exposure_range ?? "N/A"}</Tag>
+                <Tag>Risk budget {finalExecutionCard?.daily_risk_budget ?? "N/A"}</Tag>
               </Space>
-              <Statistic
-                title="综合评分"
-                value={snapshot.panic_reversal_score.score}
-                precision={1}
-              />
-              <Progress percent={Math.round(snapshot.panic_reversal_score.score)} />
+              <Typography.Text>{finalExecutionCard?.summary ?? "No final action summary."}</Typography.Text>
               <Space wrap>
-                <Tag>恐慌 {snapshot.panic_reversal_score.panic_extreme_score.toFixed(1)}</Tag>
-                <Tag>衰竭 {snapshot.panic_reversal_score.selling_exhaustion_score.toFixed(1)}</Tag>
-                <Tag>日内反转 {snapshot.panic_reversal_score.intraday_reversal_score.toFixed(1)}</Tag>
-                <Tag>次日延续 {snapshot.panic_reversal_score.followthrough_confirmation_score.toFixed(1)}</Tag>
+                <Tag color={finalExecutionCard?.new_position_allowed ? "success" : "error"}>
+                  New positions {finalExecutionCard?.new_position_allowed ? "allowed" : "blocked"}
+                </Tag>
+                <Tag color={finalExecutionCard?.chase_breakout_allowed ? "success" : "error"}>
+                  Breakout chase {finalExecutionCard?.chase_breakout_allowed ? "allowed" : "blocked"}
+                </Tag>
+                <Tag color={finalExecutionCard?.dip_buy_allowed ? "success" : "error"}>
+                  Dip buy {finalExecutionCard?.dip_buy_allowed ? "allowed" : "blocked"}
+                </Tag>
+                <Tag color={finalExecutionCard?.overnight_allowed ? "success" : "error"}>
+                  Overnight {finalExecutionCard?.overnight_allowed ? "allowed" : "blocked"}
+                </Tag>
               </Space>
-              <Typography.Text>{snapshot.panic_reversal_score.action}</Typography.Text>
-              <Typography.Text type="secondary">
-                止损 {snapshot.panic_reversal_score.stop_loss}，止盈 {snapshot.panic_reversal_score.profit_rule}
-              </Typography.Text>
+              <Descriptions size="small" column={1}>
+                <Descriptions.Item label="Event risk">
+                  {finalExecutionCard?.event_risk_flag.index_level.active
+                    ? finalExecutionCard.event_risk_flag.index_level.type ?? "active"
+                    : "inactive"}
+                </Descriptions.Item>
+                <Descriptions.Item label="Stock event rule">
+                  {finalExecutionCard?.event_risk_flag.stock_level.rule ?? "N/A"}
+                </Descriptions.Item>
+              </Descriptions>
             </Space>
           </Card>
         </Col>
         <Col xs={24} xl={10}>
-          <Card className="page-card" title="数据状态">
-            <Space direction="vertical" size={12} style={{ width: "100%" }}>
-              <Tag color={dataStatus?.source_coverage.status === "full" ? "success" : "warning"}>
-                {dataStatus?.source_coverage.status ?? snapshot.source_coverage.status}
-              </Tag>
-              <List
-                size="small"
-                header="降级因子"
-                dataSource={snapshot.source_coverage.degraded_factors}
-                renderItem={(item) => <List.Item>{item}</List.Item>}
-              />
-            </Space>
+          <Card className="page-card" title="Panic Module">
+            {ruleSnapshot.panic_reversal_score ? (
+              <Space direction="vertical" size={12} style={{ width: "100%" }}>
+                <Space wrap>
+                  <Tag>{ruleSnapshot.panic_reversal_score.state}</Tag>
+                  <Tag>{ruleSnapshot.panic_reversal_score.zone}</Tag>
+                  <Tag>
+                    Early entry {ruleSnapshot.panic_reversal_score.early_entry_allowed ? "allowed" : "off"}
+                  </Tag>
+                </Space>
+                <Statistic
+                  title="Score"
+                  value={ruleSnapshot.panic_reversal_score.score}
+                  precision={1}
+                />
+                <Progress percent={Math.round(ruleSnapshot.panic_reversal_score.score)} />
+                <Typography.Text>{ruleSnapshot.panic_reversal_score.action}</Typography.Text>
+                <Typography.Text type="secondary">
+                  Stop {ruleSnapshot.panic_reversal_score.stop_loss} | Profit {ruleSnapshot.panic_reversal_score.profit_rule}
+                </Typography.Text>
+              </Space>
+            ) : (
+              <Alert type="warning" showIcon message="Panic module unavailable without a complete rule snapshot." />
+            )}
           </Card>
         </Col>
       </Row>
 
-      <Card className="page-card" title="最近趋势">
+      <Card className="page-card" title="Data Status">
+        <Space direction="vertical" size={12} style={{ width: "100%" }}>
+          <Tag color={sourceCoverage.status === "full" ? "success" : sourceCoverage.status === "partial" ? "warning" : "error"}>
+            {sourceCoverage.status}
+          </Tag>
+          <Typography.Text strong>Available sources</Typography.Text>
+          <Space wrap>
+            {["live_yfinance_daily", "nasdaq_100_static_universe", "fastapi_market_monitor"].map((item) => (
+              <Tag key={item}>{item}</Tag>
+            ))}
+          </Space>
+          <Typography.Text strong>Pending sources</Typography.Text>
+          <Space wrap>
+            {[
+              "intraday_panic_confirmation",
+              "put_call_ratio",
+              "vix_term_structure",
+              "calendar_events",
+              "web_search_overlay",
+            ].map((item) => (
+              <Tag key={item}>{item}</Tag>
+            ))}
+          </Space>
+        </Space>
+      </Card>
+
+      <Card
+        className="page-card"
+        title="Recent History"
+        extra={
+          !historyEnabled ? (
+            <a
+              className="page-card-extra-button ant-btn ant-btn-default"
+              onClick={(event) => {
+                event.preventDefault();
+                setHistoryEnabled(true);
+                historyQuery.refetch();
+              }}
+            >
+              Load History
+            </a>
+          ) : undefined
+        }
+      >
         <List
-          dataSource={history?.points || []}
-          locale={{ emptyText: "暂无历史数据" }}
+          dataSource={historyEnabled ? history?.points || [] : []}
+          locale={{ emptyText: historyEnabled ? "No history data available" : "History loads on demand to avoid duplicate live downloads." }}
           renderItem={(item) => (
             <List.Item>
               <Space wrap style={{ width: "100%", justifyContent: "space-between" }}>
                 <Space wrap>
                   <Typography.Text strong>{item.trade_date}</Typography.Text>
-                  <Tag color={regimeTagColor(item.regime_label)}>{item.regime_label}</Tag>
+                  <Tag color={regimeTagColor(item.regime_label)}>{displayRegime(item.regime_label)}</Tag>
                 </Space>
                 <Space wrap>
-                  <Tag>长线 {item.long_term_score.toFixed(1)}</Tag>
-                  <Tag>短线 {item.short_term_score.toFixed(1)}</Tag>
-                  <Tag>风险 {item.system_risk_score.toFixed(1)}</Tag>
-                  <Tag>恐慌反转 {item.panic_reversal_score.toFixed(1)}</Tag>
+                  <Tag>LT {item.long_term_score.toFixed(1)}</Tag>
+                  <Tag>ST {item.short_term_score.toFixed(1)}</Tag>
+                  <Tag>Risk {item.system_risk_score.toFixed(1)}</Tag>
+                  <Tag>Panic {item.panic_reversal_score.toFixed(1)}</Tag>
                 </Space>
               </Space>
             </List.Item>

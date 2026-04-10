@@ -166,12 +166,9 @@ def get_historical_backtest(job_id: str) -> HistoricalBacktestDetail:
 
 
 @app.get("/api/market-monitor/snapshot", response_model=MarketMonitorSnapshotResponse)
-def get_market_monitor_snapshot(
-    as_of_date: str | None = None, force_refresh: bool = False
-) -> MarketMonitorSnapshotResponse:
+def get_market_monitor_snapshot(as_of_date: str | None = None) -> MarketMonitorSnapshotResponse:
     request = MarketMonitorSnapshotRequest(
         as_of_date=as_of_date,
-        force_refresh=force_refresh,
     )
     return market_monitor_service.get_snapshot(request)
 

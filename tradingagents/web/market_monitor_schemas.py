@@ -1,12 +1,19 @@
 from datetime import date, datetime
-from typing import List, Literal, Optional
+from typing import Any, Literal, Optional
 
 from pydantic import BaseModel, Field, field_validator
 
 
-MarketRegimeLabel = Literal["绿灯", "黄灯", "黄绿灯-Swing", "橙灯", "红灯"]
-PanicState = Literal["无信号", "panic_watch", "panic_confirmed"]
+MarketRegimeLabel = Literal[
+    "green",
+    "yellow",
+    "yellow_green_swing",
+    "orange",
+    "red",
+]
+PanicState = Literal["none", "watch", "confirmed"]
 CoverageStatus = Literal["full", "partial", "degraded"]
+OverlayStatus = Literal["skipped", "applied", "error"]
 
 
 class MarketMonitorSnapshotRequest(BaseModel):
@@ -51,8 +58,8 @@ class MarketStyleAssetLayer(BaseModel):
     defensive: MarketStyleSignal
     energy_cyclical: MarketStyleSignal
     financials: MarketStyleSignal
-    preferred_assets: List[str] = Field(default_factory=list)
-    avoid_assets: List[str] = Field(default_factory=list)
+    preferred_assets: list[str] = Field(default_factory=list)
+    avoid_assets: list[str] = Field(default_factory=list)
 
 
 class MarketStyleEffectiveness(BaseModel):
@@ -75,7 +82,7 @@ class MarketIndexEventRisk(BaseModel):
 
 
 class MarketStockEventRisk(BaseModel):
-    earnings_stocks: List[str] = Field(default_factory=list)
+    earnings_stocks: list[str] = Field(default_factory=list)
     rule: Optional[str] = None
 
 
@@ -102,10 +109,11 @@ class MarketExecutionCard(BaseModel):
     single_position_cap: str
     daily_risk_budget: str
     tactic_preference: str
-    preferred_assets: List[str] = Field(default_factory=list)
-    avoid_assets: List[str] = Field(default_factory=list)
+    preferred_assets: list[str] = Field(default_factory=list)
+    avoid_assets: list[str] = Field(default_factory=list)
     signal_confirmation: MarketExecutionSignalConfirmation
     event_risk_flag: MarketEventRiskFlag
+    summary: str = ""
 
 
 class MarketPanicReversalCard(BaseModel):
@@ -128,21 +136,56 @@ class MarketPanicReversalCard(BaseModel):
 class MarketSourceCoverage(BaseModel):
     status: CoverageStatus
     data_freshness: str
-    degraded_factors: List[str] = Field(default_factory=list)
-    notes: List[str] = Field(default_factory=list)
+    degraded_factors: list[str] = Field(default_factory=list)
+    notes: list[str] = Field(default_factory=list)
+
+
+class MarketMonitorRuleSnapshot(BaseModel):
+    ready: bool
+    long_term_score: Optional[MarketScoreCard] = None
+    short_term_score: Optional[MarketScoreCard] = None
+    system_risk_score: Optional[MarketScoreCard] = None
+    style_effectiveness: Optional[MarketStyleEffectiveness] = None
+    panic_reversal_score: Optional[MarketPanicReversalCard] = None
+    base_regime_label: Optional[MarketRegimeLabel] = None
+    base_execution_card: Optional[MarketExecutionCard] = None
+    base_event_risk_flag: MarketEventRiskFlag
+    source_coverage: MarketSourceCoverage
+    missing_inputs: list[str] = Field(default_factory=list)
+    degraded_factors: list[str] = Field(default_factory=list)
+    key_indicators: dict[str, Any] = Field(default_factory=dict)
+
+
+class MarketExecutionAdjustments(BaseModel):
+    regime_label: Optional[MarketRegimeLabel] = None
+    conflict_mode: Optional[str] = None
+    new_position_allowed: Optional[bool] = None
+    chase_breakout_allowed: Optional[bool] = None
+    dip_buy_allowed: Optional[bool] = None
+    overnight_allowed: Optional[bool] = None
+    daily_risk_budget: Optional[str] = None
+    summary: Optional[str] = None
+
+
+class MarketMonitorModelOverlay(BaseModel):
+    status: OverlayStatus
+    regime_override: Optional[MarketRegimeLabel] = None
+    execution_adjustments: Optional[MarketExecutionAdjustments] = None
+    event_risk_override: Optional[MarketEventRiskFlag] = None
+    market_narrative: str = ""
+    risk_narrative: str = ""
+    panic_narrative: str = ""
+    evidence_sources: list[str] = Field(default_factory=list)
+    model_confidence: Optional[float] = Field(default=None, ge=0, le=1)
+    notes: list[str] = Field(default_factory=list)
 
 
 class MarketMonitorSnapshotResponse(BaseModel):
     timestamp: datetime
     as_of_date: date
-    long_term_score: MarketScoreCard
-    short_term_score: MarketScoreCard
-    system_risk_score: MarketScoreCard
-    style_effectiveness: MarketStyleEffectiveness
-    execution_card: MarketExecutionCard
-    panic_reversal_score: MarketPanicReversalCard
-    event_risk_flag: MarketEventRiskFlag
-    source_coverage: MarketSourceCoverage
+    rule_snapshot: MarketMonitorRuleSnapshot
+    model_overlay: MarketMonitorModelOverlay
+    final_execution_card: Optional[MarketExecutionCard] = None
 
 
 class MarketHistoryPoint(BaseModel):
@@ -156,11 +199,11 @@ class MarketHistoryPoint(BaseModel):
 
 class MarketMonitorHistoryResponse(BaseModel):
     as_of_date: date
-    points: List[MarketHistoryPoint] = Field(default_factory=list)
+    points: list[MarketHistoryPoint] = Field(default_factory=list)
 
 
 class MarketMonitorDataStatusResponse(BaseModel):
     as_of_date: date
     source_coverage: MarketSourceCoverage
-    available_sources: List[str] = Field(default_factory=list)
-    pending_sources: List[str] = Field(default_factory=list)
+    available_sources: list[str] = Field(default_factory=list)
+    pending_sources: list[str] = Field(default_factory=list)
