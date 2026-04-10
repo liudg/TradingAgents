@@ -7,7 +7,7 @@ from typing import Any
 from openai import OpenAI
 
 from tradingagents.default_config import DEFAULT_CONFIG
-from tradingagents.web.market_monitor_schemas import (
+from .schemas import (
     MarketEventRiskFlag,
     MarketExecutionAdjustments,
     MarketIndexEventRisk,

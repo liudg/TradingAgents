@@ -9,7 +9,7 @@ import yfinance as yf
 
 from tradingagents.dataflows import stockstats_utils, yfinance_news
 from tradingagents.dataflows.yfinance_proxy import configure_yfinance_proxy
-from tradingagents.web.backtest_manager import BacktestJobManager
+from tradingagents.web.backtest.manager import BacktestJobManager
 
 
 class YFinanceProxyConfigTests(unittest.TestCase):
@@ -104,7 +104,7 @@ class YFinanceProxyConfigTests(unittest.TestCase):
         yf_mock = MagicMock()
         yf_mock.download.return_value = frame
 
-        with patch("tradingagents.web.backtest_manager.get_yf", return_value=yf_mock) as get_yf_mock:
+        with patch("tradingagents.web.backtest.manager.get_yf", return_value=yf_mock) as get_yf_mock:
             data = BacktestJobManager._fetch_price_history(
                 "AAPL",
                 date(2024, 1, 1),

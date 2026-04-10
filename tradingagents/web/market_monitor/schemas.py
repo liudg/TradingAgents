@@ -183,6 +183,7 @@ class MarketMonitorModelOverlay(BaseModel):
 class MarketMonitorSnapshotResponse(BaseModel):
     timestamp: datetime
     as_of_date: date
+    trace_id: Optional[str] = None
     rule_snapshot: MarketMonitorRuleSnapshot
     model_overlay: MarketMonitorModelOverlay
     final_execution_card: Optional[MarketExecutionCard] = None
@@ -207,3 +208,35 @@ class MarketMonitorDataStatusResponse(BaseModel):
     source_coverage: MarketSourceCoverage
     available_sources: list[str] = Field(default_factory=list)
     pending_sources: list[str] = Field(default_factory=list)
+
+
+class MarketMonitorTraceLogEntry(BaseModel):
+    line_no: int
+    timestamp: Optional[datetime] = None
+    level: str
+    content: str
+
+
+class MarketMonitorTraceSummary(BaseModel):
+    trace_id: str
+    as_of_date: date
+    status: str
+    force_refresh: bool = False
+    started_at: datetime
+    finished_at: Optional[datetime] = None
+    duration_ms: Optional[int] = None
+    rule_ready: Optional[bool] = None
+    base_regime_label: Optional[MarketRegimeLabel] = None
+    final_regime_label: Optional[MarketRegimeLabel] = None
+    overlay_status: Optional[OverlayStatus] = None
+
+
+class MarketMonitorTraceDetail(MarketMonitorTraceSummary):
+    request: dict[str, Any] = Field(default_factory=dict)
+    cache_decision: dict[str, Any] = Field(default_factory=dict)
+    dataset_summary: dict[str, Any] = Field(default_factory=dict)
+    rule_snapshot_summary: dict[str, Any] = Field(default_factory=dict)
+    overlay_summary: dict[str, Any] = Field(default_factory=dict)
+    final_execution_summary: dict[str, Any] = Field(default_factory=dict)
+    response_summary: dict[str, Any] = Field(default_factory=dict)
+    error: dict[str, Any] = Field(default_factory=dict)

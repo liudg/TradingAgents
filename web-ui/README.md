@@ -7,7 +7,7 @@
 先启动后端 API：
 
 ```bash
-python -m tradingagents.web.app
+python -m tradingagents.web.api.app
 ```
 
 再启动前端：

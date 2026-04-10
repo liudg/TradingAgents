@@ -9,8 +9,8 @@ import pandas as pd
 from fastapi.testclient import TestClient
 
 from tradingagents.default_config import DEFAULT_CONFIG
-from tradingagents.web.app import app, backtest_manager
-from tradingagents.web.backtest_manager import BacktestJobManager
+from tradingagents.web.api.app import app, backtest_manager
+from tradingagents.web.backtest.manager import BacktestJobManager
 
 
 class DummyBacktestLLM:
@@ -111,10 +111,10 @@ class BacktestWebApiTests(unittest.TestCase):
             add_calls.append(list(situations_and_advice))
 
         with patch(
-            "tradingagents.web.backtest_manager.TradingAgentsGraph",
+            "tradingagents.web.backtest.manager.TradingAgentsGraph",
             DummyBacktestGraph,
         ), patch(
-            "tradingagents.web.backtest_manager.BacktestJobManager._fetch_price_history",
+            "tradingagents.web.backtest.manager.BacktestJobManager._fetch_price_history",
             return_value=self._price_frame(),
         ), patch(
             "tradingagents.agents.utils.memory.FinancialSituationMemory.add_situations",
@@ -189,16 +189,16 @@ class BacktestWebApiTests(unittest.TestCase):
             add_calls.append(list(situations_and_advice))
 
         with patch(
-            "tradingagents.web.backtest_manager.TradingAgentsGraph",
+            "tradingagents.web.backtest.manager.TradingAgentsGraph",
             DummyBacktestGraph,
         ), patch(
-            "tradingagents.web.backtest_manager.BacktestJobManager._fetch_price_history",
+            "tradingagents.web.backtest.manager.BacktestJobManager._fetch_price_history",
             return_value=self._price_frame(),
         ), patch(
             "tradingagents.agents.utils.memory.FinancialSituationMemory.add_situations",
             new=fake_add_situations,
         ), patch(
-            "tradingagents.web.backtest_manager.BacktestJobManager._commit_memory_entries",
+            "tradingagents.web.backtest.manager.BacktestJobManager._commit_memory_entries",
             side_effect=RuntimeError("commit failed"),
         ):
             create_response = self.client.post(

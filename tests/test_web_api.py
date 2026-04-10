@@ -9,8 +9,8 @@ from unittest.mock import patch
 from fastapi.testclient import TestClient
 from langchain_core.messages import AIMessage, HumanMessage, ToolCall, ToolMessage
 
-from tradingagents.web.app import app, job_manager
-from tradingagents.web.job_manager import AnalysisJobManager
+from tradingagents.web.api.app import app, job_manager
+from tradingagents.web.analysis.manager import AnalysisJobManager
 
 
 class DummyPropagator:
@@ -177,7 +177,7 @@ class WebApiTests(unittest.TestCase):
 
     def test_create_and_poll_job_until_completed(self):
         with patch(
-            "tradingagents.web.job_manager.TradingAgentsGraph",
+            "tradingagents.web.analysis.manager.TradingAgentsGraph",
             DummyTradingAgentsGraph,
         ):
             create_response = self.client.post(
@@ -313,7 +313,7 @@ class WebApiTests(unittest.TestCase):
 
     def test_selected_analysts_are_normalized_and_same_day_jobs_are_isolated(self):
         with patch(
-            "tradingagents.web.job_manager.TradingAgentsGraph",
+            "tradingagents.web.analysis.manager.TradingAgentsGraph",
             DummyTradingAgentsGraph,
         ):
             payload = {
@@ -345,7 +345,7 @@ class WebApiTests(unittest.TestCase):
 
     def test_create_job_with_codex_provider_keeps_codex_reasoning_effort(self):
         with patch(
-            "tradingagents.web.job_manager.TradingAgentsGraph",
+            "tradingagents.web.analysis.manager.TradingAgentsGraph",
             DummyTradingAgentsGraph,
         ):
             create_response = self.client.post(
@@ -386,7 +386,7 @@ class WebApiTests(unittest.TestCase):
 
     def test_failed_job_persists_log_and_snapshot(self):
         with patch(
-            "tradingagents.web.job_manager.TradingAgentsGraph",
+            "tradingagents.web.analysis.manager.TradingAgentsGraph",
             FailingTradingAgentsGraph,
         ):
             create_response = self.client.post(

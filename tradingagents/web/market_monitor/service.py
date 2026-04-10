@@ -2,18 +2,19 @@ from __future__ import annotations
 
 from copy import deepcopy
 from datetime import date, datetime
+from pathlib import Path
 from typing import Any
 
 import pandas as pd
 
-from tradingagents.web.market_monitor_cache import (
+from .cache import (
     latest_symbol_cache_mtime,
     load_snapshot_cache,
     save_snapshot_cache,
 )
-from tradingagents.web.market_monitor_data import _expected_market_close_date, build_market_dataset
-from tradingagents.web.market_monitor_llm import MarketMonitorLLMService
-from tradingagents.web.market_monitor_schemas import (
+from .data import _expected_market_close_date, build_market_dataset
+from .llm import MarketMonitorLLMService
+from .schemas import (
     MarketEventRiskFlag,
     MarketExecutionCard,
     MarketExecutionSignalConfirmation,
@@ -25,6 +26,9 @@ from tradingagents.web.market_monitor_schemas import (
     MarketMonitorRuleSnapshot,
     MarketMonitorSnapshotRequest,
     MarketMonitorSnapshotResponse,
+    MarketMonitorTraceDetail,
+    MarketMonitorTraceLogEntry,
+    MarketMonitorTraceSummary,
     MarketPanicReversalCard,
     MarketScoreCard,
     MarketSourceCoverage,
@@ -34,7 +38,7 @@ from tradingagents.web.market_monitor_schemas import (
     MarketStyleSignal,
     MarketStyleTacticLayer,
 )
-from tradingagents.web.market_monitor_scoring import (
+from .scoring import (
     LONG_TERM_ZONES,
     SHORT_TERM_ZONES,
     SYSTEM_RISK_ZONES,
@@ -46,7 +50,8 @@ from tradingagents.web.market_monitor_scoring import (
     score_tactic_layer,
     summarize_score,
 )
-from tradingagents.web.market_monitor_universe import get_market_monitor_universe
+from .trace import MarketMonitorTraceLogger, MarketMonitorTraceStore
+from .universe import get_market_monitor_universe
 
 
 class MarketMonitorService:
@@ -54,39 +59,188 @@ class MarketMonitorService:
 
     _LIVE_CACHE_TTL_SECONDS = 300
 
-    def __init__(self) -> None:
+    def __init__(self, trace_root: Path | None = None) -> None:
         self._overlay_service = MarketMonitorLLMService()
         self._dataset_cache: dict[date, dict[str, Any]] = {}
+        self._trace_store = MarketMonitorTraceStore(trace_root)
 
     def get_snapshot(self, request: MarketMonitorSnapshotRequest) -> MarketMonitorSnapshotResponse:
         as_of_date = request.as_of_date or date.today()
         universe = get_market_monitor_universe()
-        if not request.force_refresh:
-            cached_snapshot = load_snapshot_cache(as_of_date)
-            if cached_snapshot is not None and self._is_snapshot_cache_usable(cached_snapshot, as_of_date, universe):
-                snapshot = MarketMonitorSnapshotResponse.model_validate(cached_snapshot)
-                return snapshot
-
-        dataset = self._get_dataset(universe, as_of_date, force_refresh=request.force_refresh)
-        rule_snapshot = self._build_rule_snapshot(dataset, universe)
-        context_queries = self._build_context_queries(rule_snapshot)
-        model_overlay = self._overlay_service.create_overlay(rule_snapshot, as_of_date.isoformat(), context_queries)
-        final_execution_card = self._merge_overlay(rule_snapshot, model_overlay)
-
-        response = MarketMonitorSnapshotResponse(
-            timestamp=datetime.now(),
-            as_of_date=as_of_date,
-            rule_snapshot=rule_snapshot,
-            model_overlay=model_overlay,
-            final_execution_card=final_execution_card,
+        trace = self._trace_store.create_logger(as_of_date, request.force_refresh)
+        trace.log_event(
+            "Request",
+            f"Snapshot request started for {as_of_date.isoformat()} (force_refresh={request.force_refresh})",
         )
-        if self._is_snapshot_cacheable(response):
-            save_snapshot_cache(as_of_date, response.model_dump(mode="json"))
-        return response
+        trace.set_stage(
+            "request",
+            {
+                "as_of_date": as_of_date.isoformat(),
+                "force_refresh": request.force_refresh,
+                "universe_sizes": {
+                    "all_symbols": len(universe["all_symbols"]),
+                    "market_proxies": len(universe["market_proxies"]),
+                    "sector_etfs": len(universe["sector_etfs"]),
+                },
+            },
+        )
+
+        try:
+            if request.force_refresh:
+                trace.log_event("Cache", "Snapshot cache bypassed because force_refresh=True")
+                trace.set_stage(
+                    "cache_decision",
+                    {
+                        "snapshot_cache_checked": False,
+                        "snapshot_cache_hit": False,
+                        "dataset_cache_hit": False,
+                        "reason": "force_refresh",
+                    },
+                )
+            else:
+                cached_snapshot = load_snapshot_cache(as_of_date)
+                snapshot_cache_hit = False
+                cache_reason = "snapshot_cache_miss"
+                if cached_snapshot is not None:
+                    snapshot_cache_hit = self._is_snapshot_cache_usable(cached_snapshot, as_of_date, universe)
+                    cache_reason = "snapshot_cache_hit" if snapshot_cache_hit else "snapshot_cache_unusable"
+                trace.log_event("Cache", f"Snapshot cache decision: {cache_reason}")
+                if snapshot_cache_hit:
+                    snapshot = MarketMonitorSnapshotResponse.model_validate(cached_snapshot)
+                    snapshot.trace_id = trace.trace_id
+                    trace.set_stage(
+                        "dataset_summary",
+                        {
+                            "source": "snapshot_cache",
+                            "available_symbol_count": None,
+                            "market_proxy_count": len(universe["market_proxies"]),
+                            "missing_required_symbols": list(snapshot.rule_snapshot.missing_inputs),
+                            "available_symbols_sample": [],
+                            "symbol_rows": {},
+                        },
+                    )
+                    trace.set_stage(
+                        "rule_snapshot_summary",
+                        self._summarize_rule_snapshot(snapshot.rule_snapshot),
+                    )
+                    trace.set_stage(
+                        "overlay_summary",
+                        self._summarize_overlay(snapshot.model_overlay, []),
+                    )
+                    trace.set_stage(
+                        "final_execution_summary",
+                        self._summarize_final_execution(
+                            snapshot.rule_snapshot,
+                            snapshot.model_overlay,
+                            snapshot.final_execution_card,
+                        ),
+                    )
+                    trace.set_summary_fields(
+                        rule_ready=snapshot.rule_snapshot.ready,
+                        base_regime_label=snapshot.rule_snapshot.base_regime_label,
+                        final_regime_label=(
+                            snapshot.final_execution_card.regime_label if snapshot.final_execution_card else None
+                        ),
+                        overlay_status=snapshot.model_overlay.status,
+                    )
+                    trace.set_stage(
+                        "cache_decision",
+                        {
+                            "snapshot_cache_checked": True,
+                            "snapshot_cache_hit": True,
+                            "dataset_cache_hit": False,
+                            "reason": cache_reason,
+                        },
+                    )
+                    trace.log_event("Response", "Returning cached snapshot")
+                    trace.complete(
+                        {
+                            "served_from_snapshot_cache": True,
+                            "snapshot_cache_written": False,
+                            "trace_id": trace.trace_id,
+                        }
+                    )
+                    return snapshot
+                trace.set_stage(
+                    "cache_decision",
+                    {
+                        "snapshot_cache_checked": True,
+                        "snapshot_cache_hit": False,
+                        "dataset_cache_hit": False,
+                        "reason": cache_reason,
+                    },
+                )
+
+            dataset, dataset_meta = self._get_dataset(
+                universe,
+                as_of_date,
+                force_refresh=request.force_refresh,
+                trace=trace,
+            )
+            trace.set_stage("dataset_summary", dataset_meta)
+            rule_snapshot = self._build_rule_snapshot(dataset, universe)
+            rule_summary = self._summarize_rule_snapshot(rule_snapshot)
+            trace.set_stage("rule_snapshot_summary", rule_summary)
+            trace.set_summary_fields(
+                rule_ready=rule_snapshot.ready,
+                base_regime_label=rule_snapshot.base_regime_label,
+            )
+            trace.log_event(
+                "Rule",
+                f"Rule snapshot ready={rule_snapshot.ready}, base_regime={rule_snapshot.base_regime_label}",
+            )
+            context_queries = self._build_context_queries(rule_snapshot)
+            trace.log_event("Overlay", f"Generated {len(context_queries)} context queries")
+            model_overlay = self._overlay_service.create_overlay(
+                rule_snapshot,
+                as_of_date.isoformat(),
+                context_queries,
+            )
+            overlay_summary = self._summarize_overlay(model_overlay, context_queries)
+            trace.set_stage("overlay_summary", overlay_summary)
+            trace.set_summary_fields(overlay_status=model_overlay.status)
+            trace.log_event("Overlay", f"Overlay status={model_overlay.status}")
+            final_execution_card = self._merge_overlay(rule_snapshot, model_overlay)
+            final_summary = self._summarize_final_execution(rule_snapshot, model_overlay, final_execution_card)
+            trace.set_stage("final_execution_summary", final_summary)
+            trace.set_summary_fields(final_regime_label=final_summary.get("final_regime_label"))
+            trace.log_event(
+                "Merge",
+                f"Final execution regime={final_summary.get('final_regime_label')}, overrides={len(final_summary.get('overridden_fields', []))}",
+            )
+
+            response = MarketMonitorSnapshotResponse(
+                timestamp=datetime.now(),
+                as_of_date=as_of_date,
+                trace_id=trace.trace_id,
+                rule_snapshot=rule_snapshot,
+                model_overlay=model_overlay,
+                final_execution_card=final_execution_card,
+            )
+            snapshot_cache_written = False
+            if self._is_snapshot_cacheable(response):
+                save_snapshot_cache(as_of_date, response.model_dump(mode="json"))
+                snapshot_cache_written = True
+                trace.log_event("Cache", "Snapshot cache saved")
+            else:
+                trace.log_event("Cache", "Snapshot cache skipped because response is not cacheable")
+            trace.log_event("Response", "Snapshot request completed")
+            trace.complete(
+                {
+                    "served_from_snapshot_cache": False,
+                    "snapshot_cache_written": snapshot_cache_written,
+                    "trace_id": trace.trace_id,
+                }
+            )
+            return response
+        except Exception as exc:
+            trace.log_event("Error", f"{exc.__class__.__name__}: {exc}")
+            trace.fail("snapshot", exc)
+            raise
 
     def get_history(self, as_of_date: date, days: int = 10) -> MarketMonitorHistoryResponse:
         universe = get_market_monitor_universe()
-        dataset = self._get_dataset(universe, as_of_date)
+        dataset, _ = self._get_dataset(universe, as_of_date)
         core_data = dataset["core"]
         missing_required = self._missing_required_symbols(core_data)
         if missing_required:
@@ -148,7 +302,7 @@ class MarketMonitorService:
                 ],
             )
 
-        dataset = self._get_dataset(universe, as_of_date)
+        dataset, _ = self._get_dataset(universe, as_of_date)
         rule_snapshot = self._build_rule_snapshot(dataset, universe)
         return MarketMonitorDataStatusResponse(
             as_of_date=as_of_date,
@@ -167,24 +321,182 @@ class MarketMonitorService:
             ],
         )
 
+    def list_traces(
+        self,
+        as_of_date: date | None = None,
+        status: str | None = None,
+        limit: int = 20,
+    ) -> list[MarketMonitorTraceSummary]:
+        return self._trace_store.list_traces(as_of_date=as_of_date, status=status, limit=limit)
+
+    def get_trace_detail(self, trace_id: str) -> MarketMonitorTraceDetail:
+        return self._trace_store.get_trace_detail(trace_id)
+
+    def list_trace_logs(self, trace_id: str) -> list[MarketMonitorTraceLogEntry]:
+        return self._trace_store.list_trace_logs(trace_id)
+
     def _get_dataset(
         self,
         universe: dict[str, list[str]],
         as_of_date: date,
         force_refresh: bool = False,
-    ) -> dict[str, dict[str, pd.DataFrame]]:
+        trace: MarketMonitorTraceLogger | None = None,
+    ) -> tuple[dict[str, dict[str, pd.DataFrame]], dict[str, Any]]:
         if force_refresh:
             dataset = build_market_dataset(universe, as_of_date, force_refresh=True)
             self._save_dataset_cache(as_of_date, dataset, universe)
-            return dataset
+            meta = self._build_dataset_summary(dataset, universe, "live_refresh")
+            if trace is not None:
+                trace.log_event("Dataset", "Dataset rebuilt with force_refresh=True")
+                self._merge_trace_stage(trace, "cache_decision", {"dataset_cache_hit": False})
+            return dataset, meta
 
         cached_entry = self._dataset_cache.get(as_of_date)
         if cached_entry is not None and self._is_dataset_cache_usable(cached_entry, as_of_date, universe):
-            return cached_entry["dataset"]
+            dataset = cached_entry["dataset"]
+            meta = self._build_dataset_summary(dataset, universe, "memory_cache")
+            if trace is not None:
+                trace.log_event("Dataset", "Reused in-memory dataset cache")
+                self._merge_trace_stage(trace, "cache_decision", {"dataset_cache_hit": True})
+            return dataset, meta
 
         dataset = build_market_dataset(universe, as_of_date, force_refresh=False)
         self._save_dataset_cache(as_of_date, dataset, universe)
-        return dataset
+        meta = self._build_dataset_summary(dataset, universe, "live_request")
+        if trace is not None:
+            trace.log_event("Dataset", "Built dataset from market data source")
+            self._merge_trace_stage(trace, "cache_decision", {"dataset_cache_hit": False})
+        return dataset, meta
+
+    def _build_dataset_summary(
+        self,
+        dataset: dict[str, dict[str, pd.DataFrame]],
+        universe: dict[str, list[str]],
+        source: str,
+    ) -> dict[str, Any]:
+        core_data = dataset.get("core", {})
+        available_symbols = sorted(
+            symbol for symbol, frame in core_data.items() if frame is not None and not frame.empty
+        )
+        missing_required = self._missing_required_symbols(core_data)
+        sample_symbols = ["SPY", "QQQ", "IWM", "^VIX"]
+        symbol_rows = {
+            symbol: self._summarize_frame(core_data.get(symbol))
+            for symbol in sample_symbols
+            if symbol in core_data
+        }
+        return {
+            "source": source,
+            "available_symbol_count": len(available_symbols),
+            "market_proxy_count": len(universe["market_proxies"]),
+            "missing_required_symbols": missing_required,
+            "available_symbols_sample": available_symbols[:12],
+            "symbol_rows": symbol_rows,
+        }
+
+    def _summarize_rule_snapshot(self, rule_snapshot: MarketMonitorRuleSnapshot) -> dict[str, Any]:
+        return {
+            "ready": rule_snapshot.ready,
+            "base_regime_label": rule_snapshot.base_regime_label,
+            "missing_inputs": list(rule_snapshot.missing_inputs),
+            "degraded_factors": list(rule_snapshot.degraded_factors),
+            "source_coverage": rule_snapshot.source_coverage.model_dump(mode="json"),
+            "key_indicators": rule_snapshot.key_indicators,
+            "long_term_score": (
+                rule_snapshot.long_term_score.model_dump(mode="json")
+                if rule_snapshot.long_term_score
+                else None
+            ),
+            "short_term_score": (
+                rule_snapshot.short_term_score.model_dump(mode="json")
+                if rule_snapshot.short_term_score
+                else None
+            ),
+            "system_risk_score": (
+                rule_snapshot.system_risk_score.model_dump(mode="json")
+                if rule_snapshot.system_risk_score
+                else None
+            ),
+        }
+
+    def _summarize_overlay(
+        self,
+        model_overlay: MarketMonitorModelOverlay,
+        context_queries: list[str],
+    ) -> dict[str, Any]:
+        return {
+            "status": model_overlay.status,
+            "query_count": len(context_queries),
+            "queries": context_queries,
+            "regime_override": model_overlay.regime_override,
+            "execution_adjustments": (
+                model_overlay.execution_adjustments.model_dump(mode="json")
+                if model_overlay.execution_adjustments
+                else None
+            ),
+            "event_risk_override": (
+                model_overlay.event_risk_override.model_dump(mode="json")
+                if model_overlay.event_risk_override
+                else None
+            ),
+            "evidence_sources": list(model_overlay.evidence_sources),
+            "notes": list(model_overlay.notes),
+            "model_confidence": model_overlay.model_confidence,
+        }
+
+    def _summarize_final_execution(
+        self,
+        rule_snapshot: MarketMonitorRuleSnapshot,
+        model_overlay: MarketMonitorModelOverlay,
+        final_execution_card: MarketExecutionCard | None,
+    ) -> dict[str, Any]:
+        overridden_fields = []
+        if model_overlay.regime_override:
+            overridden_fields.append("regime_override")
+        if model_overlay.execution_adjustments:
+            overridden_fields.extend(model_overlay.execution_adjustments.model_dump(exclude_none=True).keys())
+        if model_overlay.event_risk_override:
+            overridden_fields.append("event_risk_override")
+        return {
+            "base_regime_label": rule_snapshot.base_execution_card.regime_label
+            if rule_snapshot.base_execution_card
+            else None,
+            "final_regime_label": final_execution_card.regime_label if final_execution_card else None,
+            "base_execution_card": (
+                rule_snapshot.base_execution_card.model_dump(mode="json")
+                if rule_snapshot.base_execution_card
+                else None
+            ),
+            "final_execution_card": (
+                final_execution_card.model_dump(mode="json")
+                if final_execution_card
+                else None
+            ),
+            "overridden_fields": overridden_fields,
+        }
+
+    def _summarize_frame(self, frame: pd.DataFrame | None) -> dict[str, Any]:
+        if frame is None or frame.empty:
+            return {"rows": 0, "last_trade_date": None}
+        last_trade_date = frame.index.max()
+        return {
+            "rows": int(len(frame.index)),
+            "last_trade_date": (
+                last_trade_date.date().isoformat() if hasattr(last_trade_date, "date") else str(last_trade_date)
+            ),
+            "columns": sorted(str(column) for column in frame.columns),
+        }
+
+    def _merge_trace_stage(
+        self,
+        trace: MarketMonitorTraceLogger,
+        stage_name: str,
+        payload: dict[str, Any],
+    ) -> None:
+        existing = trace.payload.get(stage_name)
+        stage_payload = dict(existing) if isinstance(existing, dict) else {}
+        stage_payload.update(payload)
+        trace.set_stage(stage_name, stage_payload)
 
     def _save_dataset_cache(
         self,

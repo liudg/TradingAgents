@@ -8,7 +8,7 @@ import pandas as pd
 from yfinance.exceptions import YFRateLimitError
 
 from tradingagents.dataflows.yfinance_proxy import get_yf
-from tradingagents.web.market_monitor_cache import load_symbol_daily_cache, save_symbol_daily_cache
+from .cache import load_symbol_daily_cache, save_symbol_daily_cache
 
 
 def _normalize_ohlcv_frame(frame: pd.DataFrame) -> pd.DataFrame:

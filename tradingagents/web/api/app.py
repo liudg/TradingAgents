@@ -6,9 +6,9 @@ from datetime import date
 
 from cli.models import AnalystType
 from tradingagents.default_config import DEFAULT_CONFIG
-from tradingagents.web.backtest_manager import BacktestJobManager
+from tradingagents.web.backtest.manager import BacktestJobManager
 from tradingagents.llm_clients.model_catalog import MODEL_OPTIONS
-from tradingagents.web.job_manager import AnalysisJobManager
+from tradingagents.web.analysis.manager import AnalysisJobManager
 from tradingagents.web.schemas import (
     AnalysisJobCreateResponse,
     AnalysisJobLogEntry,
@@ -23,13 +23,16 @@ from tradingagents.web.schemas import (
     HistoricalReportSummary,
     MetadataOptionsResponse,
 )
-from tradingagents.web.market_monitor_schemas import (
+from tradingagents.web.market_monitor.schemas import (
     MarketMonitorDataStatusResponse,
     MarketMonitorHistoryResponse,
     MarketMonitorSnapshotRequest,
     MarketMonitorSnapshotResponse,
+    MarketMonitorTraceDetail,
+    MarketMonitorTraceLogEntry,
+    MarketMonitorTraceSummary,
 )
-from tradingagents.web.market_monitor_service import MarketMonitorService
+from tradingagents.web.market_monitor.service import MarketMonitorService
 
 
 load_dotenv()
@@ -201,8 +204,48 @@ def get_market_monitor_data_status(
     return market_monitor_service.get_data_status(target_date)
 
 
+@app.get(
+    "/api/market-monitor/traces",
+    response_model=list[MarketMonitorTraceSummary],
+)
+def list_market_monitor_traces(
+    as_of_date: str | None = None,
+    status: str | None = None,
+    limit: int = 20,
+) -> list[MarketMonitorTraceSummary]:
+    request = MarketMonitorSnapshotRequest(as_of_date=as_of_date)
+    target_date = request.as_of_date
+    return market_monitor_service.list_traces(as_of_date=target_date, status=status, limit=limit)
+
+
+@app.get(
+    "/api/market-monitor/traces/{trace_id}",
+    response_model=MarketMonitorTraceDetail,
+)
+def get_market_monitor_trace(trace_id: str) -> MarketMonitorTraceDetail:
+    try:
+        return market_monitor_service.get_trace_detail(trace_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="Market monitor trace not found") from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
+@app.get(
+    "/api/market-monitor/traces/{trace_id}/logs",
+    response_model=list[MarketMonitorTraceLogEntry],
+)
+def get_market_monitor_trace_logs(trace_id: str) -> list[MarketMonitorTraceLogEntry]:
+    try:
+        return market_monitor_service.list_trace_logs(trace_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="Market monitor trace not found") from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
 def run_api() -> None:
-    uvicorn.run("tradingagents.web.app:app", host="0.0.0.0", port=8000)
+    uvicorn.run("tradingagents.web.api.app:app", host="0.0.0.0", port=8000)
 
 
 if __name__ == "__main__":

@@ -16,7 +16,7 @@ from tradingagents.dataflows.yfinance_proxy import get_yf
 from tradingagents.default_config import DEFAULT_CONFIG
 from tradingagents.graph.trading_graph import TradingAgentsGraph
 from tradingagents.reporting import save_report_to_disk
-from tradingagents.web.job_manager import AnalysisJobManager
+from tradingagents.web.analysis.manager import AnalysisJobManager
 from tradingagents.web.schemas import (
     AnalysisJobLogEntry,
     BacktestJobRequest,

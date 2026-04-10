@@ -18,7 +18,7 @@ Set-Location $repoRoot
 
 $uvicornArgs = @(
     "-m", "uvicorn",
-    "tradingagents.web.app:app",
+    "tradingagents.web.api.app:app",
     "--host", $BindHost,
     "--port", "$Port"
 )

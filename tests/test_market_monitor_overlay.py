@@ -4,15 +4,15 @@ from unittest.mock import patch
 
 import pandas as pd
 
-from tradingagents.web.market_monitor_schemas import (
+from tradingagents.web.market_monitor.schemas import (
     MarketEventRiskFlag,
     MarketIndexEventRisk,
     MarketMonitorModelOverlay,
     MarketMonitorSnapshotRequest,
     MarketStockEventRisk,
 )
-from tradingagents.web.market_monitor_service import MarketMonitorService
-from tradingagents.web.market_monitor_universe import get_market_monitor_universe
+from tradingagents.web.market_monitor.service import MarketMonitorService
+from tradingagents.web.market_monitor.universe import get_market_monitor_universe
 
 
 def _make_frame(base: float, days: int = 320) -> pd.DataFrame:
@@ -68,17 +68,17 @@ class MarketMonitorOverlayTests(unittest.TestCase):
         )
 
         with patch(
-            "tradingagents.web.market_monitor_service.build_market_dataset",
+            "tradingagents.web.market_monitor.service.build_market_dataset",
             return_value=dataset,
         ), patch.object(
             service._overlay_service,
             "create_overlay",
             return_value=overlay,
         ), patch(
-            "tradingagents.web.market_monitor_service.load_snapshot_cache",
+            "tradingagents.web.market_monitor.service.load_snapshot_cache",
             return_value=None,
         ), patch(
-            "tradingagents.web.market_monitor_service.save_snapshot_cache",
+            "tradingagents.web.market_monitor.service.save_snapshot_cache",
         ):
             response = service.get_snapshot(MarketMonitorSnapshotRequest(as_of_date=date(2026, 4, 10)))
 

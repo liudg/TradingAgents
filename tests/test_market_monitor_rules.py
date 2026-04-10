@@ -4,10 +4,10 @@ from unittest.mock import patch
 
 import pandas as pd
 
-from tradingagents.web.market_monitor_schemas import MarketMonitorModelOverlay, MarketMonitorSnapshotRequest
-from tradingagents.web.market_monitor_data import _expected_market_close_date, _is_cache_usable
-from tradingagents.web.market_monitor_service import MarketMonitorService
-from tradingagents.web.market_monitor_universe import get_market_monitor_universe
+from tradingagents.web.market_monitor.schemas import MarketMonitorModelOverlay, MarketMonitorSnapshotRequest
+from tradingagents.web.market_monitor.data import _expected_market_close_date, _is_cache_usable
+from tradingagents.web.market_monitor.service import MarketMonitorService
+from tradingagents.web.market_monitor.universe import get_market_monitor_universe
 
 
 def _make_frame(base: float, days: int = 320) -> pd.DataFrame:
@@ -54,17 +54,17 @@ class MarketMonitorRulesTests(unittest.TestCase):
             cached_payload.update(payload)
 
         with patch(
-            "tradingagents.web.market_monitor_service.build_market_dataset",
+            "tradingagents.web.market_monitor.service.build_market_dataset",
             return_value=dataset,
         ) as mocked_dataset, patch.object(
             service._overlay_service,
             "create_overlay",
             return_value=MarketMonitorModelOverlay(status="skipped", notes=["test"]),
         ), patch(
-            "tradingagents.web.market_monitor_service.load_snapshot_cache",
+            "tradingagents.web.market_monitor.service.load_snapshot_cache",
             side_effect=fake_load_snapshot_cache,
         ) as mocked_load_cache, patch(
-            "tradingagents.web.market_monitor_service.save_snapshot_cache",
+            "tradingagents.web.market_monitor.service.save_snapshot_cache",
             side_effect=fake_save_snapshot_cache,
         ):
             service.get_snapshot(MarketMonitorSnapshotRequest(as_of_date=date(2026, 4, 10)))
@@ -78,16 +78,16 @@ class MarketMonitorRulesTests(unittest.TestCase):
         dataset = _complete_dataset()
 
         with patch(
-            "tradingagents.web.market_monitor_service.build_market_dataset",
+            "tradingagents.web.market_monitor.service.build_market_dataset",
             side_effect=[dataset, dataset],
         ) as mocked_dataset, patch.object(
             service._overlay_service,
             "create_overlay",
             return_value=MarketMonitorModelOverlay(status="skipped", notes=["test"]),
         ), patch(
-            "tradingagents.web.market_monitor_service.load_snapshot_cache",
+            "tradingagents.web.market_monitor.service.load_snapshot_cache",
         ) as mocked_load_cache, patch(
-            "tradingagents.web.market_monitor_service.save_snapshot_cache",
+            "tradingagents.web.market_monitor.service.save_snapshot_cache",
         ):
             service.get_snapshot(
                 MarketMonitorSnapshotRequest(as_of_date=date(2026, 4, 10), force_refresh=True)
@@ -105,14 +105,14 @@ class MarketMonitorRulesTests(unittest.TestCase):
         error_overlay = MarketMonitorModelOverlay(status="error", notes=["transient"])
 
         with patch(
-            "tradingagents.web.market_monitor_service.build_market_dataset",
+            "tradingagents.web.market_monitor.service.build_market_dataset",
             return_value=dataset,
         ) as mocked_dataset, patch.object(
             service._overlay_service,
             "create_overlay",
             return_value=MarketMonitorModelOverlay(status="skipped", notes=["ok"]),
         ), patch(
-            "tradingagents.web.market_monitor_service.load_snapshot_cache",
+            "tradingagents.web.market_monitor.service.load_snapshot_cache",
             return_value={
                 "timestamp": "2026-04-10T16:00:00",
                 "as_of_date": "2026-04-10",
@@ -136,7 +136,7 @@ class MarketMonitorRulesTests(unittest.TestCase):
                 "final_execution_card": None,
             },
         ), patch(
-            "tradingagents.web.market_monitor_service.save_snapshot_cache",
+            "tradingagents.web.market_monitor.service.save_snapshot_cache",
         ) as mocked_save_cache:
             response = service.get_snapshot(MarketMonitorSnapshotRequest(as_of_date=date(2026, 4, 10)))
 
@@ -151,7 +151,7 @@ class MarketMonitorRulesTests(unittest.TestCase):
         stale_timestamp = (datetime.now() - timedelta(minutes=10)).isoformat()
 
         with patch(
-            "tradingagents.web.market_monitor_service.build_market_dataset",
+            "tradingagents.web.market_monitor.service.build_market_dataset",
             return_value=dataset,
         ) as mocked_dataset, patch.object(
             service,
@@ -162,7 +162,7 @@ class MarketMonitorRulesTests(unittest.TestCase):
             "create_overlay",
             return_value=MarketMonitorModelOverlay(status="skipped", notes=["rebuilt"]),
         ), patch(
-            "tradingagents.web.market_monitor_service.load_snapshot_cache",
+            "tradingagents.web.market_monitor.service.load_snapshot_cache",
             return_value={
                 "timestamp": stale_timestamp,
                 "as_of_date": today.isoformat(),
@@ -293,7 +293,7 @@ class MarketMonitorRulesTests(unittest.TestCase):
                 },
             },
         ), patch(
-            "tradingagents.web.market_monitor_service.save_snapshot_cache",
+            "tradingagents.web.market_monitor.service.save_snapshot_cache",
         ):
             response = service.get_snapshot(MarketMonitorSnapshotRequest(as_of_date=today))
 
@@ -306,10 +306,10 @@ class MarketMonitorRulesTests(unittest.TestCase):
         bad_dataset = {"core": {**good_dataset["core"], "SPY": pd.DataFrame()}}
 
         with patch(
-            "tradingagents.web.market_monitor_service.build_market_dataset",
+            "tradingagents.web.market_monitor.service.build_market_dataset",
             side_effect=[good_dataset, bad_dataset],
         ) as mocked_dataset, patch(
-            "tradingagents.web.market_monitor_service.load_snapshot_cache",
+            "tradingagents.web.market_monitor.service.load_snapshot_cache",
             return_value=None,
         ):
             first = service.get_history(date(2026, 4, 10), days=3)
@@ -327,10 +327,10 @@ class MarketMonitorRulesTests(unittest.TestCase):
         dataset = _complete_dataset()
 
         with patch(
-            "tradingagents.web.market_monitor_service.build_market_dataset",
+            "tradingagents.web.market_monitor.service.build_market_dataset",
             return_value=dataset,
         ) as mocked_dataset, patch(
-            "tradingagents.web.market_monitor_service.load_snapshot_cache",
+            "tradingagents.web.market_monitor.service.load_snapshot_cache",
             return_value=None,
         ):
             service.get_history(date(2026, 4, 10), days=5)

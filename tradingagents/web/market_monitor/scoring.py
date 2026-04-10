@@ -4,7 +4,7 @@ from dataclasses import dataclass
 
 import pandas as pd
 
-from tradingagents.web.market_monitor_indicators import (
+from .indicators import (
     atr_percent,
     bounded_score,
     latest_close,
