@@ -24,6 +24,7 @@ For quick package smoke checks, run:
 
 ## Coding Style & Naming Conventions
 Follow existing Python style: 4-space indentation, `snake_case` for functions and modules, `PascalCase` for classes, and uppercase constants such as `DEFAULT_CONFIG`. Prefer explicit imports from package modules (`from tradingagents.graph.trading_graph import TradingAgentsGraph`). Keep comments brief and focused on non-obvious behavior. No repository-wide formatter config is checked in, so match surrounding file style when editing.
+For CLI, Web UI, and any other user-facing copy, default to Simplified Chinese so the product stays linguistically consistent. Only keep English for identifiers, data-source IDs, industry-standard abbreviations, or technical terms that would become less clear if translated.
 
 ## Testing Guidelines
 Tests are written with `unittest` and named `tests/test_*.py`. Always run them with `.venv\Scripts\python.exe` so dependencies and interpreter behavior match the project environment. Keep test classes descriptive (`ModelValidationTests`) and test methods behavior-focused (`test_unknown_model_emits_warning_for_strict_provider`). Add regression tests for bug fixes in the package area you modify, especially model validation, ticker normalization, and API-key handling.

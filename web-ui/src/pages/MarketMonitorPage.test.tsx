@@ -49,7 +49,7 @@ describe("MarketMonitorPage", () => {
 
     const { rerender } = render(<MarketMonitorPage />);
 
-    expect(screen.getByText("Market Monitor")).toBeInTheDocument();
+    expect(screen.getByText("市场监控")).toBeInTheDocument();
 
     snapshotQueryState = {
       isLoading: false,
@@ -168,7 +168,7 @@ describe("MarketMonitorPage", () => {
 
     rerender(<MarketMonitorPage />);
 
-    expect(screen.getByText("Rule snapshot + model overlay")).toBeInTheDocument();
-    expect(screen.getByText(/As of 2026-04-11 .*:30:00/)).toBeInTheDocument();
+    expect(screen.getByText("规则快照 + 模型叠加")).toBeInTheDocument();
+    expect(screen.getByText(/更新时间 2026-04-11 .*:30:00/)).toBeInTheDocument();
   });
 });
