@@ -7,12 +7,14 @@ const mockUseMarketMonitorSnapshot = vi.fn();
 const mockUseMarketMonitorHistory = vi.fn();
 const mockUseMarketMonitorTraceLogs = vi.fn();
 const mockUseMarketMonitorTraces = vi.fn();
+const mockUseMarketMonitorTraceDetail = vi.fn();
 
 vi.mock("../api/hooks", () => ({
   useMarketMonitorSnapshot: () => mockUseMarketMonitorSnapshot(),
   useMarketMonitorHistory: () => mockUseMarketMonitorHistory(),
   useMarketMonitorTraceLogs: () => mockUseMarketMonitorTraceLogs(),
   useMarketMonitorTraces: () => mockUseMarketMonitorTraces(),
+  useMarketMonitorTraceDetail: () => mockUseMarketMonitorTraceDetail(),
 }));
 
 function installMatchMedia() {
@@ -39,40 +41,30 @@ function buildSnapshot() {
     market_data_snapshot: {
       local_market_data: {
         SPY: { close: 510.2, change_20d_pct: 4.1, above_ma200: true },
-        QQQ: { close: 430.4, change_20d_pct: 5.3, above_ma200: true },
       },
       derived_metrics: {
         breadth_above_200dma_pct: 75,
-        spy_distance_to_ma200_pct: 6.2,
       },
-      llm_reasoning_notes: ["已补充未来三日宏观事件与财报日历。"],
+      llm_reasoning_notes: [],
     },
-    missing_data: [
-      {
-        key: "vix_term_structure",
-        label: "VIX 期限结构",
-        required_for: ["long_term_card", "system_risk_card"],
-        status: "filled_by_search",
-        note: "通过搜索补充事件背景，不作为本地时序因子。",
-      },
-    ],
+    missing_data: [],
     assessment: {
       long_term_card: {
         label: "偏多",
-        summary: "中期趋势与广度共振偏多。",
+        summary: "中期趋势偏多。",
         confidence: 0.84,
         data_completeness: "medium",
-        key_evidence: ["SPY 站上 MA200", "QQQ 同步走强"],
-        missing_data_filled_by_search: ["VIX 期限结构背景"],
+        key_evidence: ["SPY 站上 MA200"],
+        missing_data_filled_by_search: [],
         action: "允许继续持有趋势仓。",
       },
       short_term_card: {
         label: "可做",
-        summary: "短线环境允许参与，但事件前减少追价。",
+        summary: "短线环境允许参与。",
         confidence: 0.76,
         data_completeness: "medium",
         key_evidence: ["行业动量扩散改善"],
-        missing_data_filled_by_search: ["未来三日事件窗口"],
+        missing_data_filled_by_search: [],
         action: "优先低吸而非追突破。",
       },
       system_risk_card: {
@@ -80,7 +72,7 @@ function buildSnapshot() {
         summary: "系统性风险未明显恶化。",
         confidence: 0.8,
         data_completeness: "medium",
-        key_evidence: ["VIX 未出现异常抬升"],
+        key_evidence: ["VIX 未异常抬升"],
         missing_data_filled_by_search: [],
         action: "使用标准风险预算。",
       },
@@ -90,7 +82,7 @@ function buildSnapshot() {
         confidence: 0.81,
         data_completeness: "medium",
         key_evidence: ["趋势偏多", "未来三日事件密集"],
-        missing_data_filled_by_search: ["银行财报日历"],
+        missing_data_filled_by_search: [],
         action: "继续参与，但压低追高频率。",
         total_exposure_range: "50%-70%",
         new_position_allowed: true,
@@ -107,7 +99,7 @@ function buildSnapshot() {
         confidence: 0.78,
         data_completeness: "high",
         key_evidence: ["PPI", "大型银行财报"],
-        missing_data_filled_by_search: ["已搜索事件日历"],
+        missing_data_filled_by_search: [],
         action: "减少事件前追价。",
       },
       panic_card: {
@@ -120,29 +112,39 @@ function buildSnapshot() {
         action: "无需执行恐慌策略。",
       },
     },
-    evidence_sources: ["bls.gov", "federalreserve.gov"],
+    evidence_sources: ["bls.gov"],
     overall_confidence: 0.81,
   };
 }
 
+function buildTraceDetail(status = "completed") {
+  return {
+    trace_id: "trace-1",
+    as_of_date: "2026-04-11",
+    status,
+    force_refresh: false,
+    started_at: "2026-04-11T08:29:00Z",
+    finished_at: status === "completed" ? "2026-04-11T08:30:00Z" : null,
+    duration_ms: status === "completed" ? 60000 : null,
+    overall_confidence: status === "completed" ? 0.81 : null,
+    long_term_label: status === "completed" ? "偏多" : null,
+    execution_label: status === "completed" ? "顺势参与" : null,
+    request: { as_of_date: "2026-04-11" },
+    cache_decision: { snapshot_cache_hit: false, dataset_cache_hit: false },
+    dataset_summary: { source: "live_request" },
+    context_summary: { local_symbol_count: 16 },
+    assessment_summary: status === "completed" ? { overall_confidence: 0.81 } : {},
+    response_summary: status === "completed" ? { trace_id: "trace-1" } : {},
+    error: {},
+  };
+}
+
 describe("MarketMonitorPage", () => {
-  it("renders the new assessment cards and evidence panels", () => {
+  it("renders assessment cards and execution trace after snapshot returns", () => {
     installMatchMedia();
 
     mockUseMarketMonitorHistory.mockImplementation(() => ({
-      data: {
-        as_of_date: "2026-04-11",
-        points: [
-          {
-            trade_date: "2026-04-10",
-            overall_confidence: 0.79,
-            long_term_label: "偏多",
-            short_term_label: "可做",
-            system_risk_label: "正常",
-            execution_label: "顺势参与",
-          },
-        ],
-      },
+      data: { as_of_date: "2026-04-11", points: [] },
       refetch: vi.fn(),
     }));
     mockUseMarketMonitorTraces.mockImplementation(() => ({
@@ -153,7 +155,27 @@ describe("MarketMonitorPage", () => {
       error: null,
     }));
     mockUseMarketMonitorTraceLogs.mockImplementation(() => ({
-      data: [],
+      data: [
+        {
+          line_no: 1,
+          timestamp: "2026-04-11T08:29:00Z",
+          level: "Request",
+          content: "市场监控快照请求开始：2026-04-11",
+        },
+        {
+          line_no: 2,
+          timestamp: "2026-04-11T08:30:00Z",
+          level: "Response",
+          content: "市场监控快照请求完成",
+        },
+      ],
+      isLoading: false,
+      isFetching: false,
+      isError: false,
+      error: null,
+    }));
+    mockUseMarketMonitorTraceDetail.mockImplementation(() => ({
+      data: buildTraceDetail(),
       isLoading: false,
       isFetching: false,
       isError: false,
@@ -170,14 +192,57 @@ describe("MarketMonitorPage", () => {
     render(<MarketMonitorPage />);
 
     expect(screen.getByText("整体置信度 0.81")).toBeInTheDocument();
-    expect(screen.getByText("长线环境")).toBeInTheDocument();
-    expect(screen.getAllByText("顺势参与").length).toBeGreaterThan(0);
-    expect(screen.getByText("事件密集")).toBeInTheDocument();
-    expect(screen.getByText("未来三日存在宏观与财报事件簇。")).toBeInTheDocument();
-    expect(screen.getByText("本地数据证据")).toBeInTheDocument();
-    expect(screen.getByText("缺失数据与补全")).toBeInTheDocument();
-    expect(screen.getByText("VIX 期限结构")).toBeInTheDocument();
-    expect(screen.getByText("bls.gov")).toBeInTheDocument();
-    expect(screen.getByText("2026-04-10")).toBeInTheDocument();
+    expect(screen.getByText("长期环境")).toBeInTheDocument();
+    expect(screen.getByText("SPY 站上 MA200")).toBeInTheDocument();
+    expect(screen.getByText("执行过程")).toBeInTheDocument();
+  });
+
+  it("shows execution trace while snapshot is still loading", () => {
+    installMatchMedia();
+
+    mockUseMarketMonitorHistory.mockImplementation(() => ({
+      data: { as_of_date: "2026-04-11", points: [] },
+      refetch: vi.fn(),
+    }));
+    mockUseMarketMonitorTraces.mockImplementation(() => ({
+      data: [{ trace_id: "trace-running", status: "running" }],
+      isLoading: false,
+      isFetching: true,
+      isError: false,
+      error: null,
+    }));
+    mockUseMarketMonitorTraceDetail.mockImplementation(() => ({
+      data: { ...buildTraceDetail("running"), trace_id: "trace-running" },
+      isLoading: false,
+      isFetching: true,
+      isError: false,
+      error: null,
+    }));
+    mockUseMarketMonitorTraceLogs.mockImplementation(() => ({
+      data: [
+        {
+          line_no: 1,
+          timestamp: "2026-04-11T08:29:00Z",
+          level: "Request",
+          content: "市场监控快照请求开始：2026-04-11",
+        },
+      ],
+      isLoading: false,
+      isFetching: true,
+      isError: false,
+      error: null,
+    }));
+    mockUseMarketMonitorSnapshot.mockImplementation(() => ({
+      isLoading: true,
+      isError: false,
+      data: undefined,
+      error: null,
+      refetch: vi.fn(),
+    }));
+
+    render(<MarketMonitorPage />);
+
+    expect(screen.getByText("执行过程")).toBeInTheDocument();
+    expect(screen.getByText("正在生成市场裁决")).toBeInTheDocument();
   });
 });

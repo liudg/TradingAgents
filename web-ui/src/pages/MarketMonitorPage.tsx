@@ -16,6 +16,7 @@ import { type ReactNode } from "react";
 import {
   useMarketMonitorHistory,
   useMarketMonitorSnapshot,
+  useMarketMonitorTraceDetail,
   useMarketMonitorTraceLogs,
   useMarketMonitorTraces,
 } from "../api/hooks";
@@ -150,25 +151,16 @@ export function MarketMonitorPage() {
   );
   const activeTraceId =
     snapshotQuery.data?.trace_id ?? runningTracesQuery.data?.[0]?.trace_id;
+  const traceDetailQuery = useMarketMonitorTraceDetail(
+    activeTraceId,
+    Boolean(activeTraceId),
+  );
   const traceLogsQuery = useMarketMonitorTraceLogs(
     activeTraceId,
     Boolean(activeTraceId),
   );
 
-  if (snapshotQuery.isLoading) {
-    return (
-      <Card className="page-card" title="市场监控">
-        <Alert
-          type="info"
-          showIcon
-          message="正在生成市场裁决"
-          description="系统会先读取本地数据，再补充外部搜索后输出结构化结论。"
-        />
-      </Card>
-    );
-  }
-
-  if (snapshotQuery.isError || !snapshotQuery.data) {
+  if (snapshotQuery.isError && !snapshotQuery.data) {
     return (
       <Alert
         type="error"
@@ -180,13 +172,18 @@ export function MarketMonitorPage() {
   }
 
   const snapshot = snapshotQuery.data;
-  const assessment = snapshot.assessment;
+  const assessment = snapshot?.assessment;
   const traceLogs = Array.isArray(traceLogsQuery.data)
     ? traceLogsQuery.data
     : [];
   const hasTerminalTraceLog = traceLogs.some(
     (item) => item.level === "Response" || item.level === "Error",
   );
+  const isSnapshotPending = snapshotQuery.isLoading && !snapshot;
+  const isTraceLoading =
+    Boolean(activeTraceId) &&
+    ((traceLogsQuery.isLoading && traceLogs.length === 0) ||
+      traceDetailQuery.isLoading);
 
   return (
     <Space direction="vertical" size="large" style={{ width: "100%" }}>
@@ -207,67 +204,98 @@ export function MarketMonitorPage() {
         }
       >
         <Space direction="vertical" size={12} style={{ width: "100%" }}>
-          <Space wrap>
-            <Tag>更新时间 {formatDateTime(snapshot.timestamp)}</Tag>
-            <Tag>交易日 {snapshot.as_of_date}</Tag>
-            <Tag color={confidenceTag(snapshot.overall_confidence)}>
-              整体置信度 {snapshot.overall_confidence.toFixed(2)}
-            </Tag>
-          </Space>
-          <Typography.Text>{assessment.execution_card.summary}</Typography.Text>
+          {isSnapshotPending ? (
+            <Alert
+              type="info"
+              showIcon
+              message="正在生成市场裁决"
+              description="系统会先读取本地数据，再补充外部搜索后输出结构化结论。"
+            />
+          ) : snapshot && assessment ? (
+            <>
+              <Space wrap>
+                <Tag>更新时间 {formatDateTime(snapshot.timestamp)}</Tag>
+                <Tag>交易日 {snapshot.as_of_date}</Tag>
+                <Tag color={confidenceTag(snapshot.overall_confidence)}>
+                  整体置信度 {snapshot.overall_confidence.toFixed(2)}
+                </Tag>
+              </Space>
+              <Typography.Text>{assessment.execution_card.summary}</Typography.Text>
+            </>
+          ) : (
+            <Alert
+              type="warning"
+              showIcon
+              message="暂未获取到市场监控快照"
+              description="可以先查看执行过程，待后端完成后页面会自动刷新结果。"
+            />
+          )}
         </Space>
       </Card>
 
-      <ExecutionCardBlock card={assessment.execution_card} />
+      {assessment ? (
+        <>
+          <ExecutionCardBlock card={assessment.execution_card} />
 
-      <Row gutter={[16, 16]}>
-        <Col xs={24} lg={8}>
-          <AssessmentCardBlock
-            title="长线环境"
-            helpKey="long_term_card"
-            card={assessment.long_term_card}
-          />
-        </Col>
-        <Col xs={24} lg={8}>
-          <AssessmentCardBlock
-            title="短线环境"
-            helpKey="short_term_card"
-            card={assessment.short_term_card}
-          />
-        </Col>
-        <Col xs={24} lg={8}>
-          <AssessmentCardBlock
-            title="系统风险"
-            helpKey="system_risk_card"
-            card={assessment.system_risk_card}
-          />
-        </Col>
-      </Row>
+          <Row gutter={[16, 16]}>
+            <Col xs={24} lg={8}>
+              <AssessmentCardBlock
+                title="长期环境"
+                helpKey="long_term_card"
+                card={assessment.long_term_card}
+              />
+            </Col>
+            <Col xs={24} lg={8}>
+              <AssessmentCardBlock
+                title="短线环境"
+                helpKey="short_term_card"
+                card={assessment.short_term_card}
+              />
+            </Col>
+            <Col xs={24} lg={8}>
+              <AssessmentCardBlock
+                title="系统风险"
+                helpKey="system_risk_card"
+                card={assessment.system_risk_card}
+              />
+            </Col>
+          </Row>
 
-      <Row gutter={[16, 16]}>
-        <Col xs={24} lg={12}>
-          <AssessmentCardBlock
-            title="事件风险"
-            helpKey="event_risk_card"
-            card={assessment.event_risk_card}
-          />
-        </Col>
-        <Col xs={24} lg={12}>
-          <AssessmentCardBlock
-            title="恐慌模块"
-            helpKey="panic_card"
-            card={assessment.panic_card}
-          />
-        </Col>
-      </Row>
+          <Row gutter={[16, 16]}>
+            <Col xs={24} lg={12}>
+              <AssessmentCardBlock
+                title="事件风险"
+                helpKey="event_risk_card"
+                card={assessment.event_risk_card}
+              />
+            </Col>
+            <Col xs={24} lg={12}>
+              <AssessmentCardBlock
+                title="恐慌模块"
+                helpKey="panic_card"
+                card={assessment.panic_card}
+              />
+            </Col>
+          </Row>
+        </>
+      ) : null}
 
       <MarketMonitorExecutionTrace
         logs={traceLogs}
-        isLoading={traceLogsQuery.isLoading && traceLogs.length === 0}
-        isFetching={traceLogsQuery.isFetching}
+        traceDetail={traceDetailQuery.data}
+        isLoading={isTraceLoading}
+        isFetching={
+          traceLogsQuery.isFetching ||
+          traceDetailQuery.isFetching ||
+          runningTracesQuery.isFetching
+        }
         isCompleted={hasTerminalTraceLog}
         errorMessage={
-          traceLogsQuery.isError ? extractErrorMessage(traceLogsQuery.error) : null
+          traceLogsQuery.isError
+            ? extractErrorMessage(traceLogsQuery.error)
+            : traceDetailQuery.isError
+              ? extractErrorMessage(traceDetailQuery.error)
+              : null
         }
       />
     </Space>

@@ -108,6 +108,7 @@ class MarketMonitorService:
                     "long_term_label": assessment.long_term_card.label,
                     "execution_label": assessment.execution_card.label,
                     "evidence_sources": evidence_sources,
+                    "llm_debug": self._assessment_service.last_debug_info,
                 },
             )
             trace.set_summary_fields(

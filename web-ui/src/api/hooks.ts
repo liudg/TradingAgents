@@ -15,6 +15,7 @@ import {
   fetchMarketMonitorDataStatus,
   fetchMarketMonitorHistory,
   fetchMarketMonitorSnapshot,
+  fetchMarketMonitorTraceDetail,
   fetchMarketMonitorTraceLogs,
   fetchMarketMonitorTraces,
   fetchMetadataOptions,
@@ -163,6 +164,21 @@ export function useMarketMonitorTraceLogs(
         (item) => item.level === "Response" || item.level === "Error",
       );
       return enabled && traceId && !hasTerminalLog ? 2000 : false;
+    },
+    enabled: enabled && Boolean(traceId),
+  });
+}
+
+export function useMarketMonitorTraceDetail(
+  traceId?: string | null,
+  enabled = true,
+) {
+  return useQuery({
+    queryKey: ["market-monitor-trace-detail", traceId],
+    queryFn: () => fetchMarketMonitorTraceDetail(traceId || ""),
+    refetchInterval: (query) => {
+      const status = query.state.data?.status;
+      return enabled && traceId && status === "running" ? 2000 : false;
     },
     enabled: enabled && Boolean(traceId),
   });

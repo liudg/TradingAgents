@@ -142,6 +142,7 @@ class MarketMonitorApiTests(unittest.TestCase):
         self.assertEqual(detail_payload["status"], "completed")
         self.assertIn("assessment_summary", detail_payload)
         self.assertEqual(detail_payload["assessment_summary"]["overall_confidence"], 0.82)
+        self.assertIn("llm_debug", detail_payload["assessment_summary"])
         self.assertNotIn("log_path", detail_payload)
         self.assertNotIn("snapshot_path", detail_payload)
 

@@ -14,6 +14,7 @@ import {
   MarketMonitorDataStatusResponse,
   MarketMonitorHistoryResponse,
   MarketMonitorSnapshotResponse,
+  MarketMonitorTraceDetail,
   MarketMonitorTraceLogEntry,
   MarketMonitorTraceSummary,
   MetadataOptionsResponse,
@@ -133,6 +134,12 @@ export async function fetchMarketMonitorDataStatus() {
 export async function fetchMarketMonitorTraceLogs(traceId: string) {
   return requestJson<MarketMonitorTraceLogEntry[]>(
     `/api/market-monitor/traces/${traceId}/logs`,
+  );
+}
+
+export async function fetchMarketMonitorTraceDetail(traceId: string) {
+  return requestJson<MarketMonitorTraceDetail>(
+    `/api/market-monitor/traces/${traceId}`,
   );
 }
 

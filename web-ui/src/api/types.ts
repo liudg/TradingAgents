@@ -313,6 +313,16 @@ export interface MarketMonitorTraceSummary {
   execution_label?: string | null;
 }
 
+export interface MarketMonitorTraceDetail extends MarketMonitorTraceSummary {
+  request: Record<string, unknown>;
+  cache_decision: Record<string, unknown>;
+  dataset_summary: Record<string, unknown>;
+  context_summary: Record<string, unknown>;
+  assessment_summary: Record<string, unknown>;
+  response_summary: Record<string, unknown>;
+  error: Record<string, unknown>;
+}
+
 export interface MarketHistoryPoint {
   trade_date: string;
   long_term_label: string;

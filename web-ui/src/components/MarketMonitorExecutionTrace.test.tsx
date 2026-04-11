@@ -6,6 +6,26 @@ import {
   MarketMonitorExecutionTrace,
 } from "./MarketMonitorExecutionTrace";
 
+const runningTraceDetail = {
+  trace_id: "trace-1",
+  as_of_date: "2026-04-11",
+  status: "running",
+  force_refresh: false,
+  started_at: "2026-04-11T01:16:34",
+  finished_at: null,
+  duration_ms: null,
+  overall_confidence: null,
+  long_term_label: null,
+  execution_label: null,
+  request: { as_of_date: "2026-04-11" },
+  cache_decision: { snapshot_cache_hit: false, dataset_cache_hit: false },
+  dataset_summary: { source: "live_request" },
+  context_summary: {},
+  assessment_summary: {},
+  response_summary: {},
+  error: {},
+};
+
 describe("MarketMonitorExecutionTrace", () => {
   beforeEach(() => {
     Object.defineProperty(window, "matchMedia", {
@@ -52,6 +72,7 @@ describe("MarketMonitorExecutionTrace", () => {
             content: "已组装上下文：16 个本地符号，4 个缺失项",
           },
         ]}
+        traceDetail={runningTraceDetail}
         isLoading={false}
         isFetching={false}
         isCompleted={false}
@@ -91,6 +112,12 @@ describe("MarketMonitorExecutionTrace", () => {
             content: "RuntimeError: 上游服务不可用",
           },
         ]}
+        traceDetail={{
+          ...runningTraceDetail,
+          status: "failed",
+          context_summary: { local_symbol_count: 16 },
+          error: { stage: "snapshot", message: "RuntimeError: 涓婃父鏈嶅姟涓嶅彲鐢?" },
+        }}
         isLoading={false}
         isFetching={false}
         isCompleted={false}
@@ -106,6 +133,7 @@ describe("MarketMonitorExecutionTrace", () => {
     render(
       <MarketMonitorExecutionTrace
         logs={[]}
+        traceDetail={null}
         isLoading={true}
         isFetching={true}
         isCompleted={false}
@@ -149,10 +177,72 @@ describe("MarketMonitorExecutionTrace", () => {
           content: "LLM 裁决完成：长线=偏多，执行=顺势参与",
         },
       ],
+      {
+        ...runningTraceDetail,
+        status: "completed",
+        context_summary: { local_symbol_count: 16 },
+        assessment_summary: { overall_confidence: 0.8 },
+      },
       true,
     );
 
     expect(steps.find((item) => item.key === "assessment")?.status).toBe("completed");
     expect(steps.find((item) => item.key === "response")?.status).toBe("waiting");
+  });
+
+  it("derives running status from trace detail even before terminal logs arrive", () => {
+    const steps = buildTraceSteps(
+      [
+        {
+          line_no: 1,
+          timestamp: "2026-04-11T01:16:34",
+          level: "Request",
+          content: "甯傚満鐩戞帶蹇収璇锋眰寮€濮嬶細2026-04-11",
+        },
+      ],
+      {
+        ...runningTraceDetail,
+        context_summary: { local_symbol_count: 16 },
+      },
+      false,
+    );
+
+    expect(steps.find((item) => item.key === "request")?.status).toBe("completed");
+    expect(steps.find((item) => item.key === "cache")?.status).toBe("completed");
+    expect(steps.find((item) => item.key === "dataset")?.status).toBe("completed");
+    expect(steps.find((item) => item.key === "context")?.status).toBe("running");
+  });
+
+  it("marks non-executed middle steps as skipped on cache-hit completion", () => {
+    const steps = buildTraceSteps(
+      [
+        {
+          line_no: 1,
+          timestamp: "2026-04-11T01:16:34",
+          level: "Request",
+          content: "甯傚満鐩戞帶蹇収璇锋眰寮€濮嬶細2026-04-11",
+        },
+        {
+          line_no: 2,
+          timestamp: "2026-04-11T01:16:35",
+          level: "Response",
+          content: "杩斿洖缂撳瓨蹇収",
+        },
+      ],
+      {
+        ...runningTraceDetail,
+        status: "completed",
+        cache_decision: { snapshot_cache_hit: true, dataset_cache_hit: false },
+        assessment_summary: { overall_confidence: 0.82 },
+        response_summary: { served_from_snapshot_cache: true },
+      },
+      true,
+    );
+
+    expect(steps.find((item) => item.key === "cache")?.status).toBe("completed");
+    expect(steps.find((item) => item.key === "dataset")?.status).toBe("skipped");
+    expect(steps.find((item) => item.key === "context")?.status).toBe("skipped");
+    expect(steps.find((item) => item.key === "assessment")?.status).toBe("completed");
+    expect(steps.find((item) => item.key === "response")?.status).toBe("completed");
   });
 });
