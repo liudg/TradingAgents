@@ -15,7 +15,6 @@ from tradingagents.default_config import DEFAULT_CONFIG
 
 MARKET_MONITOR_CACHE_DIR = Path(DEFAULT_CONFIG["data_cache_dir"]) / "market_monitor"
 MARKET_MONITOR_CACHE_DIR.mkdir(parents=True, exist_ok=True)
-SNAPSHOT_CACHE_VERSION = 1
 
 
 def _symbol_cache_path(symbol: str) -> Path:
@@ -65,31 +64,14 @@ def load_snapshot_cache(as_of_date: date) -> dict[str, Any] | None:
         payload = json.loads(path.read_text(encoding="utf-8"))
     except Exception:
         return None
-    if not isinstance(payload, dict):
-        return None
-    if payload.get("cache_version") != SNAPSHOT_CACHE_VERSION:
-        return None
-    snapshot = payload.get("snapshot")
-    if not isinstance(snapshot, dict):
-        return None
-    return snapshot
+    return payload if isinstance(payload, dict) else None
 
 
 def save_snapshot_cache(as_of_date: date, payload: dict[str, Any]) -> None:
     path = _snapshot_cache_path(as_of_date)
     with NamedTemporaryFile("w", encoding="utf-8", delete=False, dir=path.parent, suffix=".tmp") as handle:
         temp_path = Path(handle.name)
-        handle.write(
-            json.dumps(
-                {
-                    "cache_version": SNAPSHOT_CACHE_VERSION,
-                    "snapshot": payload,
-                },
-                ensure_ascii=False,
-                indent=2,
-                default=_json_default,
-            )
-        )
+        handle.write(json.dumps(payload, ensure_ascii=False, indent=2, default=_json_default))
     try:
         temp_path.replace(path)
     finally:

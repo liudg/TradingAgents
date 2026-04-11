@@ -1,10 +1,10 @@
 export type MarketMonitorCardHelpKey =
-  | "panic_module"
-  | "long_term_score"
-  | "short_term_score"
-  | "system_risk_score"
-  | "model_overlay"
-  | "rule_snapshot";
+  | "long_term_card"
+  | "short_term_card"
+  | "system_risk_card"
+  | "execution_card"
+  | "event_risk_card"
+  | "panic_card";
 
 export type MarketMonitorCardHelpContent = {
   title: string;
@@ -16,46 +16,40 @@ export const MARKET_MONITOR_CARD_HELP: Record<
   MarketMonitorCardHelpKey,
   MarketMonitorCardHelpContent
 > = {
-  panic_module: {
+  long_term_card: {
+    title: "长线环境",
+    purpose: "判断中期市场环境是否支持继续维持或增加趋势仓位。",
+    rules:
+      "模型先读取本地价格、均线、区间位置、广度代理等结构化数据，再搜索缺失的宏观与市场上下文，综合输出偏多、中性或偏空结论。",
+  },
+  short_term_card: {
+    title: "短线环境",
+    purpose: "判断短线交易窗口是否友好，以及更适合等待、低吸还是顺势参与。",
+    rules:
+      "模型结合本地动量、波动、广度代理与外部事件背景，给出短线可做性结论与动作建议。",
+  },
+  system_risk_card: {
+    title: "系统风险",
+    purpose: "衡量系统性风险是否显著抬升，以及是否需要收紧风险预算。",
+    rules:
+      "模型优先读取 VIX、大小盘相对表现和代理广度，再补充外部风险事件，输出正常、承压或高风险判断。",
+  },
+  execution_card: {
+    title: "执行建议",
+    purpose: "把市场判断翻译成仓位、追高、低吸、隔夜和杠杆等可执行动作。",
+    rules:
+      "模型综合长线、短线、系统风险和事件风险，直接生成结构化执行建议，而不是从固定规则矩阵推导。",
+  },
+  event_risk_card: {
+    title: "事件风险",
+    purpose: "识别未来几个交易日可能影响指数和风格轮动的宏观或财报事件。",
+    rules:
+      "模型固定先搜索未来三日重要宏观事件和财报日历，再判断事件是否足以改变执行层建议。",
+  },
+  panic_card: {
     title: "恐慌模块",
-    purpose:
-      "用于识别美股是否进入恐慌后的可交易反转窗口，帮助区分仅需观察的极端波动与允许轻仓试错的确认反弹。",
+    purpose: "识别是否存在恐慌后的可交易反转机会。",
     rules:
-      "综合 panic_extreme_score、selling_exhaustion_score 与反转确认分数得出结论。极端恐慌分优先决定是否进入 watch 或 confirmed；当综合反转分达到阈值，或强恐慌直接触发时，才给出可执行结论与 early entry 提示。",
-  },
-  long_term_score: {
-    title: "长期规则卡",
-    purpose:
-      "用于判断中长期市场环境是否支持提升总仓位，核心回答当前更适合防守、试仓还是进攻。",
-    rules:
-      "按长期趋势结构、市场广度修复、龙头确认和波动健康度四组因子评分后汇总为 0 到 100 分，再映射到防守区、谨慎区、试仓区、进攻区和强趋势区，同时给出 1 日、5 日变化与斜率状态。",
-  },
-  short_term_score: {
-    title: "短期规则卡",
-    purpose:
-      "用于判断短线交易环境是否友好，帮助确认当前更适合等待、轻仓试错还是积极参与短线机会。",
-    rules:
-      "基于热点延续性、突破成功率、板块赚钱效应和波动友好度四组因子汇总评分，再映射到极差区、弱势区、观察区、可做区、活跃区和高胜率区，并结合 1 日、5 日变化展示短线环境是否在改善或恶化。",
-  },
-  system_risk_score: {
-    title: "系统风险卡",
-    purpose:
-      "用于衡量流动性压力与风险偏好是否在同步恶化，决定整体风险预算、杠杆使用和防守优先级。",
-    rules:
-      "由流动性压力分和风险偏好分各占一半组成，总分越高代表系统风险越大。核心参考 VIX、信用利差、大小盘相对表现、防御板块强弱与跨资产同步下跌等指标，最终映射到低压区、正常区、压力区、高压区和危机区。",
-  },
-  model_overlay: {
-    title: "模型叠加",
-    purpose:
-      "用于在规则快照之上补充模型视角的市场叙述与风险解释，帮助快速理解当前结论背后的上下文。",
-    rules:
-      "该卡片本身不直接重新计算规则分数，而是读取模型输出的市场、风险和恐慌叙述，并展示是否应用、置信度、状态覆盖以及证据来源；当模型未应用或出错时，会明确显示跳过或异常状态。",
-  },
-  rule_snapshot: {
-    title: "规则快照",
-    purpose:
-      "用于展示规则引擎在模型叠加前的基础结论，是页面上其他决策信息的底层确定性快照。",
-    rules:
-      "汇总基础 regime、基础执行卡、缺失输入和降级因子。结论主要来自长期、短期、系统风险与事件风险规则的组合，不含模型修正；若关键输入缺失，会通过 ready 状态、missing inputs 和 degraded factors 明确标记。",
+      "模型结合本地波动和外部风险背景判断是否存在恐慌反转窗口；若证据不足，会明确保持未激活结论。",
   },
 };

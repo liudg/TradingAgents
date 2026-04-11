@@ -30,9 +30,8 @@ const TRACE_STEPS: TraceStepDefinition[] = [
   { key: "request", title: "接收请求", levels: ["Request"] },
   { key: "cache", title: "检查缓存", levels: ["Cache"] },
   { key: "dataset", title: "准备市场数据", levels: ["Dataset"] },
-  { key: "rule", title: "生成规则快照", levels: ["Rule"] },
-  { key: "overlay", title: "生成模型叠加", levels: ["Overlay"] },
-  { key: "merge", title: "合并最终决策", levels: ["Merge"] },
+  { key: "context", title: "组装裁决上下文", levels: ["Context"] },
+  { key: "assessment", title: "生成 LLM 裁决", levels: ["Assessment"] },
   { key: "response", title: "返回结果", levels: ["Response"] },
 ];
 

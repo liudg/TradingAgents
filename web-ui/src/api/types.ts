@@ -58,7 +58,6 @@ export interface AnalysisJobResponse {
   decision: string | null;
   error_message: string | null;
   report_path: string | null;
-  log_path?: string | null;
   created_at: string;
   started_at: string | null;
   finished_at: string | null;
@@ -239,69 +238,31 @@ export interface HistoricalBacktestDetail extends HistoricalBacktestSummary {
   memory_entries: BacktestMemoryEntry[];
 }
 
-export interface MarketScoreCard {
-  score: number;
-  zone: string;
-  delta_1d: number;
-  delta_5d: number;
-  slope_state: string;
+export interface MarketMissingDataItem {
+  key: string;
+  label: string;
+  required_for: string[];
+  status: "available" | "missing" | "filled_by_search" | "not_applicable";
+  note: string;
+}
+
+export interface MarketDataSnapshot {
+  local_market_data: Record<string, Record<string, unknown>>;
+  derived_metrics: Record<string, unknown>;
+  llm_reasoning_notes: string[];
+}
+
+export interface MarketAssessmentCard {
+  label: string;
+  summary: string;
+  confidence: number;
+  data_completeness: "high" | "medium" | "low";
+  key_evidence: string[];
+  missing_data_filled_by_search: string[];
   action: string;
 }
 
-export interface MarketStyleSignal {
-  score: number;
-  preferred?: boolean | null;
-  valid?: boolean | null;
-  delta_5d: number;
-}
-
-export interface MarketStyleEffectiveness {
-  tactic_layer: {
-    trend_breakout: MarketStyleSignal;
-    dip_buy: MarketStyleSignal;
-    oversold_bounce: MarketStyleSignal;
-    top_tactic: string;
-    avoid_tactic: string;
-  };
-  asset_layer: {
-    large_cap_tech: MarketStyleSignal;
-    small_cap_momentum: MarketStyleSignal;
-    defensive: MarketStyleSignal;
-    energy_cyclical: MarketStyleSignal;
-    financials: MarketStyleSignal;
-    preferred_assets: string[];
-    avoid_assets: string[];
-  };
-}
-
-export interface MarketEventRiskFlag {
-  index_level: {
-    active: boolean;
-    type?: string | null;
-    days_to_event?: number | null;
-    action_modifier?: {
-      new_position_allowed?: boolean | null;
-      overnight_allowed?: boolean | null;
-      single_position_cap_multiplier?: number | null;
-      note?: string | null;
-    } | null;
-  };
-  stock_level: {
-    earnings_stocks: string[];
-    rule?: string | null;
-  };
-}
-
-export type MarketRegimeLabel =
-  | "green"
-  | "yellow"
-  | "yellow_green_swing"
-  | "orange"
-  | "red";
-
-export interface MarketExecutionCard {
-  regime_label: MarketRegimeLabel;
-  conflict_mode: string;
+export interface MarketAssessmentExecutionCard extends MarketAssessmentCard {
   total_exposure_range: string;
   new_position_allowed: boolean;
   chase_breakout_allowed: boolean;
@@ -310,87 +271,26 @@ export interface MarketExecutionCard {
   leverage_allowed: boolean;
   single_position_cap: string;
   daily_risk_budget: string;
-  tactic_preference: string;
-  preferred_assets: string[];
-  avoid_assets: string[];
-  signal_confirmation: {
-    current_regime_days: number;
-    downgrade_unlock_in_days: number;
-    note: string;
-  };
-  event_risk_flag: MarketEventRiskFlag;
-  summary: string;
 }
 
-export interface MarketPanicReversalCard {
-  score: number;
-  zone: string;
-  state: "none" | "watch" | "confirmed";
-  panic_extreme_score: number;
-  selling_exhaustion_score: number;
-  intraday_reversal_score: number;
-  followthrough_confirmation_score: number;
-  action: string;
-  system_risk_override?: string | null;
-  stop_loss: string;
-  profit_rule: string;
-  timeout_warning: boolean;
-  days_held: number;
-  early_entry_allowed: boolean;
-}
-
-export interface MarketSourceCoverage {
-  status: "full" | "partial" | "degraded";
-  data_freshness: string;
-  degraded_factors: string[];
-  notes: string[];
-}
-
-export interface MarketMonitorRuleSnapshot {
-  ready: boolean;
-  long_term_score?: MarketScoreCard | null;
-  short_term_score?: MarketScoreCard | null;
-  system_risk_score?: MarketScoreCard | null;
-  style_effectiveness?: MarketStyleEffectiveness | null;
-  panic_reversal_score?: MarketPanicReversalCard | null;
-  base_regime_label?: MarketRegimeLabel | null;
-  base_execution_card?: MarketExecutionCard | null;
-  base_event_risk_flag: MarketEventRiskFlag;
-  source_coverage: MarketSourceCoverage;
-  missing_inputs: string[];
-  degraded_factors: string[];
-  key_indicators: Record<string, unknown>;
-}
-
-export interface MarketMonitorModelOverlay {
-  status: "skipped" | "applied" | "error";
-  regime_override?: MarketRegimeLabel | null;
-  execution_adjustments?: {
-    regime_label?: MarketRegimeLabel | null;
-    conflict_mode?: string | null;
-    new_position_allowed?: boolean | null;
-    chase_breakout_allowed?: boolean | null;
-    dip_buy_allowed?: boolean | null;
-    overnight_allowed?: boolean | null;
-    daily_risk_budget?: string | null;
-    summary?: string | null;
-  } | null;
-  event_risk_override?: MarketEventRiskFlag | null;
-  market_narrative: string;
-  risk_narrative: string;
-  panic_narrative: string;
-  evidence_sources: string[];
-  model_confidence?: number | null;
-  notes: string[];
+export interface MarketAssessment {
+  long_term_card: MarketAssessmentCard;
+  short_term_card: MarketAssessmentCard;
+  system_risk_card: MarketAssessmentCard;
+  execution_card: MarketAssessmentExecutionCard;
+  event_risk_card: MarketAssessmentCard;
+  panic_card: MarketAssessmentCard;
 }
 
 export interface MarketMonitorSnapshotResponse {
   timestamp: string;
   as_of_date: string;
   trace_id?: string | null;
-  rule_snapshot: MarketMonitorRuleSnapshot;
-  model_overlay: MarketMonitorModelOverlay;
-  final_execution_card?: MarketExecutionCard | null;
+  market_data_snapshot: MarketDataSnapshot;
+  missing_data: MarketMissingDataItem[];
+  assessment: MarketAssessment;
+  evidence_sources: string[];
+  overall_confidence: number;
 }
 
 export interface MarketMonitorTraceLogEntry {
@@ -408,31 +308,31 @@ export interface MarketMonitorTraceSummary {
   started_at: string;
   finished_at?: string | null;
   duration_ms?: number | null;
-  rule_ready?: boolean | null;
-  base_regime_label?: MarketRegimeLabel | null;
-  final_regime_label?: MarketRegimeLabel | null;
-  overlay_status?: "skipped" | "applied" | "error" | null;
+  overall_confidence?: number | null;
+  long_term_label?: string | null;
+  execution_label?: string | null;
 }
 
-export interface MarketMonitorHistoryPoint {
+export interface MarketHistoryPoint {
   trade_date: string;
-  regime_label: MarketRegimeLabel;
-  long_term_score: number;
-  short_term_score: number;
-  system_risk_score: number;
-  panic_reversal_score: number;
+  long_term_label: string;
+  short_term_label: string;
+  system_risk_label: string;
+  execution_label: string;
+  overall_confidence: number;
 }
 
 export interface MarketMonitorHistoryResponse {
   as_of_date: string;
-  points: MarketMonitorHistoryPoint[];
+  points: MarketHistoryPoint[];
 }
 
 export interface MarketMonitorDataStatusResponse {
   as_of_date: string;
-  source_coverage: MarketSourceCoverage;
-  available_sources: string[];
-  pending_sources: string[];
+  available_local_data: string[];
+  missing_data: MarketMissingDataItem[];
+  search_enabled: boolean;
+  latest_cache_status: Record<string, unknown>;
 }
 
 export class ApiError extends Error {

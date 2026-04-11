@@ -6,12 +6,12 @@ import {
 } from "./marketMonitorCardHelp";
 
 const REQUIRED_KEYS: MarketMonitorCardHelpKey[] = [
-  "panic_module",
-  "long_term_score",
-  "short_term_score",
-  "system_risk_score",
-  "model_overlay",
-  "rule_snapshot",
+  "long_term_card",
+  "short_term_card",
+  "system_risk_card",
+  "execution_card",
+  "event_risk_card",
+  "panic_card",
 ];
 
 describe("marketMonitorCardHelp", () => {

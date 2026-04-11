@@ -48,8 +48,8 @@ describe("MarketMonitorExecutionTrace", () => {
           {
             line_no: 4,
             timestamp: "2026-04-11T01:16:34",
-            level: "Rule",
-            content: "规则快照 ready=True，基础状态=green",
+            level: "Context",
+            content: "已组装上下文：16 个本地符号，4 个缺失项",
           },
         ]}
         isLoading={false}
@@ -62,10 +62,10 @@ describe("MarketMonitorExecutionTrace", () => {
     expect(screen.getByText("接收请求")).toBeInTheDocument();
     expect(screen.getByText("检查缓存")).toBeInTheDocument();
     expect(screen.getByText("准备市场数据")).toBeInTheDocument();
-    expect(screen.getByText("生成规则快照")).toBeInTheDocument();
-    expect(screen.getByText("生成模型叠加")).toBeInTheDocument();
+    expect(screen.getByText("组装裁决上下文")).toBeInTheDocument();
+    expect(screen.getByText("生成 LLM 裁决")).toBeInTheDocument();
     expect(screen.getByText("进行中")).toBeInTheDocument();
-    expect(screen.getByText("规则快照 ready=True，基础状态=green")).toBeInTheDocument();
+    expect(screen.getByText("已组装上下文：16 个本地符号，4 个缺失项")).toBeInTheDocument();
   });
 
   it("marks the failing step when an error log appears", () => {
@@ -81,8 +81,8 @@ describe("MarketMonitorExecutionTrace", () => {
           {
             line_no: 2,
             timestamp: "2026-04-11T01:17:24",
-            level: "Overlay",
-            content: "模型叠加状态=error",
+            level: "Assessment",
+            content: "LLM 裁决失败",
           },
           {
             line_no: 3,
@@ -97,7 +97,7 @@ describe("MarketMonitorExecutionTrace", () => {
       />,
     );
 
-    expect(screen.getByText("生成模型叠加")).toBeInTheDocument();
+    expect(screen.getByText("生成 LLM 裁决")).toBeInTheDocument();
     expect(screen.getByText("执行失败")).toBeInTheDocument();
     expect(screen.getByText("RuntimeError: 上游服务不可用")).toBeInTheDocument();
   });
@@ -139,20 +139,20 @@ describe("MarketMonitorExecutionTrace", () => {
         {
           line_no: 4,
           timestamp: "2026-04-11T01:16:34",
-          level: "Rule",
-          content: "规则快照 ready=True，基础状态=green",
+          level: "Context",
+          content: "已组装上下文：16 个本地符号，4 个缺失项",
         },
         {
           line_no: 5,
           timestamp: "2026-04-11T01:16:34",
-          level: "Overlay",
-          content: "已生成 3 条上下文查询",
+          level: "Assessment",
+          content: "LLM 裁决完成：长线=偏多，执行=顺势参与",
         },
       ],
       true,
     );
 
-    expect(steps.find((item) => item.key === "merge")?.status).toBe("waiting");
+    expect(steps.find((item) => item.key === "assessment")?.status).toBe("completed");
     expect(steps.find((item) => item.key === "response")?.status).toBe("waiting");
   });
 });

@@ -6,8 +6,8 @@ from unittest.mock import patch
 
 import pandas as pd
 
-from tradingagents.web.market_monitor.schemas import MarketMonitorModelOverlay, MarketMonitorSnapshotRequest
 from tradingagents.web.market_monitor.service import MarketMonitorService
+from tradingagents.web.market_monitor.schemas import MarketMonitorSnapshotRequest
 from tradingagents.web.market_monitor.universe import get_market_monitor_universe
 
 
@@ -35,7 +35,7 @@ def _dataset_missing_spy() -> dict[str, dict[str, pd.DataFrame]]:
 
 
 class MarketMonitorNoCacheTests(unittest.TestCase):
-    def test_missing_required_data_returns_structured_gap_not_placeholder_scores(self) -> None:
+    def test_missing_required_data_is_reported_in_missing_data_list(self) -> None:
         service = MarketMonitorService()
         dataset = _dataset_missing_spy()
 
@@ -43,23 +43,19 @@ class MarketMonitorNoCacheTests(unittest.TestCase):
             "tradingagents.web.market_monitor.service.build_market_dataset",
             return_value=dataset,
         ), patch.object(
-            service._overlay_service,
-            "create_overlay",
-            return_value=MarketMonitorModelOverlay(status="skipped", notes=["test"]),
+            service._assessment_service,
+            "create_assessment",
+            return_value=(service._assessment_service._build_error_assessment("缺少本地关键数据。"), [], [], 0.1),
         ), patch(
             "tradingagents.web.market_monitor.service.load_snapshot_cache",
             return_value=None,
         ), patch(
             "tradingagents.web.market_monitor.service.save_snapshot_cache",
-        ) as mocked_save_cache:
+        ):
             response = service.get_snapshot(MarketMonitorSnapshotRequest(as_of_date=date(2026, 4, 10)))
 
-        self.assertFalse(response.rule_snapshot.ready)
-        self.assertIn("SPY", response.rule_snapshot.missing_inputs)
-        self.assertIsNone(response.rule_snapshot.long_term_score)
-        self.assertEqual(response.rule_snapshot.source_coverage.data_freshness, "live_request_yfinance_daily")
-        self.assertNotIn("fallback_placeholder", response.rule_snapshot.source_coverage.data_freshness)
-        mocked_save_cache.assert_not_called()
+        self.assertTrue(any(item.key == "missing_symbol_SPY" for item in response.missing_data))
+        self.assertEqual(response.assessment.long_term_card.label, "待确认")
 
     def test_failed_snapshot_persists_trace_snapshot(self) -> None:
         dataset = _dataset_missing_spy()
@@ -70,14 +66,14 @@ class MarketMonitorNoCacheTests(unittest.TestCase):
                 "tradingagents.web.market_monitor.service.build_market_dataset",
                 return_value=dataset,
             ), patch.object(
-                service._overlay_service,
-                "create_overlay",
-                side_effect=RuntimeError("overlay boom"),
+                service._assessment_service,
+                "create_assessment",
+                side_effect=RuntimeError("assessment boom"),
             ), patch(
                 "tradingagents.web.market_monitor.service.load_snapshot_cache",
                 return_value=None,
             ):
-                with self.assertRaisesRegex(RuntimeError, "overlay boom"):
+                with self.assertRaisesRegex(RuntimeError, "assessment boom"):
                     service.get_snapshot(MarketMonitorSnapshotRequest(as_of_date=date(2026, 4, 10)))
 
             traces = service.list_traces()
@@ -85,9 +81,7 @@ class MarketMonitorNoCacheTests(unittest.TestCase):
             self.assertEqual(traces[0].status, "failed")
             detail = service.get_trace_detail(traces[0].trace_id)
             self.assertEqual(detail.error["stage"], "snapshot")
-            self.assertIn("overlay boom", detail.error["message"])
-            logs = service.list_trace_logs(traces[0].trace_id)
-            self.assertTrue(any(item.level == "Error" for item in logs))
+            self.assertIn("assessment boom", detail.error["message"])
 
 
 if __name__ == "__main__":

@@ -11,7 +11,7 @@ from tradingagents.web.market_monitor import cache
 
 
 class MarketMonitorCacheTests(unittest.TestCase):
-    def test_load_symbol_daily_cache_does_not_fallback_to_legacy_files(self) -> None:
+    def test_load_symbol_daily_cache_ignores_unrelated_files(self) -> None:
         with TemporaryDirectory() as temp_dir:
             temp_path = Path(temp_dir)
             market_monitor_dir = temp_path / "market_monitor"
@@ -30,23 +30,23 @@ class MarketMonitorCacheTests(unittest.TestCase):
 
             self.assertTrue(frame.empty)
 
-    def test_load_snapshot_cache_rejects_legacy_raw_payload(self) -> None:
+    def test_load_snapshot_cache_returns_raw_payload(self) -> None:
         with TemporaryDirectory() as temp_dir:
             temp_path = Path(temp_dir)
             market_monitor_dir = temp_path / "market_monitor"
             market_monitor_dir.mkdir()
             snapshot_path = market_monitor_dir / "snapshot_2026-04-10.json"
             snapshot_path.write_text(
-                json.dumps({"as_of_date": "2026-04-10", "rule_snapshot": {"ready": True}}),
+                json.dumps({"as_of_date": "2026-04-10", "overall_confidence": 0.81}),
                 encoding="utf-8",
             )
 
             with patch.object(cache, "MARKET_MONITOR_CACHE_DIR", market_monitor_dir):
                 payload = cache.load_snapshot_cache(date(2026, 4, 10))
 
-            self.assertIsNone(payload)
+            self.assertEqual(payload, {"as_of_date": "2026-04-10", "overall_confidence": 0.81})
 
-    def test_save_snapshot_cache_wraps_payload_with_current_version(self) -> None:
+    def test_save_snapshot_cache_persists_raw_payload(self) -> None:
         with TemporaryDirectory() as temp_dir:
             temp_path = Path(temp_dir)
             market_monitor_dir = temp_path / "market_monitor"
@@ -56,8 +56,7 @@ class MarketMonitorCacheTests(unittest.TestCase):
                 cache.save_snapshot_cache(date(2026, 4, 10), {"status": "ok"})
                 saved = json.loads((market_monitor_dir / "snapshot_2026-04-10.json").read_text(encoding="utf-8"))
 
-            self.assertEqual(saved["cache_version"], 1)
-            self.assertEqual(saved["snapshot"], {"status": "ok"})
+            self.assertEqual(saved, {"status": "ok"})
 
 
 if __name__ == "__main__":

@@ -39,18 +39,16 @@ class MarketMonitorTraceLogger:
             "started_at": self.started_at.isoformat(),
             "finished_at": None,
             "duration_ms": None,
-            "rule_ready": None,
-            "base_regime_label": None,
-            "final_regime_label": None,
-            "overlay_status": None,
+            "overall_confidence": None,
+            "long_term_label": None,
+            "execution_label": None,
             "log_path": str(self.log_path),
             "snapshot_path": str(self.snapshot_path),
             "request": {},
             "cache_decision": {},
             "dataset_summary": {},
-            "rule_snapshot_summary": {},
-            "overlay_summary": {},
-            "final_execution_summary": {},
+            "context_summary": {},
+            "assessment_summary": {},
             "response_summary": {},
             "error": {},
         }
@@ -214,16 +212,4 @@ def _sanitize_trace_payload(payload: dict[str, Any]) -> dict[str, Any]:
     sanitized = dict(payload)
     sanitized.pop("log_path", None)
     sanitized.pop("snapshot_path", None)
-
-    overlay_summary = dict(sanitized.get("overlay_summary") or {})
-    queries = overlay_summary.pop("queries", None)
-    evidence_sources = overlay_summary.pop("evidence_sources", None)
-    notes = overlay_summary.pop("notes", None)
-    if queries is not None:
-        overlay_summary["query_count"] = len(queries)
-    if evidence_sources is not None:
-        overlay_summary["evidence_source_count"] = len(evidence_sources)
-    if notes is not None:
-        overlay_summary["note_count"] = len(notes)
-    sanitized["overlay_summary"] = overlay_summary
     return sanitized
