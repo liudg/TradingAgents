@@ -7,7 +7,6 @@ import {
   Progress,
   Result,
   Row,
-  Skeleton,
   Space,
   Statistic,
   Tag,
@@ -19,8 +18,11 @@ import { useEffect, useMemo, useState } from "react";
 import {
   useMarketMonitorHistory,
   useMarketMonitorSnapshot,
+  useMarketMonitorTraceLogs,
+  useMarketMonitorTraces,
 } from "../api/hooks";
 import { MarketRegimeLabel, MarketScoreCard } from "../api/types";
+import { MarketMonitorExecutionTrace } from "../components/MarketMonitorExecutionTrace";
 import { extractErrorMessage, formatDateTime } from "../utils/format";
 
 const regimeLabelMap: Record<MarketRegimeLabel, string> = {
@@ -108,7 +110,15 @@ function ScoreCardBlock(props: { title: string; card?: MarketScoreCard | null })
 export function MarketMonitorPage() {
   const [historyEnabled, setHistoryEnabled] = useState(false);
   const snapshotQuery = useMarketMonitorSnapshot();
+  const runningTracesQuery = useMarketMonitorTraces(
+    "running",
+    !snapshotQuery.data?.trace_id,
+    1,
+  );
   const historyQuery = useMarketMonitorHistory(historyEnabled);
+  const activeTraceId =
+    snapshotQuery.data?.trace_id ?? runningTracesQuery.data?.[0]?.trace_id;
+  const traceLogsQuery = useMarketMonitorTraceLogs(activeTraceId, Boolean(activeTraceId));
   const ruleSnapshotReady = snapshotQuery.data?.rule_snapshot.ready;
   const overlayStatus = snapshotQuery.data?.model_overlay.status;
   const topStatus = useMemo(() => {
@@ -125,9 +135,29 @@ export function MarketMonitorPage() {
 
   if (snapshotQuery.isLoading) {
     return (
-      <Card className="page-card" title="市场监控">
-        <Skeleton active paragraph={{ rows: 14 }} />
-      </Card>
+      <Space direction="vertical" size="large" style={{ width: "100%" }}>
+        <Card className="page-card" title="市场监控">
+          <Alert
+            type="info"
+            showIcon
+            message="正在分析市场状态"
+            description="结果看板会在本次分析完成后自动展示。"
+          />
+        </Card>
+        <MarketMonitorExecutionTrace
+          logs={traceLogsQuery.data || []}
+          isLoading={traceLogsQuery.isLoading || runningTracesQuery.isLoading}
+          isFetching={traceLogsQuery.isFetching || runningTracesQuery.isFetching}
+          isCompleted={false}
+          errorMessage={
+            traceLogsQuery.isError
+              ? extractErrorMessage(traceLogsQuery.error)
+              : runningTracesQuery.isError
+                ? extractErrorMessage(runningTracesQuery.error)
+                : null
+          }
+        />
+      </Space>
     );
   }
 
@@ -143,6 +173,10 @@ export function MarketMonitorPage() {
 
   const snapshot = snapshotQuery.data;
   const history = historyEnabled ? historyQuery.data : undefined;
+  const traceLogs = Array.isArray(traceLogsQuery.data) ? traceLogsQuery.data : [];
+  const hasTerminalTraceLog = traceLogs.some(
+    (item) => item.level === "Response" || item.level === "Error",
+  );
   const ruleSnapshot = snapshot.rule_snapshot;
   const overlay = snapshot.model_overlay;
   const finalExecutionCard = snapshot.final_execution_card;
@@ -424,6 +458,14 @@ export function MarketMonitorPage() {
           )}
         />
       </Card>
+
+      <MarketMonitorExecutionTrace
+        logs={traceLogs}
+        isLoading={traceLogsQuery.isLoading && traceLogs.length === 0}
+        isFetching={traceLogsQuery.isFetching}
+        isCompleted={hasTerminalTraceLog}
+        errorMessage={traceLogsQuery.isError ? extractErrorMessage(traceLogsQuery.error) : null}
+      />
     </Space>
   );
 }

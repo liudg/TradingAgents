@@ -387,9 +387,31 @@ export interface MarketMonitorModelOverlay {
 export interface MarketMonitorSnapshotResponse {
   timestamp: string;
   as_of_date: string;
+  trace_id?: string | null;
   rule_snapshot: MarketMonitorRuleSnapshot;
   model_overlay: MarketMonitorModelOverlay;
   final_execution_card?: MarketExecutionCard | null;
+}
+
+export interface MarketMonitorTraceLogEntry {
+  line_no: number;
+  timestamp: string | null;
+  level: string;
+  content: string;
+}
+
+export interface MarketMonitorTraceSummary {
+  trace_id: string;
+  as_of_date: string;
+  status: string;
+  force_refresh: boolean;
+  started_at: string;
+  finished_at?: string | null;
+  duration_ms?: number | null;
+  rule_ready?: boolean | null;
+  base_regime_label?: MarketRegimeLabel | null;
+  final_regime_label?: MarketRegimeLabel | null;
+  overlay_status?: "skipped" | "applied" | "error" | null;
 }
 
 export interface MarketMonitorHistoryPoint {

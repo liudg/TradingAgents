@@ -15,6 +15,8 @@ import {
   fetchMarketMonitorDataStatus,
   fetchMarketMonitorHistory,
   fetchMarketMonitorSnapshot,
+  fetchMarketMonitorTraceLogs,
+  fetchMarketMonitorTraces,
   fetchMetadataOptions,
 } from "./client";
 import { AnalysisJobRequest, BacktestJobRequest, JobStatus } from "./types";
@@ -126,6 +128,10 @@ export function useMarketMonitorSnapshot() {
   return useQuery({
     queryKey: ["market-monitor-snapshot"],
     queryFn: fetchMarketMonitorSnapshot,
+    refetchInterval: (query) => {
+      const data = query.state.data;
+      return data?.trace_id ? false : 2000;
+    },
   });
 }
 
@@ -141,5 +147,36 @@ export function useMarketMonitorDataStatus() {
   return useQuery({
     queryKey: ["market-monitor-data-status"],
     queryFn: fetchMarketMonitorDataStatus,
+  });
+}
+
+export function useMarketMonitorTraceLogs(
+  traceId?: string | null,
+  enabled = true,
+) {
+  return useQuery({
+    queryKey: ["market-monitor-trace-logs", traceId],
+    queryFn: () => fetchMarketMonitorTraceLogs(traceId || ""),
+    refetchInterval: (query) => {
+      const logs = Array.isArray(query.state.data) ? query.state.data : [];
+      const hasTerminalLog = logs.some(
+        (item) => item.level === "Response" || item.level === "Error",
+      );
+      return enabled && traceId && !hasTerminalLog ? 2000 : false;
+    },
+    enabled: enabled && Boolean(traceId),
+  });
+}
+
+export function useMarketMonitorTraces(
+  status?: string,
+  enabled = true,
+  limit = 20,
+) {
+  return useQuery({
+    queryKey: ["market-monitor-traces", status, limit],
+    queryFn: () => fetchMarketMonitorTraces(status, limit),
+    refetchInterval: enabled ? 2000 : false,
+    enabled,
   });
 }

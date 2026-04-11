@@ -14,6 +14,8 @@ import {
   MarketMonitorDataStatusResponse,
   MarketMonitorHistoryResponse,
   MarketMonitorSnapshotResponse,
+  MarketMonitorTraceLogEntry,
+  MarketMonitorTraceSummary,
   MetadataOptionsResponse,
 } from "./types";
 
@@ -125,5 +127,21 @@ export async function fetchMarketMonitorHistory() {
 export async function fetchMarketMonitorDataStatus() {
   return requestJson<MarketMonitorDataStatusResponse>(
     "/api/market-monitor/data-status",
+  );
+}
+
+export async function fetchMarketMonitorTraceLogs(traceId: string) {
+  return requestJson<MarketMonitorTraceLogEntry[]>(
+    `/api/market-monitor/traces/${traceId}/logs`,
+  );
+}
+
+export async function fetchMarketMonitorTraces(status?: string, limit = 20) {
+  const searchParams = new URLSearchParams({ limit: String(limit) });
+  if (status) {
+    searchParams.set("status", status);
+  }
+  return requestJson<MarketMonitorTraceSummary[]>(
+    `/api/market-monitor/traces?${searchParams.toString()}`,
   );
 }

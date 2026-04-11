@@ -54,18 +54,23 @@ class MarketMonitorTraceLogger:
             "response_summary": {},
             "error": {},
         }
+        self._persist_running_snapshot()
 
     def log_event(self, level: str, content: str) -> None:
         timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         normalized = content.replace("\r\n", "\n").replace("\n", " ")
+        self.trace_dir.mkdir(parents=True, exist_ok=True)
         with self.log_path.open("a", encoding="utf-8") as handle:
             handle.write(f"{timestamp} [{level}] {normalized}\n")
+        self._persist_running_snapshot()
 
     def set_stage(self, stage_name: str, payload: dict[str, Any]) -> None:
         self.payload[stage_name] = payload
+        self._persist_running_snapshot()
 
     def set_summary_fields(self, **fields: Any) -> None:
         self.payload.update(fields)
+        self._persist_running_snapshot()
 
     def complete(self, response_summary: dict[str, Any]) -> None:
         self.payload["status"] = "completed"
@@ -88,6 +93,12 @@ class MarketMonitorTraceLogger:
             (self.finished_at - self.started_at).total_seconds() * 1000
         )
         _write_json_atomic(self.snapshot_path, self.payload)
+
+    def _persist_running_snapshot(self) -> None:
+        payload = dict(self.payload)
+        payload["finished_at"] = None
+        payload["duration_ms"] = None
+        _write_json_atomic(self.snapshot_path, payload)
 
 
 class MarketMonitorTraceStore:

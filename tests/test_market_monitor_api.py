@@ -1,5 +1,6 @@
 import unittest
 from datetime import date
+from threading import Event, Thread
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest.mock import patch
@@ -149,6 +150,65 @@ class MarketMonitorApiTests(unittest.TestCase):
         self.assertIn("final_regime_label", detail["final_execution_summary"])
         logs_payload = self.client.get(f"/api/market-monitor/traces/{trace_id}/logs").json()
         self.assertTrue(any("Returning cached snapshot" in item["content"] for item in logs_payload))
+
+    def test_running_trace_is_listed_before_snapshot_response_finishes(self) -> None:
+        dataset = _complete_dataset()
+        skipped_overlay = MarketMonitorModelOverlay(status="skipped", notes=["test"])
+        started = Event()
+        release_overlay = Event()
+        captured: dict[str, object] = {}
+
+        def delayed_overlay(*_args, **_kwargs):
+            started.set()
+            release_overlay.wait(timeout=5)
+            return skipped_overlay
+
+        def request_snapshot() -> None:
+            captured["response"] = self.client.get(
+                "/api/market-monitor/snapshot",
+                params={"as_of_date": date(2026, 4, 10).isoformat()},
+            )
+
+        with patch(
+            "tradingagents.web.market_monitor.service.build_market_dataset",
+            return_value=dataset,
+        ), patch.object(
+            market_monitor_service._overlay_service,
+            "create_overlay",
+            side_effect=delayed_overlay,
+        ), patch(
+            "tradingagents.web.market_monitor.service.load_snapshot_cache",
+            return_value=None,
+        ), patch(
+            "tradingagents.web.market_monitor.service.save_snapshot_cache",
+        ):
+            worker = Thread(target=request_snapshot)
+            worker.start()
+            self.assertTrue(started.wait(timeout=5))
+
+            traces_response = self.client.get(
+                "/api/market-monitor/traces",
+                params={"status": "running", "limit": 5},
+            )
+            self.assertEqual(traces_response.status_code, 200)
+            traces_payload = traces_response.json()
+            self.assertEqual(len(traces_payload), 1)
+            self.assertEqual(traces_payload[0]["status"], "running")
+            trace_id = traces_payload[0]["trace_id"]
+
+            logs_response = self.client.get(f"/api/market-monitor/traces/{trace_id}/logs")
+            self.assertEqual(logs_response.status_code, 200)
+            logs_payload = logs_response.json()
+            self.assertTrue(any(item["level"] == "Request" for item in logs_payload))
+            self.assertTrue(any(item["level"] == "Rule" for item in logs_payload))
+
+            release_overlay.set()
+            worker.join(timeout=5)
+
+        response = captured["response"]
+        self.assertEqual(response.status_code, 200)
+        detail_payload = self.client.get(f"/api/market-monitor/traces/{trace_id}").json()
+        self.assertEqual(detail_payload["status"], "completed")
 
 
 if __name__ == "__main__":
