@@ -1,4 +1,5 @@
 import { render, screen, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 
 import { MarketMonitorPage } from "./MarketMonitorPage";
@@ -7,10 +8,6 @@ const mockUseMarketMonitorSnapshot = vi.fn();
 const mockUseMarketMonitorHistory = vi.fn();
 const mockUseMarketMonitorTraceLogs = vi.fn();
 const mockUseMarketMonitorTraces = vi.fn();
-let snapshotQueryState: unknown;
-let historyQueryState: unknown;
-let traceLogsQueryState: unknown;
-let tracesQueryState: unknown;
 
 vi.mock("../api/hooks", () => ({
   useMarketMonitorSnapshot: () => mockUseMarketMonitorSnapshot(),
@@ -19,26 +16,143 @@ vi.mock("../api/hooks", () => ({
   useMarketMonitorTraces: () => mockUseMarketMonitorTraces(),
 }));
 
+function installMatchMedia() {
+  Object.defineProperty(window, "matchMedia", {
+    writable: true,
+    value: vi.fn().mockImplementation((query: string) => ({
+      matches: false,
+      media: query,
+      onchange: null,
+      addListener: vi.fn(),
+      removeListener: vi.fn(),
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+      dispatchEvent: vi.fn(),
+    })),
+  });
+}
+
+function buildLoadedSnapshot(overrides?: Record<string, unknown>) {
+  return {
+    timestamp: "2026-04-11T08:30:00Z",
+    as_of_date: "2026-04-11",
+    trace_id: "trace-1",
+    rule_snapshot: {
+      ready: true,
+      long_term_score: {
+        score: 72.1,
+        zone: "进攻区",
+        delta_1d: 1.2,
+        delta_5d: 2.8,
+        slope_state: "缓慢改善",
+        action: "中期趋势稳健，可逐步提高风险暴露。",
+      },
+      short_term_score: {
+        score: 61.5,
+        zone: "可做区",
+        delta_1d: 0.4,
+        delta_5d: 1.1,
+        slope_state: "钝化震荡",
+        action: "短线条件允许操作，适合低吸和确认后突破。",
+      },
+      system_risk_score: {
+        score: 55.4,
+        zone: "压力区",
+        delta_1d: -0.5,
+        delta_5d: 0.3,
+        slope_state: "钝化震荡",
+        action: "系统风险抬升，应收紧风险预算并减少追价。",
+      },
+      panic_reversal_score: null,
+      base_regime_label: "green",
+      base_execution_card: {
+        regime_label: "green",
+        conflict_mode: "trend_and_tape_aligned",
+        total_exposure_range: "40-60%",
+        new_position_allowed: true,
+        chase_breakout_allowed: true,
+        dip_buy_allowed: true,
+        overnight_allowed: true,
+        leverage_allowed: false,
+        single_position_cap: "10%",
+        daily_risk_budget: "1R",
+        tactic_preference: "trend",
+        preferred_assets: ["QQQ"],
+        avoid_assets: ["UVXY"],
+        signal_confirmation: {
+          current_regime_days: 3,
+          downgrade_unlock_in_days: 0,
+          note: "状态已确认",
+        },
+        event_risk_flag: {
+          index_level: { active: false, type: null, note: "" },
+          stock_level: { active: false, rule: "标准规则", tickers: [] },
+        },
+        summary: "当前适合顺着主趋势参与。",
+      },
+      base_event_risk_flag: {
+        index_level: { active: false, type: null, note: "" },
+        stock_level: { active: false, rule: "标准规则", tickers: [] },
+      },
+      source_coverage: {
+        status: "full",
+        data_freshness: "fresh",
+        degraded_factors: ["intraday_panic_confirmation_missing"],
+        notes: ["实时 Yahoo Finance 日线数据已完成更新。"],
+      },
+      missing_inputs: [],
+      degraded_factors: ["intraday_panic_confirmation_missing"],
+      key_indicators: {},
+    },
+    model_overlay: {
+      status: "applied",
+      regime_override: "green",
+      execution_adjustments: null,
+      event_risk_override: null,
+      market_narrative: "市场广度正在改善。",
+      risk_narrative: "整体风险仍处于可控范围。",
+      panic_narrative: "当前没有恐慌反转信号。",
+      evidence_sources: ["snapshot"],
+      model_confidence: 0.82,
+      notes: [],
+    },
+    final_execution_card: {
+      regime_label: "green",
+      conflict_mode: "trend_and_tape_aligned",
+      total_exposure_range: "50-70%",
+      new_position_allowed: true,
+      chase_breakout_allowed: true,
+      dip_buy_allowed: true,
+      overnight_allowed: true,
+      leverage_allowed: false,
+      single_position_cap: "10%",
+      daily_risk_budget: "1R",
+      tactic_preference: "trend",
+      preferred_assets: ["QQQ"],
+      avoid_assets: ["UVXY"],
+      signal_confirmation: {
+        current_regime_days: 3,
+        downgrade_unlock_in_days: 0,
+        note: "状态已确认",
+      },
+      event_risk_flag: {
+        index_level: { active: false, type: null, note: "" },
+        stock_level: { active: false, rule: "标准规则", tickers: [] },
+      },
+      summary: "继续沿主趋势执行。",
+    },
+    ...overrides,
+  };
+}
+
 describe("MarketMonitorPage", () => {
   it("renders successfully after transitioning from loading to loaded state", () => {
-    Object.defineProperty(window, "matchMedia", {
-      writable: true,
-      value: vi.fn().mockImplementation((query: string) => ({
-        matches: false,
-        media: query,
-        onchange: null,
-        addListener: vi.fn(),
-        removeListener: vi.fn(),
-        addEventListener: vi.fn(),
-        removeEventListener: vi.fn(),
-        dispatchEvent: vi.fn(),
-      })),
-    });
+    installMatchMedia();
 
     const snapshotRefetch = vi.fn();
     const historyRefetch = vi.fn();
 
-    historyQueryState = {
+    mockUseMarketMonitorHistory.mockImplementation(() => ({
       data: {
         as_of_date: "2026-04-11",
         points: [
@@ -53,17 +167,15 @@ describe("MarketMonitorPage", () => {
         ],
       },
       refetch: historyRefetch,
-    };
-    mockUseMarketMonitorHistory.mockImplementation(() => historyQueryState);
-    tracesQueryState = {
+    }));
+    mockUseMarketMonitorTraces.mockImplementation(() => ({
       data: [{ trace_id: "trace-1", status: "running" }],
       isLoading: false,
       isFetching: true,
       isError: false,
       error: null,
-    };
-    mockUseMarketMonitorTraces.mockImplementation(() => tracesQueryState);
-    traceLogsQueryState = {
+    }));
+    mockUseMarketMonitorTraceLogs.mockImplementation(() => ({
       data: [
         {
           line_no: 1,
@@ -76,17 +188,15 @@ describe("MarketMonitorPage", () => {
       isFetching: true,
       isError: false,
       error: null,
-    };
-    mockUseMarketMonitorTraceLogs.mockImplementation(() => traceLogsQueryState);
+    }));
 
-    snapshotQueryState = {
+    mockUseMarketMonitorSnapshot.mockImplementationOnce(() => ({
       isLoading: true,
       isError: false,
       data: undefined,
       error: null,
       refetch: snapshotRefetch,
-    };
-    mockUseMarketMonitorSnapshot.mockImplementation(() => snapshotQueryState);
+    }));
 
     const { rerender } = render(<MarketMonitorPage />);
 
@@ -95,129 +205,21 @@ describe("MarketMonitorPage", () => {
     expect(screen.getByText("执行过程")).toBeInTheDocument();
     expect(screen.getByText("接收请求")).toBeInTheDocument();
 
-    snapshotQueryState = {
+    mockUseMarketMonitorSnapshot.mockImplementation(() => ({
       isLoading: false,
       isError: false,
-      data: {
-        timestamp: "2026-04-11T08:30:00Z",
-        as_of_date: "2026-04-11",
-        trace_id: "trace-1",
-        rule_snapshot: {
-          ready: true,
-          long_term_score: {
-            score: 72.1,
-            zone: "进攻区",
-            delta_1d: 1.2,
-            delta_5d: 2.8,
-            slope_state: "缓慢改善",
-            action: "中期趋势健康，可以择机增加风险暴露。",
-          },
-          short_term_score: {
-            score: 61.5,
-            zone: "可做区",
-            delta_1d: 0.4,
-            delta_5d: 1.1,
-            slope_state: "钝化震荡",
-            action: "短线条件可操作，适合低吸和确认后的突破。",
-          },
-          system_risk_score: {
-            score: 55.4,
-            zone: "压力区",
-            delta_1d: -0.5,
-            delta_5d: 0.3,
-            slope_state: "钝化震荡",
-            action: "系统风险抬升，应收紧风险预算并减少追价。",
-          },
-          panic_reversal_score: null,
-          base_regime_label: "green",
-          base_execution_card: {
-            regime_label: "green",
-            conflict_mode: "trend_and_tape_aligned",
-            total_exposure_range: "40-60%",
-            new_position_allowed: true,
-            chase_breakout_allowed: true,
-            dip_buy_allowed: true,
-            overnight_allowed: true,
-            leverage_allowed: false,
-            single_position_cap: "10%",
-            daily_risk_budget: "1R",
-            tactic_preference: "trend",
-            preferred_assets: ["QQQ"],
-            avoid_assets: ["UVXY"],
-            signal_confirmation: {
-              current_regime_days: 3,
-              downgrade_unlock_in_days: 0,
-              note: "状态已确认",
-            },
-            event_risk_flag: {
-              index_level: { active: false, type: null, note: "" },
-              stock_level: { active: false, rule: "标准规则", tickers: [] },
-            },
-            summary: "当前适合顺着主趋势参与。",
-          },
-          base_event_risk_flag: {
-            index_level: { active: false, type: null, note: "" },
-            stock_level: { active: false, rule: "标准规则", tickers: [] },
-          },
-          source_coverage: {
-            status: "full",
-            data_freshness: "fresh",
-            degraded_factors: ["intraday_panic_confirmation_missing"],
-            notes: ["实时 Yahoo Finance 日线数据已完成更新。"],
-          },
-          missing_inputs: [],
-          degraded_factors: ["intraday_panic_confirmation_missing"],
-          key_indicators: {},
-        },
-        model_overlay: {
-          status: "applied",
-          regime_override: "green",
-          execution_adjustments: null,
-          event_risk_override: null,
-          market_narrative: "市场广度正在改善。",
-          risk_narrative: "总体风险仍处于可控范围。",
-          panic_narrative: "当前没有恐慌反转信号。",
-          evidence_sources: ["snapshot"],
-          model_confidence: 0.82,
-          notes: [],
-        },
-        final_execution_card: {
-          regime_label: "green",
-          conflict_mode: "trend_and_tape_aligned",
-          total_exposure_range: "50-70%",
-          new_position_allowed: true,
-          chase_breakout_allowed: true,
-          dip_buy_allowed: true,
-          overnight_allowed: true,
-          leverage_allowed: false,
-          single_position_cap: "10%",
-          daily_risk_budget: "1R",
-          tactic_preference: "trend",
-          preferred_assets: ["QQQ"],
-          avoid_assets: ["UVXY"],
-          signal_confirmation: {
-            current_regime_days: 3,
-            downgrade_unlock_in_days: 0,
-            note: "状态已确认",
-          },
-          event_risk_flag: {
-            index_level: { active: false, type: null, note: "" },
-            stock_level: { active: false, rule: "标准规则", tickers: [] },
-          },
-          summary: "继续沿主趋势执行。",
-        },
-      },
+      data: buildLoadedSnapshot(),
       error: null,
       refetch: snapshotRefetch,
-    };
-    tracesQueryState = {
+    }));
+    mockUseMarketMonitorTraces.mockImplementation(() => ({
       data: [],
       isLoading: false,
       isFetching: false,
       isError: false,
       error: null,
-    };
-    traceLogsQueryState = {
+    }));
+    mockUseMarketMonitorTraceLogs.mockImplementation(() => ({
       data: [
         {
           line_no: 1,
@@ -236,7 +238,7 @@ describe("MarketMonitorPage", () => {
       isFetching: false,
       isError: false,
       error: null,
-    };
+    }));
 
     rerender(<MarketMonitorPage />);
 
@@ -254,19 +256,7 @@ describe("MarketMonitorPage", () => {
   });
 
   it("does not mark trailing steps as completed before terminal logs arrive", () => {
-    Object.defineProperty(window, "matchMedia", {
-      writable: true,
-      value: vi.fn().mockImplementation((query: string) => ({
-        matches: false,
-        media: query,
-        onchange: null,
-        addListener: vi.fn(),
-        removeListener: vi.fn(),
-        addEventListener: vi.fn(),
-        removeEventListener: vi.fn(),
-        dispatchEvent: vi.fn(),
-      })),
-    });
+    installMatchMedia();
 
     mockUseMarketMonitorHistory.mockImplementation(() => ({
       data: { as_of_date: "2026-04-11", points: [] },
@@ -304,115 +294,7 @@ describe("MarketMonitorPage", () => {
       isError: false,
       error: null,
       refetch: vi.fn(),
-      data: {
-        timestamp: "2026-04-11T08:30:00Z",
-        as_of_date: "2026-04-11",
-        trace_id: "trace-1",
-        rule_snapshot: {
-          ready: true,
-          long_term_score: {
-            score: 72.1,
-            zone: "进攻区",
-            delta_1d: 1.2,
-            delta_5d: 2.8,
-            slope_state: "缓慢改善",
-            action: "中期趋势健康，可以择机增加风险暴露。",
-          },
-          short_term_score: {
-            score: 61.5,
-            zone: "可做区",
-            delta_1d: 0.4,
-            delta_5d: 1.1,
-            slope_state: "钝化震荡",
-            action: "短线条件可操作，适合低吸和确认后的突破。",
-          },
-          system_risk_score: {
-            score: 55.4,
-            zone: "压力区",
-            delta_1d: -0.5,
-            delta_5d: 0.3,
-            slope_state: "钝化震荡",
-            action: "系统风险抬升，应收紧风险预算并减少追价。",
-          },
-          panic_reversal_score: null,
-          base_regime_label: "green",
-          base_execution_card: {
-            regime_label: "green",
-            conflict_mode: "trend_and_tape_aligned",
-            total_exposure_range: "40-60%",
-            new_position_allowed: true,
-            chase_breakout_allowed: true,
-            dip_buy_allowed: true,
-            overnight_allowed: true,
-            leverage_allowed: false,
-            single_position_cap: "10%",
-            daily_risk_budget: "1R",
-            tactic_preference: "trend",
-            preferred_assets: ["QQQ"],
-            avoid_assets: ["UVXY"],
-            signal_confirmation: {
-              current_regime_days: 3,
-              downgrade_unlock_in_days: 0,
-              note: "状态已确认",
-            },
-            event_risk_flag: {
-              index_level: { active: false, type: null, note: "" },
-              stock_level: { active: false, rule: "标准规则", tickers: [] },
-            },
-            summary: "当前适合顺着主趋势参与。",
-          },
-          base_event_risk_flag: {
-            index_level: { active: false, type: null, note: "" },
-            stock_level: { active: false, rule: "标准规则", tickers: [] },
-          },
-          source_coverage: {
-            status: "full",
-            data_freshness: "fresh",
-            degraded_factors: [],
-            notes: [],
-          },
-          missing_inputs: [],
-          degraded_factors: [],
-          key_indicators: {},
-        },
-        model_overlay: {
-          status: "applied",
-          regime_override: "green",
-          execution_adjustments: null,
-          event_risk_override: null,
-          market_narrative: "市场广度正在改善。",
-          risk_narrative: "总体风险仍处于可控范围。",
-          panic_narrative: "当前没有恐慌反转信号。",
-          evidence_sources: ["snapshot"],
-          model_confidence: 0.82,
-          notes: [],
-        },
-        final_execution_card: {
-          regime_label: "green",
-          conflict_mode: "trend_and_tape_aligned",
-          total_exposure_range: "50-70%",
-          new_position_allowed: true,
-          chase_breakout_allowed: true,
-          dip_buy_allowed: true,
-          overnight_allowed: true,
-          leverage_allowed: false,
-          single_position_cap: "10%",
-          daily_risk_budget: "1R",
-          tactic_preference: "trend",
-          preferred_assets: ["QQQ"],
-          avoid_assets: ["UVXY"],
-          signal_confirmation: {
-            current_regime_days: 3,
-            downgrade_unlock_in_days: 0,
-            note: "状态已确认",
-          },
-          event_risk_flag: {
-            index_level: { active: false, type: null, note: "" },
-            stock_level: { active: false, rule: "标准规则", tickers: [] },
-          },
-          summary: "继续沿主趋势执行。",
-        },
-      },
+      data: buildLoadedSnapshot(),
     }));
 
     render(<MarketMonitorPage />);
@@ -424,5 +306,65 @@ describe("MarketMonitorPage", () => {
     expect(responseStep).not.toBeNull();
     expect(within(mergeStep as HTMLElement).getByText("等待中")).toBeInTheDocument();
     expect(within(responseStep as HTMLElement).getByText("等待中")).toBeInTheDocument();
+  });
+
+  it("shows help triggers for the documented market monitor cards", async () => {
+    installMatchMedia();
+
+    mockUseMarketMonitorHistory.mockImplementation(() => ({
+      data: { as_of_date: "2026-04-11", points: [] },
+      refetch: vi.fn(),
+    }));
+    mockUseMarketMonitorTraces.mockImplementation(() => ({
+      data: [],
+      isLoading: false,
+      isFetching: false,
+      isError: false,
+      error: null,
+    }));
+    mockUseMarketMonitorTraceLogs.mockImplementation(() => ({
+      data: [],
+      isLoading: false,
+      isFetching: false,
+      isError: false,
+      error: null,
+    }));
+    mockUseMarketMonitorSnapshot.mockImplementation(() => ({
+      isLoading: false,
+      isError: false,
+      error: null,
+      refetch: vi.fn(),
+      data: buildLoadedSnapshot({
+        rule_snapshot: {
+          ...buildLoadedSnapshot().rule_snapshot,
+          panic_reversal_score: {
+            score: 64,
+            zone: "一级试错",
+            state: "confirmed",
+            early_entry_allowed: true,
+            stop_loss: "ATRx1.0",
+            profit_rule: "1R 兑现 50%",
+            action: "允许轻仓试探",
+          },
+        },
+      }),
+    }));
+
+    render(<MarketMonitorPage />);
+
+    const panicTrigger = screen.getByTestId("card-help-trigger-panic_module");
+    expect(screen.getByTestId("card-help-trigger-long_term_score")).toBeInTheDocument();
+    expect(screen.getByTestId("card-help-trigger-short_term_score")).toBeInTheDocument();
+    expect(screen.getByTestId("card-help-trigger-system_risk_score")).toBeInTheDocument();
+    expect(screen.getByTestId("card-help-trigger-model_overlay")).toBeInTheDocument();
+    expect(screen.getByTestId("card-help-trigger-rule_snapshot")).toBeInTheDocument();
+    expect(screen.queryByTestId("card-help-trigger-final_execution")).not.toBeInTheDocument();
+
+    const user = userEvent.setup();
+    await user.hover(panicTrigger);
+
+    expect(await screen.findByTestId("card-help-content-panic_module")).toBeInTheDocument();
+    expect(screen.getByText("作用")).toBeInTheDocument();
+    expect(screen.getByText("评分或结论计算规则")).toBeInTheDocument();
   });
 });

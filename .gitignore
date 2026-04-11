@@ -226,3 +226,5 @@ __marimo__/
 web-ui/node_modules/
 web-ui/dist/
 web-ui/coverage/
+web-ui/tsconfig.tsbuildinfo
+web-ui/tsconfig.node.tsbuildinfo

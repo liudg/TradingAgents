@@ -233,6 +233,56 @@ body {
   font-weight: 700;
 }
 
+.market-card-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.market-card-title-text {
+  min-width: 0;
+}
+
+.market-card-help-trigger {
+  flex: 0 0 auto;
+  width: 22px !important;
+  min-width: 22px !important;
+  height: 22px !important;
+  color: #b45309 !important;
+  border: 1px solid #fcd34d !important;
+  background: linear-gradient(180deg, #fffbeb 0%, #fef3c7 100%) !important;
+  box-shadow: 0 4px 10px rgba(217, 119, 6, 0.14);
+}
+
+.market-card-help-trigger:hover,
+.market-card-help-trigger:focus {
+  color: #92400e !important;
+  border-color: #f59e0b !important;
+  background: linear-gradient(180deg, #fef3c7 0%, #fde68a 100%) !important;
+}
+
+.market-card-help-popover .ant-popover-inner {
+  max-width: 360px;
+}
+
+.market-card-help-content {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.market-card-help-section {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.market-card-help-content .ant-typography {
+  margin-bottom: 0;
+}
+
 @media (max-width: 768px) {
   .app-header {
     height: auto;
@@ -254,5 +304,9 @@ body {
     min-height: 42px;
     padding: 0 14px;
     font-size: 15px;
+  }
+
+  .market-card-title {
+    flex-wrap: wrap;
   }
 }
