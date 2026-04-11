@@ -31,25 +31,25 @@ describe("MarketMonitorExecutionTrace", () => {
             line_no: 1,
             timestamp: "2026-04-11T01:16:34",
             level: "Request",
-            content: "Snapshot request started for 2026-04-11",
+            content: "市场监控快照请求开始：2026-04-11",
           },
           {
             line_no: 2,
             timestamp: "2026-04-11T01:16:34",
             level: "Cache",
-            content: "Snapshot cache decision: snapshot_cache_miss",
+            content: "快照缓存决策：snapshot_cache_miss",
           },
           {
             line_no: 3,
             timestamp: "2026-04-11T01:16:34",
             level: "Dataset",
-            content: "Reused in-memory dataset cache",
+            content: "复用内存中的数据集缓存",
           },
           {
             line_no: 4,
             timestamp: "2026-04-11T01:16:34",
             level: "Rule",
-            content: "Rule snapshot ready=True, base_regime=green",
+            content: "规则快照 ready=True，基础状态=green",
           },
         ]}
         isLoading={false}
@@ -65,9 +65,7 @@ describe("MarketMonitorExecutionTrace", () => {
     expect(screen.getByText("生成规则快照")).toBeInTheDocument();
     expect(screen.getByText("生成模型叠加")).toBeInTheDocument();
     expect(screen.getByText("进行中")).toBeInTheDocument();
-    expect(
-      screen.getByText("Rule snapshot ready=True, base_regime=green"),
-    ).toBeInTheDocument();
+    expect(screen.getByText("规则快照 ready=True，基础状态=green")).toBeInTheDocument();
   });
 
   it("marks the failing step when an error log appears", () => {
@@ -78,19 +76,19 @@ describe("MarketMonitorExecutionTrace", () => {
             line_no: 1,
             timestamp: "2026-04-11T01:16:34",
             level: "Request",
-            content: "Snapshot request started for 2026-04-11",
+            content: "市场监控快照请求开始：2026-04-11",
           },
           {
             line_no: 2,
             timestamp: "2026-04-11T01:17:24",
             level: "Overlay",
-            content: "Overlay status=error",
+            content: "模型叠加状态=error",
           },
           {
             line_no: 3,
             timestamp: "2026-04-11T01:17:24",
             level: "Error",
-            content: "RuntimeError: upstream service unavailable",
+            content: "RuntimeError: 上游服务不可用",
           },
         ]}
         isLoading={false}
@@ -101,9 +99,7 @@ describe("MarketMonitorExecutionTrace", () => {
 
     expect(screen.getByText("生成模型叠加")).toBeInTheDocument();
     expect(screen.getByText("执行失败")).toBeInTheDocument();
-    expect(
-      screen.getByText("RuntimeError: upstream service unavailable"),
-    ).toBeInTheDocument();
+    expect(screen.getByText("RuntimeError: 上游服务不可用")).toBeInTheDocument();
   });
 
   it("shows a loading hint before trace logs arrive", () => {
@@ -126,31 +122,31 @@ describe("MarketMonitorExecutionTrace", () => {
           line_no: 1,
           timestamp: "2026-04-11T01:16:34",
           level: "Request",
-          content: "Snapshot request started for 2026-04-11",
+          content: "市场监控快照请求开始：2026-04-11",
         },
         {
           line_no: 2,
           timestamp: "2026-04-11T01:16:34",
           level: "Cache",
-          content: "Snapshot cache decision: snapshot_cache_miss",
+          content: "快照缓存决策：snapshot_cache_miss",
         },
         {
           line_no: 3,
           timestamp: "2026-04-11T01:16:34",
           level: "Dataset",
-          content: "Built dataset from market data source",
+          content: "已从市场数据源构建数据集",
         },
         {
           line_no: 4,
           timestamp: "2026-04-11T01:16:34",
           level: "Rule",
-          content: "Rule snapshot ready=True, base_regime=green",
+          content: "规则快照 ready=True，基础状态=green",
         },
         {
           line_no: 5,
           timestamp: "2026-04-11T01:16:34",
           level: "Overlay",
-          content: "Generated 3 context queries",
+          content: "已生成 3 条上下文查询",
         },
       ],
       true,

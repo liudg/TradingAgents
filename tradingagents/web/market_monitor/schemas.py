@@ -24,7 +24,7 @@ class MarketMonitorSnapshotRequest(BaseModel):
     @classmethod
     def validate_as_of_date(cls, value: Optional[date]) -> Optional[date]:
         if value and value > date.today():
-            raise ValueError("as_of_date cannot be in the future")
+            raise ValueError("as_of_date 不能晚于今天")
         return value
 
 

@@ -226,7 +226,7 @@ def get_market_monitor_trace(trace_id: str) -> MarketMonitorTraceDetail:
     try:
         return market_monitor_service.get_trace_detail(trace_id)
     except KeyError as exc:
-        raise HTTPException(status_code=404, detail="Market monitor trace not found") from exc
+        raise HTTPException(status_code=404, detail="未找到市场监控追踪记录") from exc
     except ValueError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
 
@@ -239,7 +239,7 @@ def get_market_monitor_trace_logs(trace_id: str) -> list[MarketMonitorTraceLogEn
     try:
         return market_monitor_service.list_trace_logs(trace_id)
     except KeyError as exc:
-        raise HTTPException(status_code=404, detail="Market monitor trace not found") from exc
+        raise HTTPException(status_code=404, detail="未找到市场监控追踪记录") from exc
     except ValueError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
 

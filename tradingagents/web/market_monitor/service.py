@@ -70,7 +70,7 @@ class MarketMonitorService:
         trace = self._trace_store.create_logger(as_of_date, request.force_refresh)
         trace.log_event(
             "Request",
-            f"Snapshot request started for {as_of_date.isoformat()} (force_refresh={request.force_refresh})",
+            f"市场监控快照请求开始：{as_of_date.isoformat()}（force_refresh={request.force_refresh}）",
         )
         trace.set_stage(
             "request",
@@ -87,7 +87,7 @@ class MarketMonitorService:
 
         try:
             if request.force_refresh:
-                trace.log_event("Cache", "Snapshot cache bypassed because force_refresh=True")
+                trace.log_event("Cache", "force_refresh=True，跳过快照缓存")
                 trace.set_stage(
                     "cache_decision",
                     {
@@ -104,7 +104,7 @@ class MarketMonitorService:
                 if cached_snapshot is not None:
                     snapshot_cache_hit = self._is_snapshot_cache_usable(cached_snapshot, as_of_date, universe)
                     cache_reason = "snapshot_cache_hit" if snapshot_cache_hit else "snapshot_cache_unusable"
-                trace.log_event("Cache", f"Snapshot cache decision: {cache_reason}")
+                trace.log_event("Cache", f"快照缓存决策：{cache_reason}")
                 if snapshot_cache_hit:
                     snapshot = MarketMonitorSnapshotResponse.model_validate(cached_snapshot)
                     snapshot.trace_id = trace.trace_id
@@ -152,7 +152,7 @@ class MarketMonitorService:
                             "reason": cache_reason,
                         },
                     )
-                    trace.log_event("Response", "Returning cached snapshot")
+                    trace.log_event("Response", "返回缓存快照")
                     trace.complete(
                         {
                             "served_from_snapshot_cache": True,
@@ -187,10 +187,10 @@ class MarketMonitorService:
             )
             trace.log_event(
                 "Rule",
-                f"Rule snapshot ready={rule_snapshot.ready}, base_regime={rule_snapshot.base_regime_label}",
+                f"规则快照 ready={rule_snapshot.ready}，基础状态={rule_snapshot.base_regime_label}",
             )
             context_queries = self._build_context_queries(rule_snapshot)
-            trace.log_event("Overlay", f"Generated {len(context_queries)} context queries")
+            trace.log_event("Overlay", f"已生成 {len(context_queries)} 条上下文查询")
             model_overlay = self._overlay_service.create_overlay(
                 rule_snapshot,
                 as_of_date.isoformat(),
@@ -199,14 +199,14 @@ class MarketMonitorService:
             overlay_summary = self._summarize_overlay(model_overlay, context_queries)
             trace.set_stage("overlay_summary", overlay_summary)
             trace.set_summary_fields(overlay_status=model_overlay.status)
-            trace.log_event("Overlay", f"Overlay status={model_overlay.status}")
+            trace.log_event("Overlay", f"模型叠加状态={model_overlay.status}")
             final_execution_card = self._merge_overlay(rule_snapshot, model_overlay)
             final_summary = self._summarize_final_execution(rule_snapshot, model_overlay, final_execution_card)
             trace.set_stage("final_execution_summary", final_summary)
             trace.set_summary_fields(final_regime_label=final_summary.get("final_regime_label"))
             trace.log_event(
                 "Merge",
-                f"Final execution regime={final_summary.get('final_regime_label')}, overrides={len(final_summary.get('overridden_fields', []))}",
+                f"最终执行状态={final_summary.get('final_regime_label')}，覆盖字段数={len(final_summary.get('overridden_fields', []))}",
             )
 
             response = MarketMonitorSnapshotResponse(
@@ -221,10 +221,10 @@ class MarketMonitorService:
             if self._is_snapshot_cacheable(response):
                 save_snapshot_cache(as_of_date, response.model_dump(mode="json"))
                 snapshot_cache_written = True
-                trace.log_event("Cache", "Snapshot cache saved")
+                trace.log_event("Cache", "已写入快照缓存")
             else:
-                trace.log_event("Cache", "Snapshot cache skipped because response is not cacheable")
-            trace.log_event("Response", "Snapshot request completed")
+                trace.log_event("Cache", "响应不可缓存，跳过快照缓存写入")
+            trace.log_event("Response", "市场监控快照请求完成")
             trace.complete(
                 {
                     "served_from_snapshot_cache": False,
@@ -347,7 +347,7 @@ class MarketMonitorService:
             self._save_dataset_cache(as_of_date, dataset, universe)
             meta = self._build_dataset_summary(dataset, universe, "live_refresh")
             if trace is not None:
-                trace.log_event("Dataset", "Dataset rebuilt with force_refresh=True")
+                trace.log_event("Dataset", "force_refresh=True，已重建数据集")
                 self._merge_trace_stage(trace, "cache_decision", {"dataset_cache_hit": False})
             return dataset, meta
 
@@ -356,7 +356,7 @@ class MarketMonitorService:
             dataset = cached_entry["dataset"]
             meta = self._build_dataset_summary(dataset, universe, "memory_cache")
             if trace is not None:
-                trace.log_event("Dataset", "Reused in-memory dataset cache")
+                trace.log_event("Dataset", "复用内存中的数据集缓存")
                 self._merge_trace_stage(trace, "cache_decision", {"dataset_cache_hit": True})
             return dataset, meta
 
@@ -364,7 +364,7 @@ class MarketMonitorService:
         self._save_dataset_cache(as_of_date, dataset, universe)
         meta = self._build_dataset_summary(dataset, universe, "live_request")
         if trace is not None:
-            trace.log_event("Dataset", "Built dataset from market data source")
+            trace.log_event("Dataset", "已从市场数据源构建数据集")
             self._merge_trace_stage(trace, "cache_decision", {"dataset_cache_hit": False})
         return dataset, meta
 
@@ -664,13 +664,13 @@ class MarketMonitorService:
         )
         degraded_factors = []
         notes = [
-            f"Live yfinance request completed for {len(available_core)} core/sector symbols.",
-            f"Proxy coverage is available for {proxy_available}/{len(proxy_symbols)} ETF/index breadth symbols.",
-            "Deterministic scorecards use ETF/index proxy breadth instead of a full Nasdaq-100 stock scan.",
+            f"实时 Yahoo Finance 日线已完成，共覆盖 {len(available_core)} 个核心/行业符号。",
+            f"ETF/指数广度代理覆盖 {proxy_available}/{len(proxy_symbols)} 个符号。",
+            "当前确定性评分卡使用 ETF/指数代理广度，而不是完整的纳斯达克 100 成分股扫描。",
         ]
         if missing_required:
             degraded_factors.append(f"missing_required_symbols:{','.join(missing_required)}")
-            notes.append("Core market symbols are incomplete, so rule scorecards were not produced.")
+            notes.append("核心市场符号不完整，因此未生成规则评分卡。")
         degraded_factors.extend(
             [
                 "intraday_panic_confirmation_missing",
@@ -692,7 +692,7 @@ class MarketMonitorService:
             index_level=MarketIndexEventRisk(active=False),
             stock_level=MarketStockEventRisk(
                 earnings_stocks=[],
-                rule="No event-calendar feed is connected yet. Model overlay may add event risk context.",
+                rule="当前尚未接入事件日历数据源；模型叠加可能补充事件风险背景。",
             ),
         )
 
@@ -806,7 +806,7 @@ class MarketMonitorService:
             signal_confirmation=MarketExecutionSignalConfirmation(
                 current_regime_days=1,
                 downgrade_unlock_in_days=2,
-                note="Persistence logic is not enabled yet in phase 1.",
+                note="第 1 阶段暂未启用状态持续性确认逻辑。",
             ),
             event_risk_flag=event_risk_flag,
             summary=defaults["summary"],
@@ -824,7 +824,7 @@ class MarketMonitorService:
                 "overnight_allowed": True,
                 "leverage_allowed": True,
                 "single_position_cap": "12%",
-                "summary": "Rules support offensive trend participation.",
+                "summary": "规则支持偏进攻型的趋势参与。",
             }
         elif regime_label == "yellow_green_swing":
             return {
@@ -837,7 +837,7 @@ class MarketMonitorService:
                 "overnight_allowed": True,
                 "leverage_allowed": False,
                 "single_position_cap": "12%",
-                "summary": "Rules favor active swing trading over heavy trend exposure.",
+                "summary": "规则更偏向主动波段交易，而非重仓趋势暴露。",
             }
         elif regime_label == "yellow":
             return {
@@ -850,7 +850,7 @@ class MarketMonitorService:
                 "overnight_allowed": True,
                 "leverage_allowed": False,
                 "single_position_cap": "10%",
-                "summary": "Rules allow selective offense after confirmation.",
+                "summary": "规则允许在确认后择机进攻。",
             }
         elif regime_label == "orange":
             return {
@@ -863,7 +863,7 @@ class MarketMonitorService:
                 "overnight_allowed": True,
                 "leverage_allowed": False,
                 "single_position_cap": "8%",
-                "summary": "Rules prefer reduced size and defensive posture.",
+                "summary": "规则偏向缩小仓位并保持防守姿态。",
             }
         return {
             "total_exposure_range": "0%-20%",
@@ -875,7 +875,7 @@ class MarketMonitorService:
             "overnight_allowed": False,
             "leverage_allowed": False,
             "single_position_cap": "5%",
-            "summary": "Rules prioritize capital preservation.",
+            "summary": "规则优先保护本金。",
         }
 
     def _build_panic_card(self, short_score: float, system_risk_score: float) -> MarketPanicReversalCard:
@@ -890,7 +890,7 @@ class MarketMonitorService:
             score = 25.0
             state = "none"
             zone = "inactive"
-            action = "No panic-reversal setup is active."
+            action = "当前没有激活的恐慌反转交易形态。"
         else:
             panic_extreme = max(35.0, min(100.0, 65 + (35 - short_score) * 0.9 + (system_risk_score - 45) * 0.7))
             selling_exhaustion = max(25.0, min(100.0, 25 + (system_risk_score - short_score) * 0.45))
@@ -900,11 +900,11 @@ class MarketMonitorService:
             if panic_extreme >= 80 or score >= 50:
                 state = "confirmed"
                 zone = "actionable"
-                action = "Rule engine sees a tradeable panic reversal setup, but confirmation is still daily-only."
+                action = "规则引擎识别到可交易的恐慌反转形态，但当前确认仍限于日线级别。"
             else:
                 state = "watch"
                 zone = "watch"
-                action = "Rule engine sees panic conditions, but confirmation remains incomplete."
+                action = "规则引擎识别到恐慌条件，但确认仍不完整。"
 
         return MarketPanicReversalCard(
             score=round(score, 1),
@@ -915,9 +915,9 @@ class MarketMonitorService:
             intraday_reversal_score=round(intraday_reversal, 1),
             followthrough_confirmation_score=round(followthrough, 1),
             action=action,
-            system_risk_override="When system risk is extreme, panic-reversal exposure should stay capped.",
-            stop_loss="ATR x 1.0",
-            profit_rule="Take 50% at 1R and trail the remainder at breakeven.",
+            system_risk_override="当系统性风险极高时，恐慌反转仓位也应保持上限控制。",
+            stop_loss="1.0 倍 ATR",
+            profit_rule="1R 先止盈 50%，其余仓位以保本止损跟踪。",
             timeout_warning=False,
             days_held=0,
             early_entry_allowed=state == "confirmed" and early_gate and intraday_reversal >= 60,
@@ -948,7 +948,7 @@ class MarketMonitorService:
 
     def _build_context_queries(self, rule_snapshot: MarketMonitorRuleSnapshot) -> list[str]:
         queries = [
-            "What macro events are most relevant to US equities today or next 3 trading days?",
+            "What macro events are most relevant to US equities today or in the next 3 trading days?",
             "Are there any major earnings, policy, geopolitical, or regulatory events affecting SPY, QQQ, IWM, or mega-cap tech today?",
         ]
         if rule_snapshot.degraded_factors:
@@ -1006,33 +1006,33 @@ class MarketMonitorService:
 
     def _long_term_action(self, score: float) -> str:
         if score >= 80:
-            return "Strong long-term backdrop for trend exposure."
+            return "长期环境强劲，适合提高趋势仓位。"
         if score >= 65:
-            return "Healthy intermediate trend; add risk selectively."
+            return "中期趋势健康，可以择机增加风险暴露。"
         if score >= 50:
-            return "Intermediate trend is constructive but not fully confirmed."
+            return "中期趋势偏积极，但尚未完全确认。"
         if score >= 35:
-            return "Long-term backdrop is cautious; keep exposure moderate."
-        return "Long-term backdrop is defensive; avoid heavy trend risk."
+            return "长期环境偏谨慎，仓位应保持中等。"
+        return "长期环境偏防守，应避免过重的趋势风险。"
 
     def _short_term_action(self, score: float) -> str:
         if score >= 80:
-            return "Short-term conditions are highly tradeable."
+            return "短线条件非常活跃，具备较高交易性。"
         if score >= 65:
-            return "Short-term tape is active; increase selectivity, not recklessness."
+            return "短线盘面活跃，但应提升筛选标准，避免鲁莽追价。"
         if score >= 50:
-            return "Short-term setup is workable for dip buys and confirmed breakouts."
+            return "短线条件可操作，适合低吸和确认后的突破。"
         if score >= 35:
-            return "Short-term setup is watchful rather than aggressive."
-        return "Short-term setup is weak; avoid chasing and overnight volatility."
+            return "短线环境更适合观察，而非激进进攻。"
+        return "短线环境偏弱，应避免追价和隔夜波动暴露。"
 
     def _system_risk_action(self, score: float) -> str:
         if score >= 80:
-            return "Systemic risk is elevated; protect capital first."
+            return "系统性风险显著升高，应优先保护本金。"
         if score >= 60:
-            return "Risk pressure is high; cut gross exposure and avoid leverage."
+            return "风险压力较高，应降低总暴露并避免杠杆。"
         if score >= 45:
-            return "Risk is elevated; tighten risk budgets and reduce chasing."
+            return "风险有所抬升，应收紧风险预算并减少追价。"
         if score >= 20:
-            return "System risk is normal; use standard controls."
-        return "System risk is benign relative to the recent range."
+            return "系统风险处于常态，可使用标准风控。"
+        return "系统风险相对近期区间较温和。"

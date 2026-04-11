@@ -76,6 +76,12 @@ class MarketMonitorApiTests(unittest.TestCase):
         self.assertIn("trace_id", payload)
         self.assertNotIn("fallback_placeholder", str(payload))
         self.assertTrue(payload["rule_snapshot"]["ready"])
+        self.assertIn("实时 Yahoo Finance 日线", payload["rule_snapshot"]["source_coverage"]["notes"][0])
+        self.assertEqual(
+            payload["final_execution_card"]["signal_confirmation"]["note"],
+            "第 1 阶段暂未启用状态持续性确认逻辑。",
+        )
+        self.assertEqual(payload["rule_snapshot"]["panic_reversal_score"]["stop_loss"], "1.0 倍 ATR")
 
         trace_id = payload["trace_id"]
         detail_response = self.client.get(f"/api/market-monitor/traces/{trace_id}")
@@ -149,7 +155,7 @@ class MarketMonitorApiTests(unittest.TestCase):
         self.assertIn("status", detail["overlay_summary"])
         self.assertIn("final_regime_label", detail["final_execution_summary"])
         logs_payload = self.client.get(f"/api/market-monitor/traces/{trace_id}/logs").json()
-        self.assertTrue(any("Returning cached snapshot" in item["content"] for item in logs_payload))
+        self.assertTrue(any("返回缓存快照" in item["content"] for item in logs_payload))
 
     def test_running_trace_is_listed_before_snapshot_response_finishes(self) -> None:
         dataset = _complete_dataset()

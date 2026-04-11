@@ -33,6 +33,38 @@ const regimeLabelMap: Record<MarketRegimeLabel, string> = {
   red: "红色",
 };
 
+const conflictModeMap: Record<string, string> = {
+  trend_and_tape_aligned: "趋势与盘面同向",
+  swing_window_open: "波段窗口开启",
+  conditional_offense: "有条件进攻",
+  defense_first: "防守优先",
+  capital_protection: "本金保护优先",
+};
+
+const sourceLabelMap: Record<string, string> = {
+  live_yfinance_daily: "实时 Yahoo Finance 日线",
+  etf_index_proxy_universe: "ETF/指数代理市场池",
+  fastapi_market_monitor: "市场监控 API 服务",
+  intraday_panic_confirmation: "待接入的盘中恐慌确认",
+  put_call_ratio: "待接入的认沽认购比",
+  vix_term_structure: "待接入的 VIX 期限结构",
+  calendar_events: "待接入的事件日历",
+  web_search_overlay: "待接入的网页搜索模型叠加",
+};
+
+const degradedFactorMap: Record<string, string> = {
+  intraday_panic_confirmation_missing: "缺少盘中恐慌确认数据",
+  put_call_ratio_missing: "缺少认沽认购比数据",
+  vix_term_structure_missing: "缺少 VIX 期限结构数据",
+  calendar_events_missing: "缺少事件日历数据",
+};
+
+const panicZoneMap: Record<string, string> = {
+  inactive: "未激活",
+  watch: "观察区",
+  actionable: "可执行",
+};
+
 function scoreColor(score: number) {
   if (score >= 65) return "#389e0d";
   if (score >= 50) return "#d48806";
@@ -70,6 +102,30 @@ function displayPanicState(state?: string | null) {
   if (state === "watch") return "观察中";
   if (state === "confirmed") return "已确认";
   return state ?? "暂无";
+}
+
+function displayConflictMode(mode?: string | null) {
+  if (!mode) return "暂无";
+  return conflictModeMap[mode] ?? mode;
+}
+
+function displaySourceLabel(source?: string | null) {
+  if (!source) return "暂无";
+  return sourceLabelMap[source] ?? source;
+}
+
+function displayDegradedFactor(factor?: string | null) {
+  if (!factor) return "暂无";
+  if (factor.startsWith("missing_required_symbols:")) {
+    const symbols = factor.split(":")[1] || "";
+    return `缺少关键市场符号：${symbols}`;
+  }
+  return degradedFactorMap[factor] ?? factor;
+}
+
+function displayPanicZone(zone?: string | null) {
+  if (!zone) return "暂无";
+  return panicZoneMap[zone] ?? zone;
 }
 
 function ScoreCardBlock(props: { title: string; card?: MarketScoreCard | null }) {
@@ -269,7 +325,7 @@ export function MarketMonitorPage() {
                   {ruleSnapshot.base_execution_card?.total_exposure_range ?? "暂无"}
                 </Descriptions.Item>
                 <Descriptions.Item label="冲突模式">
-                  {ruleSnapshot.base_execution_card?.conflict_mode ?? "暂无"}
+                  {displayConflictMode(ruleSnapshot.base_execution_card?.conflict_mode)}
                 </Descriptions.Item>
                 <Descriptions.Item label="风险预算">
                   {ruleSnapshot.base_execution_card?.daily_risk_budget ?? "暂无"}
@@ -291,7 +347,7 @@ export function MarketMonitorPage() {
                 size="small"
                 dataSource={ruleSnapshot.degraded_factors}
                 locale={{ emptyText: "无" }}
-                renderItem={(item) => <List.Item>{item}</List.Item>}
+                renderItem={(item) => <List.Item>{displayDegradedFactor(item)}</List.Item>}
               />
             </Space>
           </Card>
@@ -370,7 +426,7 @@ export function MarketMonitorPage() {
               <Space direction="vertical" size={12} style={{ width: "100%" }}>
                 <Space wrap>
                   <Tag>{displayPanicState(ruleSnapshot.panic_reversal_score.state)}</Tag>
-                  <Tag>{ruleSnapshot.panic_reversal_score.zone}</Tag>
+                  <Tag>{displayPanicZone(ruleSnapshot.panic_reversal_score.zone)}</Tag>
                   <Tag>
                     提前入场 {ruleSnapshot.panic_reversal_score.early_entry_allowed ? "允许" : "关闭"}
                   </Tag>
@@ -401,7 +457,7 @@ export function MarketMonitorPage() {
           <Typography.Text strong>可用数据源</Typography.Text>
           <Space wrap>
             {["live_yfinance_daily", "etf_index_proxy_universe", "fastapi_market_monitor"].map((item) => (
-              <Tag key={item}>{item}</Tag>
+              <Tag key={item}>{displaySourceLabel(item)}</Tag>
             ))}
           </Space>
           <Typography.Text strong>待接入数据源</Typography.Text>
@@ -413,7 +469,7 @@ export function MarketMonitorPage() {
               "calendar_events",
               "web_search_overlay",
             ].map((item) => (
-              <Tag key={item}>{item}</Tag>
+              <Tag key={item}>{displaySourceLabel(item)}</Tag>
             ))}
           </Space>
         </Space>
@@ -448,8 +504,8 @@ export function MarketMonitorPage() {
                   <Tag color={regimeTagColor(item.regime_label)}>{displayRegime(item.regime_label)}</Tag>
                 </Space>
                 <Space wrap>
-                  <Tag>LT {item.long_term_score.toFixed(1)}</Tag>
-                  <Tag>ST {item.short_term_score.toFixed(1)}</Tag>
+                  <Tag>长期 {item.long_term_score.toFixed(1)}</Tag>
+                  <Tag>短期 {item.short_term_score.toFixed(1)}</Tag>
                   <Tag>风险 {item.system_risk_score.toFixed(1)}</Tag>
                   <Tag>恐慌 {item.panic_reversal_score.toFixed(1)}</Tag>
                 </Space>

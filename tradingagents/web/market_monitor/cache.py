@@ -15,7 +15,7 @@ from tradingagents.default_config import DEFAULT_CONFIG
 
 MARKET_MONITOR_CACHE_DIR = Path(DEFAULT_CONFIG["data_cache_dir"]) / "market_monitor"
 MARKET_MONITOR_CACHE_DIR.mkdir(parents=True, exist_ok=True)
-LEGACY_CACHE_DIR = Path(DEFAULT_CONFIG["data_cache_dir"])
+SNAPSHOT_CACHE_VERSION = 1
 
 
 def _symbol_cache_path(symbol: str) -> Path:
@@ -29,13 +29,9 @@ def _snapshot_cache_path(as_of_date: date) -> Path:
 
 def load_symbol_daily_cache(symbol: str, as_of_date: date) -> pd.DataFrame:
     path = _symbol_cache_path(symbol)
-    if path.exists():
-        frame = pd.read_csv(path)
-    else:
-        legacy = _load_legacy_symbol_cache(symbol)
-        if legacy.empty:
-            return pd.DataFrame()
-        frame = legacy.reset_index().rename(columns={"index": "Date"})
+    if not path.exists():
+        return pd.DataFrame()
+    frame = pd.read_csv(path)
     if frame.empty or "Date" not in frame.columns:
         return pd.DataFrame()
     frame["Date"] = pd.to_datetime(frame["Date"], errors="coerce")
@@ -66,16 +62,34 @@ def load_snapshot_cache(as_of_date: date) -> dict[str, Any] | None:
     if not path.exists():
         return None
     try:
-        return json.loads(path.read_text(encoding="utf-8"))
+        payload = json.loads(path.read_text(encoding="utf-8"))
     except Exception:
         return None
+    if not isinstance(payload, dict):
+        return None
+    if payload.get("cache_version") != SNAPSHOT_CACHE_VERSION:
+        return None
+    snapshot = payload.get("snapshot")
+    if not isinstance(snapshot, dict):
+        return None
+    return snapshot
 
 
 def save_snapshot_cache(as_of_date: date, payload: dict[str, Any]) -> None:
     path = _snapshot_cache_path(as_of_date)
     with NamedTemporaryFile("w", encoding="utf-8", delete=False, dir=path.parent, suffix=".tmp") as handle:
         temp_path = Path(handle.name)
-        handle.write(json.dumps(payload, ensure_ascii=False, indent=2, default=_json_default))
+        handle.write(
+            json.dumps(
+                {
+                    "cache_version": SNAPSHOT_CACHE_VERSION,
+                    "snapshot": payload,
+                },
+                ensure_ascii=False,
+                indent=2,
+                default=_json_default,
+            )
+        )
     try:
         temp_path.replace(path)
     finally:
@@ -112,21 +126,3 @@ def latest_symbol_cache_mtime(symbols: Iterable[str]) -> datetime | None:
     if latest is None:
         return None
     return datetime.fromtimestamp(latest)
-
-
-def _load_legacy_symbol_cache(symbol: str) -> pd.DataFrame:
-    pattern = f"{symbol}-YFin-data-*.csv"
-    candidates = sorted(LEGACY_CACHE_DIR.glob(pattern), key=lambda item: item.stat().st_mtime, reverse=True)
-    if not candidates:
-        return pd.DataFrame()
-    try:
-        frame = pd.read_csv(candidates[0])
-    except Exception:
-        return pd.DataFrame()
-    if frame.empty:
-        return pd.DataFrame()
-    if "Date" in frame.columns:
-        frame["Date"] = pd.to_datetime(frame["Date"], errors="coerce")
-        frame = frame.dropna(subset=["Date"]).set_index("Date").sort_index()
-        frame.index = frame.index.normalize()
-    return frame

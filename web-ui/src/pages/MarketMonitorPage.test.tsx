@@ -39,7 +39,19 @@ describe("MarketMonitorPage", () => {
     const historyRefetch = vi.fn();
 
     historyQueryState = {
-      data: { as_of_date: "2026-04-11", points: [] },
+      data: {
+        as_of_date: "2026-04-11",
+        points: [
+          {
+            trade_date: "2026-04-10",
+            regime_label: "green",
+            long_term_score: 72.1,
+            short_term_score: 61.5,
+            system_risk_score: 55.4,
+            panic_reversal_score: 25.0,
+          },
+        ],
+      },
       refetch: historyRefetch,
     };
     mockUseMarketMonitorHistory.mockImplementation(() => historyQueryState);
@@ -57,7 +69,7 @@ describe("MarketMonitorPage", () => {
           line_no: 1,
           timestamp: "2026-04-11T08:29:30Z",
           level: "Request",
-          content: "Snapshot request started for 2026-04-11",
+          content: "市场监控快照请求开始：2026-04-11",
         },
       ],
       isLoading: false,
@@ -94,33 +106,33 @@ describe("MarketMonitorPage", () => {
           ready: true,
           long_term_score: {
             score: 72.1,
-            zone: "bullish",
+            zone: "进攻区",
             delta_1d: 1.2,
             delta_5d: 2.8,
-            slope_state: "rising",
-            action: "Stay constructive",
+            slope_state: "缓慢改善",
+            action: "中期趋势健康，可以择机增加风险暴露。",
           },
           short_term_score: {
             score: 61.5,
-            zone: "neutral",
+            zone: "可做区",
             delta_1d: 0.4,
             delta_5d: 1.1,
-            slope_state: "stable",
-            action: "Watch pullbacks",
+            slope_state: "钝化震荡",
+            action: "短线条件可操作，适合低吸和确认后的突破。",
           },
           system_risk_score: {
             score: 55.4,
-            zone: "moderate",
+            zone: "压力区",
             delta_1d: -0.5,
             delta_5d: 0.3,
-            slope_state: "stable",
-            action: "Keep size disciplined",
+            slope_state: "钝化震荡",
+            action: "系统风险抬升，应收紧风险预算并减少追价。",
           },
           panic_reversal_score: null,
           base_regime_label: "green",
           base_execution_card: {
             regime_label: "green",
-            conflict_mode: "normal",
+            conflict_mode: "trend_and_tape_aligned",
             total_exposure_range: "40-60%",
             new_position_allowed: true,
             chase_breakout_allowed: true,
@@ -135,26 +147,26 @@ describe("MarketMonitorPage", () => {
             signal_confirmation: {
               current_regime_days: 3,
               downgrade_unlock_in_days: 0,
-              note: "Confirmed",
+              note: "状态已确认",
             },
             event_risk_flag: {
               index_level: { active: false, type: null, note: "" },
-              stock_level: { active: false, rule: "standard", tickers: [] },
+              stock_level: { active: false, rule: "标准规则", tickers: [] },
             },
-            summary: "Risk-on bias intact.",
+            summary: "当前适合顺着主趋势参与。",
           },
           base_event_risk_flag: {
             index_level: { active: false, type: null, note: "" },
-            stock_level: { active: false, rule: "standard", tickers: [] },
+            stock_level: { active: false, rule: "标准规则", tickers: [] },
           },
           source_coverage: {
             status: "full",
             data_freshness: "fresh",
-            degraded_factors: [],
-            notes: [],
+            degraded_factors: ["intraday_panic_confirmation_missing"],
+            notes: ["实时 Yahoo Finance 日线数据已完成更新。"],
           },
           missing_inputs: [],
-          degraded_factors: [],
+          degraded_factors: ["intraday_panic_confirmation_missing"],
           key_indicators: {},
         },
         model_overlay: {
@@ -162,16 +174,16 @@ describe("MarketMonitorPage", () => {
           regime_override: "green",
           execution_adjustments: null,
           event_risk_override: null,
-          market_narrative: "Breadth is improving.",
-          risk_narrative: "Risk remains contained.",
-          panic_narrative: "No panic reversal setup.",
+          market_narrative: "市场广度正在改善。",
+          risk_narrative: "总体风险仍处于可控范围。",
+          panic_narrative: "当前没有恐慌反转信号。",
           evidence_sources: ["snapshot"],
           model_confidence: 0.82,
           notes: [],
         },
         final_execution_card: {
           regime_label: "green",
-          conflict_mode: "normal",
+          conflict_mode: "trend_and_tape_aligned",
           total_exposure_range: "50-70%",
           new_position_allowed: true,
           chase_breakout_allowed: true,
@@ -186,13 +198,13 @@ describe("MarketMonitorPage", () => {
           signal_confirmation: {
             current_regime_days: 3,
             downgrade_unlock_in_days: 0,
-            note: "Confirmed",
+            note: "状态已确认",
           },
           event_risk_flag: {
             index_level: { active: false, type: null, note: "" },
-            stock_level: { active: false, rule: "standard", tickers: [] },
+            stock_level: { active: false, rule: "标准规则", tickers: [] },
           },
-          summary: "Follow the dominant trend.",
+          summary: "继续沿主趋势执行。",
         },
       },
       error: null,
@@ -211,13 +223,13 @@ describe("MarketMonitorPage", () => {
           line_no: 1,
           timestamp: "2026-04-11T08:29:30Z",
           level: "Request",
-          content: "Snapshot request started for 2026-04-11",
+          content: "市场监控快照请求开始：2026-04-11",
         },
         {
           line_no: 2,
           timestamp: "2026-04-11T08:30:00Z",
           level: "Response",
-          content: "Snapshot request completed",
+          content: "市场监控快照请求完成",
         },
       ],
       isLoading: false,
@@ -231,6 +243,11 @@ describe("MarketMonitorPage", () => {
     expect(screen.getByText("规则快照 + 模型叠加")).toBeInTheDocument();
     expect(screen.getByText(/更新时间 2026-04-11 .*:30:00/)).toBeInTheDocument();
     expect(screen.getByText("返回结果")).toBeInTheDocument();
+    expect(screen.getByText("实时 Yahoo Finance 日线")).toBeInTheDocument();
+    expect(screen.getByText("市场监控 API 服务")).toBeInTheDocument();
+    expect(screen.getByText("待接入的盘中恐慌确认")).toBeInTheDocument();
+    expect(screen.getByText("长期 72.1")).toBeInTheDocument();
+    expect(screen.getByText("短期 61.5")).toBeInTheDocument();
 
     const pageCards = document.querySelectorAll(".page-card");
     expect(pageCards[pageCards.length - 1]?.textContent).toContain("执行过程");
@@ -268,13 +285,13 @@ describe("MarketMonitorPage", () => {
           line_no: 1,
           timestamp: "2026-04-11T08:29:30Z",
           level: "Request",
-          content: "Snapshot request started for 2026-04-11",
+          content: "市场监控快照请求开始：2026-04-11",
         },
         {
           line_no: 2,
           timestamp: "2026-04-11T08:29:31Z",
           level: "Overlay",
-          content: "Generated 3 context queries",
+          content: "已生成 3 条上下文查询",
         },
       ],
       isLoading: false,
@@ -295,33 +312,33 @@ describe("MarketMonitorPage", () => {
           ready: true,
           long_term_score: {
             score: 72.1,
-            zone: "bullish",
+            zone: "进攻区",
             delta_1d: 1.2,
             delta_5d: 2.8,
-            slope_state: "rising",
-            action: "Stay constructive",
+            slope_state: "缓慢改善",
+            action: "中期趋势健康，可以择机增加风险暴露。",
           },
           short_term_score: {
             score: 61.5,
-            zone: "neutral",
+            zone: "可做区",
             delta_1d: 0.4,
             delta_5d: 1.1,
-            slope_state: "stable",
-            action: "Watch pullbacks",
+            slope_state: "钝化震荡",
+            action: "短线条件可操作，适合低吸和确认后的突破。",
           },
           system_risk_score: {
             score: 55.4,
-            zone: "moderate",
+            zone: "压力区",
             delta_1d: -0.5,
             delta_5d: 0.3,
-            slope_state: "stable",
-            action: "Keep size disciplined",
+            slope_state: "钝化震荡",
+            action: "系统风险抬升，应收紧风险预算并减少追价。",
           },
           panic_reversal_score: null,
           base_regime_label: "green",
           base_execution_card: {
             regime_label: "green",
-            conflict_mode: "normal",
+            conflict_mode: "trend_and_tape_aligned",
             total_exposure_range: "40-60%",
             new_position_allowed: true,
             chase_breakout_allowed: true,
@@ -336,17 +353,17 @@ describe("MarketMonitorPage", () => {
             signal_confirmation: {
               current_regime_days: 3,
               downgrade_unlock_in_days: 0,
-              note: "Confirmed",
+              note: "状态已确认",
             },
             event_risk_flag: {
               index_level: { active: false, type: null, note: "" },
-              stock_level: { active: false, rule: "standard", tickers: [] },
+              stock_level: { active: false, rule: "标准规则", tickers: [] },
             },
-            summary: "Risk-on bias intact.",
+            summary: "当前适合顺着主趋势参与。",
           },
           base_event_risk_flag: {
             index_level: { active: false, type: null, note: "" },
-            stock_level: { active: false, rule: "standard", tickers: [] },
+            stock_level: { active: false, rule: "标准规则", tickers: [] },
           },
           source_coverage: {
             status: "full",
@@ -363,16 +380,16 @@ describe("MarketMonitorPage", () => {
           regime_override: "green",
           execution_adjustments: null,
           event_risk_override: null,
-          market_narrative: "Breadth is improving.",
-          risk_narrative: "Risk remains contained.",
-          panic_narrative: "No panic reversal setup.",
+          market_narrative: "市场广度正在改善。",
+          risk_narrative: "总体风险仍处于可控范围。",
+          panic_narrative: "当前没有恐慌反转信号。",
           evidence_sources: ["snapshot"],
           model_confidence: 0.82,
           notes: [],
         },
         final_execution_card: {
           regime_label: "green",
-          conflict_mode: "normal",
+          conflict_mode: "trend_and_tape_aligned",
           total_exposure_range: "50-70%",
           new_position_allowed: true,
           chase_breakout_allowed: true,
@@ -387,13 +404,13 @@ describe("MarketMonitorPage", () => {
           signal_confirmation: {
             current_regime_days: 3,
             downgrade_unlock_in_days: 0,
-            note: "Confirmed",
+            note: "状态已确认",
           },
           event_risk_flag: {
             index_level: { active: false, type: null, note: "" },
-            stock_level: { active: false, rule: "standard", tickers: [] },
+            stock_level: { active: false, rule: "标准规则", tickers: [] },
           },
-          summary: "Follow the dominant trend.",
+          summary: "继续沿主趋势执行。",
         },
       },
     }));

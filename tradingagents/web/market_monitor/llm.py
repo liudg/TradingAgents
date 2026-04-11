@@ -34,12 +34,12 @@ class MarketMonitorLLMService:
     ) -> MarketMonitorModelOverlay:
         if not self._api_key:
             raise RuntimeError(
-                f"Market monitor model overlay requires API key for provider '{self._provider}'."
+                f"市场监控模型叠加需要配置 provider '{self._provider}' 对应的 API Key。"
             )
         if not context_queries:
             return MarketMonitorModelOverlay(
                 status="skipped",
-                notes=["No external-context questions were generated for this snapshot."],
+                notes=["当前快照未生成额外外部上下文问题，已跳过模型叠加。"],
             )
 
         client_kwargs: dict[str, Any] = {"api_key": self._api_key}
@@ -75,14 +75,14 @@ class MarketMonitorLLMService:
             ],
         }
         instructions = (
-            "You are assisting a deterministic market-monitor engine. "
-            "Use web search only to gather macro events, market-moving news, earnings/calendar context, "
-            "and explanations for degraded inputs. "
-            "You must not invent or overwrite prices, indicators, breadth, scores, or style factors. "
-            "You may optionally override regime/action/event risk only when external evidence justifies it. "
-            "Return strict JSON only with keys: regime_override, execution_adjustments, event_risk_override, "
-            "market_narrative, risk_narrative, panic_narrative, evidence_sources, model_confidence, notes. "
-            "Use null for omitted overrides. evidence_sources must be short URLs or domains."
+            "你正在协助一个确定性的市场监控引擎。"
+            "只允许使用 web search 收集宏观事件、市场新闻、财报/日历事件，以及解释数据降级原因的外部信息。"
+            "不得编造或覆盖价格、指标、广度、分数或风格因子。"
+            "只有在外部证据足够充分时，才可以选择性调整 regime/action/event risk。"
+            "必须只返回严格 JSON，且仅包含这些 key："
+            "regime_override, execution_adjustments, event_risk_override, "
+            "market_narrative, risk_narrative, panic_narrative, evidence_sources, model_confidence, notes。"
+            "未使用的 override 请返回 null；evidence_sources 必须是简短 URL 或域名。"
         )
 
         try:
@@ -107,9 +107,8 @@ class MarketMonitorLLMService:
             )
         except Exception as exc:
             return MarketMonitorModelOverlay(
-                enabled=True,
                 status="error",
-                notes=[f"OpenAI web_search request failed: {exc}"],
+                notes=[f"OpenAI web_search 请求失败：{exc}"],
             )
 
         content = getattr(response, "output_text", "") or ""
@@ -117,7 +116,7 @@ class MarketMonitorLLMService:
         if payload is None:
             return MarketMonitorModelOverlay(
                 status="error",
-                notes=["OpenAI web_search response was not valid JSON."],
+                notes=["OpenAI web_search 返回内容不是合法 JSON。"],
             )
 
         try:
@@ -140,7 +139,7 @@ class MarketMonitorLLMService:
         except Exception as exc:
             return MarketMonitorModelOverlay(
                 status="error",
-                notes=[f"Failed to validate model overlay payload: {exc}"],
+                notes=[f"模型叠加结果校验失败：{exc}"],
             )
         return overlay
 
