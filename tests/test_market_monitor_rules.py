@@ -4,6 +4,7 @@ from unittest.mock import patch
 
 import pandas as pd
 
+from tradingagents.web.market_monitor.scoring import build_breadth_ratio
 from tradingagents.web.market_monitor.schemas import MarketMonitorModelOverlay, MarketMonitorSnapshotRequest
 from tradingagents.web.market_monitor.data import _expected_market_close_date, _is_cache_usable
 from tradingagents.web.market_monitor.service import MarketMonitorService
@@ -33,6 +34,20 @@ def _complete_dataset() -> dict[str, dict[str, pd.DataFrame]]:
 
 
 class MarketMonitorRulesTests(unittest.TestCase):
+    def test_build_breadth_ratio_handles_duplicate_close_columns(self) -> None:
+        index = pd.date_range(end=pd.Timestamp("2026-04-10"), periods=220, freq="B")
+        close = pd.Series(range(220), index=index, dtype=float)
+        duplicate_close_frame = pd.concat(
+            [close.rename("Close"), (close + 1).rename("Close")],
+            axis=1,
+        )
+        duplicate_close_frame.columns = ["Close", "Close"]
+
+        breadth = build_breadth_ratio({"SPY": duplicate_close_frame}, ["SPY"])
+
+        self.assertIsInstance(breadth, pd.Series)
+        self.assertFalse(breadth.empty)
+
     def test_symbol_cache_requires_requested_trading_day(self) -> None:
         friday_frame = _make_frame(100, days=120)
 

@@ -46,6 +46,15 @@ class ScoreSnapshot:
     delta_5d: float
 
 
+def _frame_series(frame: pd.DataFrame, column: str) -> pd.Series:
+    value = frame.get(column, pd.Series(dtype=float))
+    if isinstance(value, pd.DataFrame):
+        if value.empty:
+            return pd.Series(dtype=float)
+        value = value.iloc[:, 0]
+    return value.dropna()
+
+
 def _series_to_scores(values: pd.Series) -> ScoreSnapshot:
     clean = values.dropna()
     if clean.empty:
@@ -57,9 +66,9 @@ def _series_to_scores(values: pd.Series) -> ScoreSnapshot:
 
 
 def build_long_term_series(core_data: dict[str, pd.DataFrame], breadth_ratio: pd.Series) -> pd.Series:
-    spy = core_data["SPY"]["Close"].dropna()
-    qqq = core_data["QQQ"]["Close"].dropna()
-    vix = core_data.get("^VIX", pd.DataFrame()).get("Close", pd.Series(dtype=float)).dropna()
+    spy = _frame_series(core_data["SPY"], "Close")
+    qqq = _frame_series(core_data["QQQ"], "Close")
+    vix = _frame_series(core_data.get("^VIX", pd.DataFrame()), "Close")
 
     aligned = pd.concat(
         {
@@ -96,14 +105,14 @@ def build_short_term_series(
     sector_data: dict[str, pd.DataFrame],
     breadth_ratio: pd.Series,
 ) -> pd.Series:
-    spy = core_data["SPY"]["Close"].dropna()
+    spy = _frame_series(core_data["SPY"], "Close")
     aligned = pd.DataFrame({"spy": spy}).dropna()
     if aligned.empty:
         return pd.Series(dtype=float)
 
     sector_momentum = []
     for frame in sector_data.values():
-        close = frame.get("Close", pd.Series(dtype=float)).dropna()
+        close = _frame_series(frame, "Close")
         rel = close.pct_change(5) - close.pct_change(20)
         sector_momentum.append(rel.rename("sector"))
     sector_panel = pd.concat(sector_momentum, axis=1) if sector_momentum else pd.DataFrame(index=aligned.index)
@@ -111,9 +120,11 @@ def build_short_term_series(
     atr_pct = spy.pct_change().rolling(14).std() * 100 * 5
     atr_score = 100 - (atr_pct - 2.0).abs() * 25
 
+    spy_open = _frame_series(core_data["SPY"], "Open")
+    spy_close = _frame_series(core_data["SPY"], "Close")
     gap_quality = (
-        core_data["SPY"]["Open"].reindex(aligned.index) - core_data["SPY"]["Close"].shift(1).reindex(aligned.index)
-    ) / core_data["SPY"]["Close"].shift(1).reindex(aligned.index) * 100
+        spy_open.reindex(aligned.index) - spy_close.shift(1).reindex(aligned.index)
+    ) / spy_close.shift(1).reindex(aligned.index) * 100
     gap_score = (gap_quality > 0).rolling(5, min_periods=3).mean().fillna(0) * 100
 
     breadth_component = breadth_ratio.reindex(aligned.index).ffill().fillna(0)
@@ -141,10 +152,10 @@ def expanding_percentile(series: pd.Series, window: int = 252) -> pd.Series:
 
 
 def build_system_risk_series(core_data: dict[str, pd.DataFrame], breadth_ratio: pd.Series) -> pd.Series:
-    spy = core_data["SPY"]["Close"].dropna()
-    iwm = core_data["IWM"]["Close"].dropna()
-    xlu = core_data["XLU"]["Close"].dropna()
-    vix = core_data.get("^VIX", pd.DataFrame()).get("Close", pd.Series(dtype=float)).dropna()
+    spy = _frame_series(core_data["SPY"], "Close")
+    iwm = _frame_series(core_data["IWM"], "Close")
+    xlu = _frame_series(core_data["XLU"], "Close")
+    vix = _frame_series(core_data.get("^VIX", pd.DataFrame()), "Close")
 
     aligned = pd.concat({"spy": spy, "iwm": iwm, "xlu": xlu}, axis=1).dropna()
     if aligned.empty:
@@ -168,7 +179,7 @@ def build_breadth_ratio(
     closes = []
     for symbol in breadth_symbols:
         frame = core_data.get(symbol, pd.DataFrame())
-        close = frame.get("Close", pd.Series(dtype=float)).dropna()
+        close = _frame_series(frame, "Close")
         if close.empty:
             continue
         moving_average = sma(close, ma_window)
@@ -200,7 +211,7 @@ def score_tactic_layer(
 
     for symbol in proxy_symbols:
         frame = core_data.get(symbol, pd.DataFrame())
-        close = frame.get("Close", pd.Series(dtype=float)).dropna()
+        close = _frame_series(frame, "Close")
         if len(close) < 30:
             continue
         rolling_high = close.rolling(20).max().shift(1)
@@ -228,7 +239,7 @@ def score_tactic_layer(
 
 
 def score_asset_layer(core_data: dict[str, pd.DataFrame]) -> dict[str, float]:
-    spy = core_data["SPY"]["Close"].dropna()
+    spy = _frame_series(core_data["SPY"], "Close")
     if len(spy) < 11:
         return {
             "large_cap_tech": 50.0,
@@ -239,26 +250,26 @@ def score_asset_layer(core_data: dict[str, pd.DataFrame]) -> dict[str, float]:
         }
 
     def relative_score(symbol: str) -> float:
-        close = core_data[symbol]["Close"].dropna()
+        close = _frame_series(core_data[symbol], "Close")
         if len(close) < 11 or spy.empty:
             return 50.0
         rel = percent_change(close, 10) - percent_change(spy, 10)
         return bounded_score(50 + rel * 4)
 
-    if any(len(core_data[symbol]["Close"].dropna()) < 11 for symbol in ["XLU", "XLV", "XLP", "XLE", "XLB"]):
+    if any(len(_frame_series(core_data[symbol], "Close")) < 11 for symbol in ["XLU", "XLV", "XLP", "XLE", "XLB"]):
         defensive_rel = 0.0
         energy_cycle_rel = 0.0
     else:
         defensive_close = (
-            core_data["XLU"]["Close"].dropna().pct_change(10).iloc[-1]
-            + core_data["XLV"]["Close"].dropna().pct_change(10).iloc[-1]
-            + core_data["XLP"]["Close"].dropna().pct_change(10).iloc[-1]
+            _frame_series(core_data["XLU"], "Close").pct_change(10).iloc[-1]
+            + _frame_series(core_data["XLV"], "Close").pct_change(10).iloc[-1]
+            + _frame_series(core_data["XLP"], "Close").pct_change(10).iloc[-1]
         ) / 3
         defensive_rel = defensive_close - spy.pct_change(10).dropna().iloc[-1]
 
         energy_cycle_rel = (
-            core_data["XLE"]["Close"].dropna().pct_change(10).iloc[-1]
-            + core_data["XLB"]["Close"].dropna().pct_change(10).iloc[-1]
+            _frame_series(core_data["XLE"], "Close").pct_change(10).iloc[-1]
+            + _frame_series(core_data["XLB"], "Close").pct_change(10).iloc[-1]
         ) / 2 - spy.pct_change(10).dropna().iloc[-1]
 
     return {

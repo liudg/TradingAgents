@@ -9,6 +9,7 @@ from openai import OpenAI
 from tradingagents.default_config import DEFAULT_CONFIG
 from .schemas import (
     MarketEventRiskFlag,
+    MarketEventRiskModifier,
     MarketExecutionAdjustments,
     MarketIndexEventRisk,
     MarketMonitorModelOverlay,
@@ -179,7 +180,21 @@ class MarketMonitorLLMService:
             pass
         if isinstance(payload, dict):
             return MarketEventRiskFlag(
-                index_level=MarketIndexEventRisk.model_validate(payload.get("index_level", {})),
+                index_level=MarketIndexEventRisk.model_validate(
+                    self._normalize_index_event_risk(payload.get("index_level", {}))
+                ),
                 stock_level=MarketStockEventRisk.model_validate(payload.get("stock_level", {})),
             )
         return None
+
+    def _normalize_index_event_risk(self, payload: Any) -> Any:
+        if not isinstance(payload, dict):
+            return payload
+
+        normalized = dict(payload)
+        action_modifier = normalized.get("action_modifier")
+        if isinstance(action_modifier, str):
+            normalized["action_modifier"] = MarketEventRiskModifier(note=action_modifier).model_dump(
+                mode="python"
+            )
+        return normalized

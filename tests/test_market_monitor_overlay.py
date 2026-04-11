@@ -4,11 +4,15 @@ from unittest.mock import patch
 
 import pandas as pd
 
+from tradingagents.web.market_monitor.llm import MarketMonitorLLMService
 from tradingagents.web.market_monitor.schemas import (
     MarketEventRiskFlag,
     MarketIndexEventRisk,
     MarketMonitorModelOverlay,
+    MarketMonitorSnapshotResponse,
     MarketMonitorSnapshotRequest,
+    MarketMonitorRuleSnapshot,
+    MarketSourceCoverage,
     MarketStockEventRisk,
 )
 from tradingagents.web.market_monitor.service import MarketMonitorService
@@ -38,6 +42,61 @@ def _complete_dataset() -> dict[str, dict[str, pd.DataFrame]]:
 
 
 class MarketMonitorOverlayTests(unittest.TestCase):
+    def test_snapshot_cache_skip_reasons_report_overlay_error(self) -> None:
+        service = MarketMonitorService()
+        snapshot = MarketMonitorSnapshotResponse(
+            timestamp=pd.Timestamp("2026-04-11T21:37:50").to_pydatetime(),
+            as_of_date=date(2026, 4, 11),
+            rule_snapshot=MarketMonitorRuleSnapshot(
+                ready=True,
+                base_event_risk_flag=MarketEventRiskFlag(
+                    index_level=MarketIndexEventRisk(active=False),
+                    stock_level=MarketStockEventRisk(),
+                ),
+                source_coverage=MarketSourceCoverage(
+                    status="partial",
+                    data_freshness="live_request_yfinance_daily",
+                ),
+                missing_inputs=[],
+            ),
+            model_overlay=MarketMonitorModelOverlay(
+                status="error",
+                notes=["overlay failed"],
+            ),
+            final_execution_card=None,
+        )
+
+        self.assertEqual(
+            service._snapshot_cache_skip_reasons(snapshot),
+            ["overlay_error", "missing_final_execution_card"],
+        )
+
+    def test_parse_event_risk_coerces_string_action_modifier_into_note(self) -> None:
+        service = MarketMonitorLLMService()
+
+        event_risk = service._parse_event_risk(
+            {
+                "index_level": {
+                    "active": True,
+                    "type": "FOMC",
+                    "days_to_event": 2,
+                    "action_modifier": "未来1-3个交易日避免追高，等待波动释放后再评估仓位扩张。",
+                },
+                "stock_level": {
+                    "earnings_stocks": ["NVDA"],
+                    "rule": "财报窗口降低隔夜暴露。",
+                },
+            }
+        )
+
+        self.assertIsNotNone(event_risk)
+        self.assertTrue(event_risk.index_level.active)
+        self.assertEqual(
+            event_risk.index_level.action_modifier.note,
+            "未来1-3个交易日避免追高，等待波动释放后再评估仓位扩张。",
+        )
+        self.assertIsNone(event_risk.index_level.action_modifier.new_position_allowed)
+
     def test_overlay_can_adjust_regime_and_actions_without_changing_base_scores(self) -> None:
         service = MarketMonitorService()
         dataset = _complete_dataset()

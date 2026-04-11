@@ -218,12 +218,22 @@ class MarketMonitorService:
                 final_execution_card=final_execution_card,
             )
             snapshot_cache_written = False
-            if self._is_snapshot_cacheable(response):
+            cache_skip_reasons = self._snapshot_cache_skip_reasons(response)
+            if not cache_skip_reasons:
                 save_snapshot_cache(as_of_date, response.model_dump(mode="json"))
                 snapshot_cache_written = True
                 trace.log_event("Cache", "已写入快照缓存")
             else:
-                trace.log_event("Cache", "响应不可缓存，跳过快照缓存写入")
+                self._merge_trace_stage(
+                    trace,
+                    "cache_decision",
+                    {"snapshot_cache_skip_reasons": cache_skip_reasons},
+                )
+                trace.log_event(
+                    "Cache",
+                    "响应不可缓存，跳过快照缓存写入，"
+                    f"reasons={','.join(cache_skip_reasons)}",
+                )
             trace.log_event("Response", "市场监控快照请求完成")
             trace.complete(
                 {
@@ -562,12 +572,19 @@ class MarketMonitorService:
         return latest_mtime is None or latest_mtime <= snapshot.timestamp
 
     def _is_snapshot_cacheable(self, snapshot: MarketMonitorSnapshotResponse) -> bool:
-        return (
-            snapshot.model_overlay.status != "error"
-            and snapshot.rule_snapshot.ready
-            and not snapshot.rule_snapshot.missing_inputs
-            and snapshot.final_execution_card is not None
-        )
+        return not self._snapshot_cache_skip_reasons(snapshot)
+
+    def _snapshot_cache_skip_reasons(self, snapshot: MarketMonitorSnapshotResponse) -> list[str]:
+        reasons: list[str] = []
+        if snapshot.model_overlay.status == "error":
+            reasons.append("overlay_error")
+        if not snapshot.rule_snapshot.ready:
+            reasons.append("rule_not_ready")
+        if snapshot.rule_snapshot.missing_inputs:
+            reasons.append("missing_inputs")
+        if snapshot.final_execution_card is None:
+            reasons.append("missing_final_execution_card")
+        return reasons
 
     def _is_live_market_date(self, as_of_date: date) -> bool:
         today = date.today()
