@@ -1,209 +1,188 @@
 import unittest
-from datetime import date
-from pathlib import Path
-from tempfile import TemporaryDirectory
+from datetime import date, datetime
 from unittest.mock import patch
 
-import pandas as pd
 from fastapi.testclient import TestClient
 
-from tradingagents.web.api.app import app, market_monitor_service
+from tradingagents.web.api.app import app
 from tradingagents.web.market_monitor.schemas import (
-    MarketAssessment,
-    MarketAssessmentCard,
-    MarketAssessmentExecutionCard,
-    MarketDataSnapshot,
-    MarketMissingDataItem,
+    ExecutionDecisionPack,
+    MarketMonitorPromptDetail,
+    MarketMonitorPromptSummary,
+    MarketMonitorRunCreateRequest,
+    MarketMonitorRunCreateResponse,
+    MarketMonitorRunDetail,
+    MarketMonitorRunEvidenceResponse,
+    MarketMonitorRunLogEntry,
+    MarketMonitorRunResultSummary,
+    MarketMonitorRunStageDetail,
+    MarketMonitorRunStagesResponse,
 )
-from tradingagents.web.market_monitor.universe import get_market_monitor_universe
 
 
-def _make_frame(base: float, days: int = 320) -> pd.DataFrame:
-    index = pd.date_range(end=pd.Timestamp("2026-04-10"), periods=days, freq="B")
-    close = pd.Series([base + i * 0.3 for i in range(days)], index=index)
-    return pd.DataFrame(
-        {
-            "Open": close - 0.3,
-            "High": close + 0.8,
-            "Low": close - 0.8,
-            "Close": close,
-            "Volume": pd.Series([750_000 + i * 50 for i in range(days)], index=index),
-        }
-    )
-
-
-def _complete_dataset() -> dict[str, dict[str, pd.DataFrame]]:
-    universe = get_market_monitor_universe()
-    core = {symbol: _make_frame(100 + idx * 2) for idx, symbol in enumerate(universe["core_index_etfs"])}
-    core.update({symbol: _make_frame(80 + idx * 2) for idx, symbol in enumerate(universe["sector_etfs"])})
-    core["^VIX"] = _make_frame(20)
-    return {"core": core}
-
-
-def _build_assessment() -> MarketAssessment:
-    shared = dict(
-        label="偏多",
-        summary="本地数据与外部搜索均支持偏多判断。",
-        confidence=0.82,
-        data_completeness="medium",
-        key_evidence=["SPY 站上 MA200", "近期广度改善", "未见新增系统性风险触发器"],
-        missing_data_filled_by_search=["未来三日宏观事件窗口", "主要财报日历"],
-        action="可以继续参与，但控制事件日前追高。",
-    )
-    return MarketAssessment(
-        long_term_card=MarketAssessmentCard(**shared),
-        short_term_card=MarketAssessmentCard(**shared),
-        system_risk_card=MarketAssessmentCard(
-            **{
-                **shared,
-                "label": "正常",
-                "summary": "系统性风险暂未显著升高。",
-                "action": "使用标准风险预算。",
-            }
-        ),
-        event_risk_card=MarketAssessmentCard(
-            **{
-                **shared,
-                "label": "事件密集",
-                "summary": "未来三个交易日存在密集宏观与财报事件。",
-                "action": "减少事件前追价。",
-            }
-        ),
-        panic_card=MarketAssessmentCard(
-            **{
-                **shared,
-                "label": "未激活",
-                "summary": "暂未发现恐慌反转条件。",
-                "action": "无需执行恐慌反转策略。",
-            }
-        ),
-        execution_card=MarketAssessmentExecutionCard(
-            **shared,
-            total_exposure_range="50%-70%",
-            new_position_allowed=True,
-            chase_breakout_allowed=False,
-            dip_buy_allowed=True,
-            overnight_allowed=True,
-            leverage_allowed=False,
-            single_position_cap="10%",
-            daily_risk_budget="1.0R",
-        ),
-    )
-
-
-class MarketMonitorApiTests(unittest.TestCase):
+class MarketMonitorRunApiTests(unittest.TestCase):
     def setUp(self) -> None:
         self.client = TestClient(app)
-        self.temp_dir = TemporaryDirectory()
-        market_monitor_service._dataset_cache.clear()
-        market_monitor_service._trace_store = market_monitor_service._trace_store.__class__(
-            Path(self.temp_dir.name)
+
+    def test_run_api_exposes_pipeline_resources(self) -> None:
+        run_id = "run-123"
+        created_at = datetime(2026, 4, 12, 9, 30, 0)
+        run_detail = MarketMonitorRunDetail(
+            run_id=run_id,
+            as_of_date=date(2026, 4, 11),
+            status="completed",
+            current_stage="completed",
+            created_at=created_at,
+            started_at=created_at,
+            finished_at=created_at,
+            error_message=None,
+            result=MarketMonitorRunResultSummary(
+                long_term_label="偏多",
+                system_risk_label="可控",
+                short_term_label="可做",
+                event_risk_label="事件密集",
+                panic_label="未激活",
+                execution_summary="维持偏多但控制事件前追价。",
+                execution=ExecutionDecisionPack(
+                    summary="维持偏多但控制事件前追价。",
+                    confidence=0.78,
+                    decision_basis=["趋势偏多", "未来三日事件密集"],
+                    tradeoffs=["允许持仓，但不鼓励重仓追高"],
+                    risk_flags=["财报密集窗口"],
+                    actions=[
+                        "总仓位控制在 50%-70%",
+                        "优先低吸，减少事件日前追高",
+                    ],
+                ),
+            ),
+        )
+        stages = MarketMonitorRunStagesResponse(
+            run_id=run_id,
+            stages=[
+                MarketMonitorRunStageDetail(
+                    stage_key="input_bundle",
+                    label="本地输入摘要",
+                    status="completed",
+                    started_at=created_at,
+                    finished_at=created_at,
+                    summary={"available_local_data": ["SPY", "QQQ", "^VIX"]},
+                ),
+                MarketMonitorRunStageDetail(
+                    stage_key="fact_sheet",
+                    label="事实整编",
+                    status="completed",
+                    started_at=created_at,
+                    finished_at=created_at,
+                    summary={"observed_fact_count": 5, "filled_fact_count": 2},
+                ),
+            ],
+        )
+        evidence = MarketMonitorRunEvidenceResponse(
+            run_id=run_id,
+            evidence_index={
+                "fact_spy_trend": [
+                    {
+                        "slot_key": "macro_calendar",
+                        "source": "fed.gov",
+                        "published_at": "2026-04-11T08:00:00",
+                        "title": "FOMC schedule",
+                    }
+                ]
+            },
+            search_slots={
+                "macro_calendar": [
+                    {
+                        "title": "FOMC schedule",
+                        "source": "fed.gov",
+                        "published_at": "2026-04-11T08:00:00",
+                    }
+                ]
+            },
+            open_gaps=["breadth 原始交易所数据未补齐"],
+        )
+        logs = [
+            MarketMonitorRunLogEntry(
+                line_no=1,
+                timestamp=created_at,
+                level="FactSheet",
+                content="事实整编完成",
+            )
+        ]
+        prompts = [
+            MarketMonitorPromptSummary(
+                prompt_id="judgment_group_a-attempt-1",
+                run_id=run_id,
+                stage_key="judgment_group_a",
+                attempt=1,
+                created_at=created_at,
+                model="gpt-5.4",
+            )
+        ]
+        prompt_detail = MarketMonitorPromptDetail(
+            prompt_id="judgment_group_a-attempt-1",
+            run_id=run_id,
+            stage_key="judgment_group_a",
+            attempt=1,
+            created_at=created_at,
+            model="gpt-5.4",
+            payload={
+                "instructions": "你是市场监控裁决器。",
+                "input": {"observed_facts": ["SPY 站上 200 日均线"]},
+                "tools": [{"type": "web_search"}],
+                "schema": {"type": "object"},
+            },
         )
 
-    def tearDown(self) -> None:
-        self.temp_dir.cleanup()
-
-    def test_snapshot_api_returns_new_assessment_structure(self) -> None:
-        dataset = _complete_dataset()
         with patch(
-            "tradingagents.web.market_monitor.service.build_market_dataset",
-            return_value=dataset,
-        ), patch.object(
-            market_monitor_service._assessment_service,
-            "create_assessment",
-            return_value=(_build_assessment(), ["example.com"], ["note"], 0.82),
+            "tradingagents.web.api.app.market_monitor_service.create_run",
+            return_value=MarketMonitorRunCreateResponse(run_id=run_id, status="running"),
         ), patch(
-            "tradingagents.web.market_monitor.service.load_snapshot_cache",
-            return_value=None,
+            "tradingagents.web.api.app.market_monitor_service.get_run",
+            return_value=run_detail,
         ), patch(
-            "tradingagents.web.market_monitor.service.save_snapshot_cache",
+            "tradingagents.web.api.app.market_monitor_service.get_run_stages",
+            return_value=stages,
+        ), patch(
+            "tradingagents.web.api.app.market_monitor_service.get_run_evidence",
+            return_value=evidence,
+        ), patch(
+            "tradingagents.web.api.app.market_monitor_service.list_run_logs",
+            return_value=logs,
+        ), patch(
+            "tradingagents.web.api.app.market_monitor_service.list_run_prompts",
+            return_value=prompts,
+        ), patch(
+            "tradingagents.web.api.app.market_monitor_service.get_prompt_detail",
+            return_value=prompt_detail,
         ):
-            response = self.client.get(
-                "/api/market-monitor/snapshot",
-                params={"as_of_date": date(2026, 4, 10).isoformat()},
+            create_response = self.client.post(
+                "/api/market-monitor/runs",
+                json=MarketMonitorRunCreateRequest(as_of_date=date(2026, 4, 11)).model_dump(mode="json"),
+            )
+            detail_response = self.client.get(f"/api/market-monitor/runs/{run_id}")
+            stages_response = self.client.get(f"/api/market-monitor/runs/{run_id}/stages")
+            evidence_response = self.client.get(f"/api/market-monitor/runs/{run_id}/evidence")
+            logs_response = self.client.get(f"/api/market-monitor/runs/{run_id}/logs")
+            prompts_response = self.client.get(f"/api/market-monitor/runs/{run_id}/prompts")
+            prompt_detail_response = self.client.get(
+                f"/api/market-monitor/runs/{run_id}/prompts/judgment_group_a-attempt-1"
             )
 
-        self.assertEqual(response.status_code, 200)
-        payload = response.json()
-        self.assertIn("market_data_snapshot", payload)
-        self.assertIn("missing_data", payload)
-        self.assertIn("assessment", payload)
-        self.assertIn("overall_confidence", payload)
-        self.assertEqual(payload["assessment"]["execution_card"]["daily_risk_budget"], "1.0R")
-        self.assertEqual(payload["assessment"]["event_risk_card"]["label"], "事件密集")
-        self.assertIn("SPY", payload["market_data_snapshot"]["local_market_data"])
-        self.assertIn("breadth_above_200dma_pct", payload["market_data_snapshot"]["derived_metrics"])
-
-        trace_id = payload["trace_id"]
-        detail_response = self.client.get(f"/api/market-monitor/traces/{trace_id}")
+        self.assertEqual(create_response.status_code, 200)
+        self.assertEqual(create_response.json()["run_id"], run_id)
+        self.assertEqual(create_response.json()["status"], "running")
         self.assertEqual(detail_response.status_code, 200)
-        detail_payload = detail_response.json()
-        self.assertEqual(detail_payload["trace_id"], trace_id)
-        self.assertEqual(detail_payload["status"], "completed")
-        self.assertIn("assessment_summary", detail_payload)
-        self.assertEqual(detail_payload["assessment_summary"]["overall_confidence"], 0.82)
-        self.assertIn("llm_debug", detail_payload["assessment_summary"])
-        self.assertNotIn("log_path", detail_payload)
-        self.assertNotIn("snapshot_path", detail_payload)
-
-    def test_data_status_api_reports_missing_data_and_search_mode(self) -> None:
-        dataset = _complete_dataset()
-        with patch(
-            "tradingagents.web.market_monitor.service.build_market_dataset",
-            return_value=dataset,
-        ), patch(
-            "tradingagents.web.market_monitor.service.load_snapshot_cache",
-            return_value=None,
-        ):
-            response = self.client.get(
-                "/api/market-monitor/data-status",
-                params={"as_of_date": date(2026, 4, 10).isoformat()},
-            )
-
-        self.assertEqual(response.status_code, 200)
-        payload = response.json()
-        self.assertTrue(payload["search_enabled"])
-        self.assertIn("SPY", payload["available_local_data"])
-        self.assertTrue(any(item["key"] == "vix_term_structure" for item in payload["missing_data"]))
-
-    def test_history_api_replays_cached_assessment_summaries(self) -> None:
-        snapshot_payload = {
-            "timestamp": "2026-04-10T21:00:00",
-            "as_of_date": "2026-04-10",
-            "trace_id": "trace-1",
-            "market_data_snapshot": MarketDataSnapshot(
-                local_market_data={"SPY": {"close": 100.0}},
-                derived_metrics={"breadth_above_200dma_pct": 75.0},
-                llm_reasoning_notes=["test"],
-            ).model_dump(mode="json"),
-            "missing_data": [
-                MarketMissingDataItem(
-                    key="vix_term_structure",
-                    label="VIX 期限结构",
-                    required_for=["long_term_card", "system_risk_card"],
-                    status="missing",
-                    note="本地未接入",
-                ).model_dump(mode="json")
-            ],
-            "assessment": _build_assessment().model_dump(mode="json"),
-            "evidence_sources": ["example.com"],
-            "overall_confidence": 0.82,
-        }
-
-        with patch(
-            "tradingagents.web.market_monitor.service.load_snapshot_cache",
-            side_effect=lambda as_of_date: snapshot_payload if as_of_date == date(2026, 4, 10) else None,
-        ):
-            response = self.client.get(
-                "/api/market-monitor/history",
-                params={"as_of_date": date(2026, 4, 10).isoformat(), "days": 2},
-            )
-
-        self.assertEqual(response.status_code, 200)
-        payload = response.json()
-        self.assertEqual(len(payload["points"]), 1)
-        self.assertEqual(payload["points"][0]["long_term_label"], "偏多")
-        self.assertEqual(payload["points"][0]["overall_confidence"], 0.82)
+        self.assertEqual(detail_response.json()["result"]["long_term_label"], "偏多")
+        self.assertEqual(stages_response.status_code, 200)
+        self.assertEqual(stages_response.json()["stages"][1]["stage_key"], "fact_sheet")
+        self.assertEqual(evidence_response.status_code, 200)
+        self.assertIn("fact_spy_trend", evidence_response.json()["evidence_index"])
+        self.assertEqual(logs_response.status_code, 200)
+        self.assertEqual(logs_response.json()[0]["level"], "FactSheet")
+        self.assertEqual(prompts_response.status_code, 200)
+        self.assertEqual(prompts_response.json()[0]["stage_key"], "judgment_group_a")
+        self.assertEqual(prompt_detail_response.status_code, 200)
+        self.assertIn("instructions", prompt_detail_response.json()["payload"])
 
 
 if __name__ == "__main__":

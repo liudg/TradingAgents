@@ -1,14 +1,26 @@
 import unittest
 from datetime import date
+from pathlib import Path
+from tempfile import TemporaryDirectory
+from typing import Any, Callable
 from unittest.mock import patch
 
 import pandas as pd
 
 from tradingagents.web.market_monitor.data import _expected_market_close_date, _is_cache_usable
 from tradingagents.web.market_monitor.metrics import build_market_snapshot
-from tradingagents.web.market_monitor.schemas import MarketMonitorSnapshotRequest
+from tradingagents.web.market_monitor.schemas import MarketMonitorRunCreateRequest
 from tradingagents.web.market_monitor.service import MarketMonitorService
 from tradingagents.web.market_monitor.universe import get_market_monitor_universe
+
+
+class CapturingExecutor:
+    def __init__(self) -> None:
+        self.calls: list[tuple[Callable[..., Any], tuple[Any, ...], dict[str, Any]]] = []
+
+    def submit(self, fn: Callable[..., Any], *args: Any, **kwargs: Any) -> None:
+        self.calls.append((fn, args, kwargs))
+        return None
 
 
 def _make_frame(base: float, days: int = 320) -> pd.DataFrame:
@@ -54,37 +66,86 @@ class MarketMonitorRulesTests(unittest.TestCase):
         self.assertIn("breadth_above_200dma_pct", derived_metrics)
         self.assertIn("spy_range_position_3m_pct", derived_metrics)
 
-    def test_snapshot_uses_cache_between_requests(self) -> None:
-        service = MarketMonitorService()
+    def test_create_run_persists_completed_stages(self) -> None:
         dataset = _complete_dataset()
-        cached_payload: dict[str, object] = {}
+        with TemporaryDirectory() as temp_dir:
+            executor = CapturingExecutor()
+            root = Path(temp_dir)
+            service = MarketMonitorService(run_root=root / "runs", prompt_root=root / "prompts", run_executor=executor)
 
-        def fake_load_snapshot_cache(_as_of_date: date) -> dict[str, object] | None:
-            return cached_payload or None
+            with patch(
+                "tradingagents.web.market_monitor.service.build_market_dataset",
+                return_value=dataset,
+            ), patch.object(
+                service._llm,
+                "request_json",
+                return_value=None,
+            ):
+                response = service.create_run(MarketMonitorRunCreateRequest(as_of_date=date(2026, 4, 10)))
+                self.assertEqual(response.status, "running")
+                self.assertEqual(len(executor.calls), 1)
+                fn, args, kwargs = executor.calls[0]
+                fn(*args, **kwargs)
 
-        def fake_save_snapshot_cache(_as_of_date: date, payload: dict[str, object]) -> None:
-            cached_payload.clear()
-            cached_payload.update(payload)
+            detail = service.get_run(response.run_id)
+            stages = service.get_run_stages(response.run_id)
+            self.assertEqual(detail.status, "completed")
+            self.assertEqual(stages.stages[-1].stage_key, "execution_decision")
+            self.assertEqual(stages.stages[-1].status, "completed")
+            self.assertIsNotNone(detail.result)
+            run_dir = root / "runs" / "2026-04-10" / response.run_id
+            self.assertTrue((run_dir / "run.json").exists())
+            self.assertTrue((run_dir / "stages.json").exists())
+            self.assertTrue((run_dir / "evidence.json").exists())
+            self.assertTrue((run_dir / "events.log").exists())
 
-        with patch(
-            "tradingagents.web.market_monitor.service.build_market_dataset",
-            return_value=dataset,
-        ) as mocked_dataset, patch.object(
-            service._assessment_service,
-            "create_assessment",
-            return_value=(service._assessment_service._build_error_assessment("test"), [], [], 0.1),
-        ), patch(
-            "tradingagents.web.market_monitor.service.load_snapshot_cache",
-            side_effect=fake_load_snapshot_cache,
-        ) as mocked_load_cache, patch(
-            "tradingagents.web.market_monitor.service.save_snapshot_cache",
-            side_effect=fake_save_snapshot_cache,
-        ):
-            service.get_snapshot(MarketMonitorSnapshotRequest(as_of_date=date(2026, 4, 10)))
-            service.get_snapshot(MarketMonitorSnapshotRequest(as_of_date=date(2026, 4, 10)))
+    def test_create_run_keeps_prompts_under_same_run_directory(self) -> None:
+        dataset = _complete_dataset()
+        with TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            executor = CapturingExecutor()
+            service = MarketMonitorService(run_root=root / "runs", prompt_root=root / "prompts", run_executor=executor)
 
-        self.assertEqual(mocked_dataset.call_count, 1)
-        self.assertEqual(mocked_load_cache.call_count, 2)
+            with patch(
+                "tradingagents.web.market_monitor.service.build_market_dataset",
+                return_value=dataset,
+            ), patch.dict("os.environ", {"CODEX_API_KEY": ""}, clear=False):
+                response = service.create_run(MarketMonitorRunCreateRequest(as_of_date=date(2026, 4, 10)))
+                fn, args, kwargs = executor.calls[0]
+                fn(*args, **kwargs)
+
+            prompts = service.list_run_prompts(response.run_id)
+            self.assertGreaterEqual(len(prompts), 4)
+            self.assertTrue(
+                all(
+                    Path(prompt.file_path).as_posix().startswith(
+                        (root / "runs" / "2026-04-10" / response.run_id).as_posix()
+                    )
+                    for prompt in prompts
+                )
+            )
+            self.assertTrue(
+                (root / "runs" / "2026-04-10" / response.run_id / "prompts" / "judgment_group_a" / "attempt-1.json")
+                .exists()
+            )
+
+    def test_service_recover_marks_abandoned_run_as_failed_after_restart(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            first_service = MarketMonitorService(run_root=root / "runs", prompt_root=root / "prompts", run_executor=CapturingExecutor())
+
+            response = first_service.create_run(MarketMonitorRunCreateRequest(as_of_date=date(2026, 4, 10)))
+            stale_before = first_service.get_run(response.run_id)
+            self.assertEqual(stale_before.status, "running")
+            self.assertEqual(stale_before.current_stage, "pending")
+
+            restarted_service = MarketMonitorService(run_root=root / "runs", prompt_root=root / "prompts", run_executor=CapturingExecutor())
+
+            recovered = restarted_service.get_run(response.run_id)
+            self.assertEqual(recovered.status, "failed")
+            self.assertEqual(recovered.current_stage, "failed")
+            self.assertIsNotNone(recovered.finished_at)
+            self.assertIn("中断", recovered.error_message or "")
 
 
 if __name__ == "__main__":

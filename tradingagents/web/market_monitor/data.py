@@ -10,6 +10,8 @@ from yfinance.exceptions import YFRateLimitError
 from tradingagents.dataflows.yfinance_proxy import get_yf
 from .cache import load_symbol_daily_cache, save_symbol_daily_cache
 
+YFINANCE_DOWNLOAD_TIMEOUT_SECONDS = 10
+
 
 def _normalize_ohlcv_frame(frame: pd.DataFrame) -> pd.DataFrame:
     if frame.empty:
@@ -164,11 +166,12 @@ def _download_single_symbol(symbol: str, as_of_date: date, lookback_days: int) -
                 progress=False,
                 threads=False,
                 multi_level_index=False,
+                timeout=YFINANCE_DOWNLOAD_TIMEOUT_SECONDS,
             )
             normalized = _normalize_ohlcv_frame(raw)
             if not normalized.empty:
                 return normalized
-            time.sleep(1.0 * (attempt + 1))
+            return pd.DataFrame(columns=["Open", "High", "Low", "Close", "Volume"])
         except YFRateLimitError:
             time.sleep(1.5 * (attempt + 1))
         except Exception:

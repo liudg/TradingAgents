@@ -238,111 +238,83 @@ export interface HistoricalBacktestDetail extends HistoricalBacktestSummary {
   memory_entries: BacktestMemoryEntry[];
 }
 
-export interface MarketMissingDataItem {
-  key: string;
-  label: string;
-  required_for: string[];
-  status: "available" | "missing" | "filled_by_search" | "not_applicable";
-  note: string;
-}
-
-export interface MarketDataSnapshot {
-  local_market_data: Record<string, Record<string, unknown>>;
-  derived_metrics: Record<string, unknown>;
-  llm_reasoning_notes: string[];
-}
-
-export interface MarketAssessmentCard {
-  label: string;
+export interface ExecutionDecisionPack {
   summary: string;
   confidence: number;
-  data_completeness: "high" | "medium" | "low";
-  key_evidence: string[];
-  missing_data_filled_by_search: string[];
-  action: string;
+  decision_basis: string[];
+  tradeoffs: string[];
+  risk_flags: string[];
+  actions: string[];
 }
 
-export interface MarketAssessmentExecutionCard extends MarketAssessmentCard {
-  total_exposure_range: string;
-  new_position_allowed: boolean;
-  chase_breakout_allowed: boolean;
-  dip_buy_allowed: boolean;
-  overnight_allowed: boolean;
-  leverage_allowed: boolean;
-  single_position_cap: string;
-  daily_risk_budget: string;
+export interface MarketMonitorRunResultSummary {
+  long_term_label: string;
+  system_risk_label: string;
+  short_term_label: string;
+  event_risk_label: string;
+  panic_label: string;
+  execution_summary: string;
+  execution: ExecutionDecisionPack;
 }
 
-export interface MarketAssessment {
-  long_term_card: MarketAssessmentCard;
-  short_term_card: MarketAssessmentCard;
-  system_risk_card: MarketAssessmentCard;
-  execution_card: MarketAssessmentExecutionCard;
-  event_risk_card: MarketAssessmentCard;
-  panic_card: MarketAssessmentCard;
+export interface MarketMonitorRunCreateResponse {
+  run_id: string;
+  status: "pending" | "running" | "completed" | "failed";
 }
 
-export interface MarketMonitorSnapshotResponse {
-  timestamp: string;
+export interface MarketMonitorRunDetail {
+  run_id: string;
   as_of_date: string;
-  trace_id?: string | null;
-  market_data_snapshot: MarketDataSnapshot;
-  missing_data: MarketMissingDataItem[];
-  assessment: MarketAssessment;
-  evidence_sources: string[];
-  overall_confidence: number;
+  status: "pending" | "running" | "completed" | "failed";
+  current_stage: string;
+  created_at: string;
+  started_at?: string | null;
+  finished_at?: string | null;
+  error_message?: string | null;
+  result?: MarketMonitorRunResultSummary | null;
 }
 
-export interface MarketMonitorTraceLogEntry {
+export interface MarketMonitorRunStageDetail {
+  stage_key: string;
+  label: string;
+  status: "pending" | "running" | "completed" | "failed" | "skipped";
+  started_at?: string | null;
+  finished_at?: string | null;
+  summary: Record<string, unknown>;
+  error?: Record<string, unknown>;
+}
+
+export interface MarketMonitorRunStagesResponse {
+  run_id: string;
+  stages: MarketMonitorRunStageDetail[];
+}
+
+export interface MarketMonitorRunEvidenceResponse {
+  run_id: string;
+  evidence_index: Record<string, Record<string, unknown>[]>;
+  search_slots: Record<string, Record<string, unknown>[]>;
+  open_gaps: string[];
+}
+
+export interface MarketMonitorRunLogEntry {
   line_no: number;
   timestamp: string | null;
   level: string;
   content: string;
 }
 
-export interface MarketMonitorTraceSummary {
-  trace_id: string;
-  as_of_date: string;
-  status: string;
-  force_refresh: boolean;
-  started_at: string;
-  finished_at?: string | null;
-  duration_ms?: number | null;
-  overall_confidence?: number | null;
-  long_term_label?: string | null;
-  execution_label?: string | null;
+export interface MarketMonitorPromptSummary {
+  prompt_id: string;
+  run_id: string;
+  stage_key: string;
+  attempt: number;
+  created_at: string;
+  model: string;
+  file_path?: string | null;
 }
 
-export interface MarketMonitorTraceDetail extends MarketMonitorTraceSummary {
-  request: Record<string, unknown>;
-  cache_decision: Record<string, unknown>;
-  dataset_summary: Record<string, unknown>;
-  context_summary: Record<string, unknown>;
-  assessment_summary: Record<string, unknown>;
-  response_summary: Record<string, unknown>;
-  error: Record<string, unknown>;
-}
-
-export interface MarketHistoryPoint {
-  trade_date: string;
-  long_term_label: string;
-  short_term_label: string;
-  system_risk_label: string;
-  execution_label: string;
-  overall_confidence: number;
-}
-
-export interface MarketMonitorHistoryResponse {
-  as_of_date: string;
-  points: MarketHistoryPoint[];
-}
-
-export interface MarketMonitorDataStatusResponse {
-  as_of_date: string;
-  available_local_data: string[];
-  missing_data: MarketMissingDataItem[];
-  search_enabled: boolean;
-  latest_cache_status: Record<string, unknown>;
+export interface MarketMonitorPromptDetail extends MarketMonitorPromptSummary {
+  payload: Record<string, unknown>;
 }
 
 export class ApiError extends Error {

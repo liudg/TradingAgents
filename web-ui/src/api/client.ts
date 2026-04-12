@@ -11,12 +11,13 @@ import {
   HistoricalBacktestSummary,
   HistoricalReportDetail,
   HistoricalReportSummary,
-  MarketMonitorDataStatusResponse,
-  MarketMonitorHistoryResponse,
-  MarketMonitorSnapshotResponse,
-  MarketMonitorTraceDetail,
-  MarketMonitorTraceLogEntry,
-  MarketMonitorTraceSummary,
+  MarketMonitorPromptDetail,
+  MarketMonitorPromptSummary,
+  MarketMonitorRunCreateResponse,
+  MarketMonitorRunDetail,
+  MarketMonitorRunEvidenceResponse,
+  MarketMonitorRunLogEntry,
+  MarketMonitorRunStagesResponse,
   MetadataOptionsResponse,
 } from "./types";
 
@@ -115,40 +116,43 @@ export async function fetchHistoricalBacktest(jobId: string) {
   );
 }
 
-export async function fetchMarketMonitorSnapshot() {
-  return requestJson<MarketMonitorSnapshotResponse>("/api/market-monitor/snapshot");
+export async function createMarketMonitorRun() {
+  return requestJson<MarketMonitorRunCreateResponse>("/api/market-monitor/runs", {
+    method: "POST",
+    body: JSON.stringify({}),
+  });
 }
 
-export async function fetchMarketMonitorHistory() {
-  return requestJson<MarketMonitorHistoryResponse>(
-    "/api/market-monitor/history",
+export async function fetchMarketMonitorRun(runId: string) {
+  return requestJson<MarketMonitorRunDetail>(`/api/market-monitor/runs/${runId}`);
+}
+
+export async function fetchMarketMonitorRunStages(runId: string) {
+  return requestJson<MarketMonitorRunStagesResponse>(
+    `/api/market-monitor/runs/${runId}/stages`,
   );
 }
 
-export async function fetchMarketMonitorDataStatus() {
-  return requestJson<MarketMonitorDataStatusResponse>(
-    "/api/market-monitor/data-status",
+export async function fetchMarketMonitorRunEvidence(runId: string) {
+  return requestJson<MarketMonitorRunEvidenceResponse>(
+    `/api/market-monitor/runs/${runId}/evidence`,
   );
 }
 
-export async function fetchMarketMonitorTraceLogs(traceId: string) {
-  return requestJson<MarketMonitorTraceLogEntry[]>(
-    `/api/market-monitor/traces/${traceId}/logs`,
+export async function fetchMarketMonitorRunLogs(runId: string) {
+  return requestJson<MarketMonitorRunLogEntry[]>(
+    `/api/market-monitor/runs/${runId}/logs`,
   );
 }
 
-export async function fetchMarketMonitorTraceDetail(traceId: string) {
-  return requestJson<MarketMonitorTraceDetail>(
-    `/api/market-monitor/traces/${traceId}`,
+export async function fetchMarketMonitorRunPrompts(runId: string) {
+  return requestJson<MarketMonitorPromptSummary[]>(
+    `/api/market-monitor/runs/${runId}/prompts`,
   );
 }
 
-export async function fetchMarketMonitorTraces(status?: string, limit = 20) {
-  const searchParams = new URLSearchParams({ limit: String(limit) });
-  if (status) {
-    searchParams.set("status", status);
-  }
-  return requestJson<MarketMonitorTraceSummary[]>(
-    `/api/market-monitor/traces?${searchParams.toString()}`,
+export async function fetchMarketMonitorPromptDetail(runId: string, promptId: string) {
+  return requestJson<MarketMonitorPromptDetail>(
+    `/api/market-monitor/runs/${runId}/prompts/${promptId}`,
   );
 }

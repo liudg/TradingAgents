@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import time
 from datetime import date, datetime
 from pathlib import Path
 from tempfile import NamedTemporaryFile
@@ -15,6 +16,7 @@ from tradingagents.default_config import DEFAULT_CONFIG
 
 MARKET_MONITOR_CACHE_DIR = Path(DEFAULT_CONFIG["data_cache_dir"]) / "market_monitor"
 MARKET_MONITOR_CACHE_DIR.mkdir(parents=True, exist_ok=True)
+ATOMIC_REPLACE_RETRY_DELAYS_SECONDS = (0.05, 0.15, 0.3)
 
 
 def _symbol_cache_path(symbol: str) -> Path:
@@ -50,7 +52,7 @@ def save_symbol_daily_cache(symbol: str, frame: pd.DataFrame) -> None:
         temp_path = Path(handle.name)
     try:
         serializable.to_csv(temp_path, index=False)
-        temp_path.replace(path)
+        _replace_with_retry(temp_path, path)
     finally:
         if temp_path.exists():
             temp_path.unlink(missing_ok=True)
@@ -73,7 +75,7 @@ def save_snapshot_cache(as_of_date: date, payload: dict[str, Any]) -> None:
         temp_path = Path(handle.name)
         handle.write(json.dumps(payload, ensure_ascii=False, indent=2, default=_json_default))
     try:
-        temp_path.replace(path)
+        _replace_with_retry(temp_path, path)
     finally:
         if temp_path.exists():
             temp_path.unlink(missing_ok=True)
@@ -83,6 +85,18 @@ def _json_default(value: Any) -> Any:
     if isinstance(value, (datetime, date)):
         return value.isoformat()
     return str(value)
+
+
+def _replace_with_retry(source: Path, target: Path) -> None:
+    attempts = len(ATOMIC_REPLACE_RETRY_DELAYS_SECONDS) + 1
+    for attempt in range(attempts):
+        try:
+            source.replace(target)
+            return
+        except PermissionError:
+            if attempt >= attempts - 1:
+                raise
+            time.sleep(ATOMIC_REPLACE_RETRY_DELAYS_SECONDS[attempt])
 
 
 def symbol_cache_status(symbol: str) -> dict[str, Any]:

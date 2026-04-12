@@ -1,8 +1,10 @@
 import { useMutation, useQuery } from "@tanstack/react-query";
+import { useEffect, useState } from "react";
 
 import {
   createAnalysisJob,
   createBacktestJob,
+  createMarketMonitorRun,
   fetchAnalysisJob,
   fetchAnalysisJobLogs,
   fetchAnalysisReport,
@@ -12,12 +14,12 @@ import {
   fetchHistoricalBacktests,
   fetchHistoricalReport,
   fetchHistoricalReports,
-  fetchMarketMonitorDataStatus,
-  fetchMarketMonitorHistory,
-  fetchMarketMonitorSnapshot,
-  fetchMarketMonitorTraceDetail,
-  fetchMarketMonitorTraceLogs,
-  fetchMarketMonitorTraces,
+  fetchMarketMonitorPromptDetail,
+  fetchMarketMonitorRun,
+  fetchMarketMonitorRunEvidence,
+  fetchMarketMonitorRunLogs,
+  fetchMarketMonitorRunPrompts,
+  fetchMarketMonitorRunStages,
   fetchMetadataOptions,
 } from "./client";
 import { AnalysisJobRequest, BacktestJobRequest, JobStatus } from "./types";
@@ -125,74 +127,146 @@ export function useHistoricalBacktest(jobId: string) {
   });
 }
 
-export function useMarketMonitorSnapshot() {
-  return useQuery({
-    queryKey: ["market-monitor-snapshot"],
-    queryFn: fetchMarketMonitorSnapshot,
-    refetchInterval: (query) => {
-      const data = query.state.data;
-      return data?.trace_id ? false : 2000;
-    },
+export function useCreateMarketMonitorRun() {
+  return useMutation({
+    mutationFn: () => createMarketMonitorRun(),
   });
 }
 
-export function useMarketMonitorHistory(enabled = true) {
+export function useMarketMonitorRun(runId?: string | null, enabled = true) {
   return useQuery({
-    queryKey: ["market-monitor-history"],
-    queryFn: fetchMarketMonitorHistory,
-    enabled,
-  });
-}
-
-export function useMarketMonitorDataStatus() {
-  return useQuery({
-    queryKey: ["market-monitor-data-status"],
-    queryFn: fetchMarketMonitorDataStatus,
-  });
-}
-
-export function useMarketMonitorTraceLogs(
-  traceId?: string | null,
-  enabled = true,
-) {
-  return useQuery({
-    queryKey: ["market-monitor-trace-logs", traceId],
-    queryFn: () => fetchMarketMonitorTraceLogs(traceId || ""),
-    refetchInterval: (query) => {
-      const logs = Array.isArray(query.state.data) ? query.state.data : [];
-      const hasTerminalLog = logs.some(
-        (item) => item.level === "Response" || item.level === "Error",
-      );
-      return enabled && traceId && !hasTerminalLog ? 2000 : false;
-    },
-    enabled: enabled && Boolean(traceId),
-  });
-}
-
-export function useMarketMonitorTraceDetail(
-  traceId?: string | null,
-  enabled = true,
-) {
-  return useQuery({
-    queryKey: ["market-monitor-trace-detail", traceId],
-    queryFn: () => fetchMarketMonitorTraceDetail(traceId || ""),
+    queryKey: ["market-monitor-run", runId],
+    queryFn: () => fetchMarketMonitorRun(runId || ""),
     refetchInterval: (query) => {
       const status = query.state.data?.status;
-      return enabled && traceId && status === "running" ? 2000 : false;
+      return enabled && runId && status === "running" ? 2000 : false;
     },
-    enabled: enabled && Boolean(traceId),
+    enabled: enabled && Boolean(runId),
   });
 }
 
-export function useMarketMonitorTraces(
-  status?: string,
+export function useMarketMonitorRunStages(
+  runId?: string | null,
   enabled = true,
-  limit = 20,
+  shouldPoll = false,
 ) {
   return useQuery({
-    queryKey: ["market-monitor-traces", status, limit],
-    queryFn: () => fetchMarketMonitorTraces(status, limit),
-    refetchInterval: enabled ? 2000 : false,
-    enabled,
+    queryKey: ["market-monitor-run-stages", runId],
+    queryFn: () => fetchMarketMonitorRunStages(runId || ""),
+    refetchInterval: enabled && shouldPoll ? 2000 : false,
+    enabled: enabled && Boolean(runId),
   });
+}
+
+export function useMarketMonitorRunEvidence(
+  runId?: string | null,
+  enabled = true,
+  shouldPoll = false,
+) {
+  return useQuery({
+    queryKey: ["market-monitor-run-evidence", runId],
+    queryFn: () => fetchMarketMonitorRunEvidence(runId || ""),
+    refetchInterval: enabled && shouldPoll ? 2000 : false,
+    enabled: enabled && Boolean(runId),
+  });
+}
+
+export function useMarketMonitorRunLogs(
+  runId?: string | null,
+  enabled = true,
+  shouldPoll = false,
+) {
+  return useQuery({
+    queryKey: ["market-monitor-run-logs", runId],
+    queryFn: () => fetchMarketMonitorRunLogs(runId || ""),
+    refetchInterval: enabled && shouldPoll ? 2000 : false,
+    enabled: enabled && Boolean(runId),
+  });
+}
+
+export function useMarketMonitorRunPrompts(
+  runId?: string | null,
+  enabled = true,
+  shouldPoll = false,
+) {
+  return useQuery({
+    queryKey: ["market-monitor-run-prompts", runId],
+    queryFn: () => fetchMarketMonitorRunPrompts(runId || ""),
+    refetchInterval: enabled && shouldPoll ? 2000 : false,
+    enabled: enabled && Boolean(runId),
+  });
+}
+
+export function useMarketMonitorPromptDetail(
+  runId?: string | null,
+  promptId?: string | null,
+  enabled = true,
+  shouldPoll = false,
+) {
+  return useQuery({
+    queryKey: ["market-monitor-prompt-detail", runId, promptId],
+    queryFn: () => fetchMarketMonitorPromptDetail(runId || "", promptId || ""),
+    refetchInterval: enabled && shouldPoll ? 2000 : false,
+    enabled: enabled && Boolean(runId) && Boolean(promptId),
+  });
+}
+
+export function useMarketMonitorRunSession() {
+  const createRun = useCreateMarketMonitorRun();
+  const [runId, setRunId] = useState<string | null>(() => {
+    if (typeof window === "undefined") {
+      return null;
+    }
+    return window.sessionStorage.getItem("market-monitor-run-id");
+  });
+
+  useEffect(() => {
+    if (runId || createRun.isPending || createRun.error) {
+      return;
+    }
+    createRun.mutate(undefined, {
+      onSuccess: (data) => {
+        setRunId(data.run_id);
+        if (typeof window !== "undefined") {
+          window.sessionStorage.setItem("market-monitor-run-id", data.run_id);
+        }
+      },
+    });
+  }, [createRun, runId]);
+
+  const runQuery = useMarketMonitorRun(runId, Boolean(runId));
+  const shouldPollPipeline = Boolean(runId) && (runQuery.isLoading || runQuery.data?.status === "running");
+  const stagesQuery = useMarketMonitorRunStages(runId, Boolean(runId), shouldPollPipeline);
+  const evidenceQuery = useMarketMonitorRunEvidence(runId, Boolean(runId), shouldPollPipeline);
+  const logsQuery = useMarketMonitorRunLogs(runId, Boolean(runId), shouldPollPipeline);
+  const promptsQuery = useMarketMonitorRunPrompts(runId, Boolean(runId), shouldPollPipeline);
+  const activePromptId = promptsQuery.data?.[0]?.prompt_id ?? null;
+  const promptDetailQuery = useMarketMonitorPromptDetail(
+    runId,
+    activePromptId,
+    Boolean(runId && activePromptId),
+    shouldPollPipeline,
+  );
+
+  useEffect(() => {
+    if (!runId || runQuery.data?.status === "running") {
+      return;
+    }
+    if (typeof window === "undefined") {
+      return;
+    }
+    window.sessionStorage.removeItem("market-monitor-run-id");
+  }, [runId, runQuery.data?.status]);
+
+  return {
+    createRun,
+    runId,
+    runQuery,
+    stagesQuery,
+    evidenceQuery,
+    logsQuery,
+    promptsQuery,
+    activePromptId,
+    promptDetailQuery,
+  };
 }

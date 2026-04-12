@@ -58,6 +58,42 @@ class MarketMonitorCacheTests(unittest.TestCase):
 
             self.assertEqual(saved, {"status": "ok"})
 
+    def test_save_symbol_daily_cache_retries_replace_after_permission_error(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            market_monitor_dir = temp_path / "market_monitor"
+            market_monitor_dir.mkdir()
+            frame = pd.DataFrame(
+                {
+                    "Open": [1.0],
+                    "High": [2.0],
+                    "Low": [0.5],
+                    "Close": [1.5],
+                    "Volume": [100],
+                },
+                index=pd.to_datetime(["2026-04-10"]),
+            )
+            call_count = {"replace": 0}
+            original_replace = Path.replace
+
+            def flaky_replace(src: Path, target: Path) -> Path:
+                if src.suffix == ".tmp" and target.name == "XLE_daily.csv":
+                    call_count["replace"] += 1
+                    if call_count["replace"] == 1:
+                        raise PermissionError(5, "拒绝访问。")
+                return original_replace(src, target)
+
+            with patch.object(cache, "MARKET_MONITOR_CACHE_DIR", market_monitor_dir), patch.object(
+                cache.Path,
+                "replace",
+                new=flaky_replace,
+            ):
+                cache.save_symbol_daily_cache("XLE", frame)
+
+            self.assertEqual(call_count["replace"], 2)
+            saved = pd.read_csv(market_monitor_dir / "XLE_daily.csv")
+            self.assertEqual(saved.loc[0, "Close"], 1.5)
+
 
 if __name__ == "__main__":
     unittest.main()

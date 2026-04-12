@@ -2,8 +2,6 @@ import uvicorn
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse
-from datetime import date
-
 from cli.models import AnalystType
 from tradingagents.default_config import DEFAULT_CONFIG
 from tradingagents.web.backtest.manager import BacktestJobManager
@@ -24,13 +22,14 @@ from tradingagents.web.schemas import (
     MetadataOptionsResponse,
 )
 from tradingagents.web.market_monitor.schemas import (
-    MarketMonitorDataStatusResponse,
-    MarketMonitorHistoryResponse,
-    MarketMonitorSnapshotRequest,
-    MarketMonitorSnapshotResponse,
-    MarketMonitorTraceDetail,
-    MarketMonitorTraceLogEntry,
-    MarketMonitorTraceSummary,
+    MarketMonitorPromptDetail,
+    MarketMonitorPromptSummary,
+    MarketMonitorRunCreateRequest,
+    MarketMonitorRunCreateResponse,
+    MarketMonitorRunDetail,
+    MarketMonitorRunEvidenceResponse,
+    MarketMonitorRunLogEntry,
+    MarketMonitorRunStagesResponse,
 )
 from tradingagents.web.market_monitor.service import MarketMonitorService
 
@@ -168,80 +167,59 @@ def get_historical_backtest(job_id: str) -> HistoricalBacktestDetail:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
 
 
-@app.get("/api/market-monitor/snapshot", response_model=MarketMonitorSnapshotResponse)
-def get_market_monitor_snapshot(as_of_date: str | None = None) -> MarketMonitorSnapshotResponse:
-    request = MarketMonitorSnapshotRequest(
-        as_of_date=as_of_date,
-    )
-    return market_monitor_service.get_snapshot(request)
+@app.post("/api/market-monitor/runs", response_model=MarketMonitorRunCreateResponse)
+def create_market_monitor_run(
+    request: MarketMonitorRunCreateRequest,
+) -> MarketMonitorRunCreateResponse:
+    return market_monitor_service.create_run(request)
 
 
-@app.post("/api/market-monitor/snapshot", response_model=MarketMonitorSnapshotResponse)
-def create_market_monitor_snapshot(
-    request: MarketMonitorSnapshotRequest,
-) -> MarketMonitorSnapshotResponse:
-    return market_monitor_service.get_snapshot(request)
-
-
-@app.get("/api/market-monitor/history", response_model=MarketMonitorHistoryResponse)
-def get_market_monitor_history(
-    as_of_date: str | None = None, days: int = 10
-) -> MarketMonitorHistoryResponse:
-    request = MarketMonitorSnapshotRequest(as_of_date=as_of_date)
-    target_date = request.as_of_date or date.today()
-    return market_monitor_service.get_history(target_date, days)
-
-
-@app.get(
-    "/api/market-monitor/data-status",
-    response_model=MarketMonitorDataStatusResponse,
-)
-def get_market_monitor_data_status(
-    as_of_date: str | None = None,
-) -> MarketMonitorDataStatusResponse:
-    request = MarketMonitorSnapshotRequest(as_of_date=as_of_date)
-    target_date = request.as_of_date or date.today()
-    return market_monitor_service.get_data_status(target_date)
-
-
-@app.get(
-    "/api/market-monitor/traces",
-    response_model=list[MarketMonitorTraceSummary],
-)
-def list_market_monitor_traces(
-    as_of_date: str | None = None,
-    status: str | None = None,
-    limit: int = 20,
-) -> list[MarketMonitorTraceSummary]:
-    request = MarketMonitorSnapshotRequest(as_of_date=as_of_date)
-    target_date = request.as_of_date
-    return market_monitor_service.list_traces(as_of_date=target_date, status=status, limit=limit)
-
-
-@app.get(
-    "/api/market-monitor/traces/{trace_id}",
-    response_model=MarketMonitorTraceDetail,
-)
-def get_market_monitor_trace(trace_id: str) -> MarketMonitorTraceDetail:
+@app.get("/api/market-monitor/runs/{run_id}", response_model=MarketMonitorRunDetail)
+def get_market_monitor_run(run_id: str) -> MarketMonitorRunDetail:
     try:
-        return market_monitor_service.get_trace_detail(trace_id)
+        return market_monitor_service.get_run(run_id)
     except KeyError as exc:
-        raise HTTPException(status_code=404, detail="未找到市场监控追踪记录") from exc
-    except ValueError as exc:
-        raise HTTPException(status_code=409, detail=str(exc)) from exc
+        raise HTTPException(status_code=404, detail="未找到市场监控运行记录") from exc
+
+
+@app.get("/api/market-monitor/runs/{run_id}/stages", response_model=MarketMonitorRunStagesResponse)
+def get_market_monitor_run_stages(run_id: str) -> MarketMonitorRunStagesResponse:
+    try:
+        return market_monitor_service.get_run_stages(run_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="未找到市场监控阶段记录") from exc
+
+
+@app.get("/api/market-monitor/runs/{run_id}/evidence", response_model=MarketMonitorRunEvidenceResponse)
+def get_market_monitor_run_evidence(run_id: str) -> MarketMonitorRunEvidenceResponse:
+    try:
+        return market_monitor_service.get_run_evidence(run_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="未找到市场监控证据记录") from exc
+
+
+@app.get("/api/market-monitor/runs/{run_id}/logs", response_model=list[MarketMonitorRunLogEntry])
+def get_market_monitor_run_logs(run_id: str) -> list[MarketMonitorRunLogEntry]:
+    try:
+        return market_monitor_service.list_run_logs(run_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="未找到市场监控日志") from exc
+
+
+@app.get("/api/market-monitor/runs/{run_id}/prompts", response_model=list[MarketMonitorPromptSummary])
+def get_market_monitor_run_prompts(run_id: str) -> list[MarketMonitorPromptSummary]:
+    return market_monitor_service.list_run_prompts(run_id)
 
 
 @app.get(
-    "/api/market-monitor/traces/{trace_id}/logs",
-    response_model=list[MarketMonitorTraceLogEntry],
+    "/api/market-monitor/runs/{run_id}/prompts/{prompt_id}",
+    response_model=MarketMonitorPromptDetail,
 )
-def get_market_monitor_trace_logs(trace_id: str) -> list[MarketMonitorTraceLogEntry]:
+def get_market_monitor_prompt_detail(run_id: str, prompt_id: str) -> MarketMonitorPromptDetail:
     try:
-        return market_monitor_service.list_trace_logs(trace_id)
+        return market_monitor_service.get_prompt_detail(run_id, prompt_id)
     except KeyError as exc:
-        raise HTTPException(status_code=404, detail="未找到市场监控追踪记录") from exc
-    except ValueError as exc:
-        raise HTTPException(status_code=409, detail=str(exc)) from exc
+        raise HTTPException(status_code=404, detail="未找到提示词详情") from exc
 
 
 def run_api() -> None:
