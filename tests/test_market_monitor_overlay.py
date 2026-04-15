@@ -5,6 +5,7 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest.mock import MagicMock, patch
 
+from tradingagents.web.market_monitor.errors import MarketMonitorError
 from tradingagents.web.market_monitor.llm import MarketMonitorLlmGateway
 from tradingagents.web.market_monitor.prompt_store import PromptCaptureStore
 
@@ -16,16 +17,16 @@ class MarketMonitorOverlayTests(unittest.TestCase):
             gateway = MarketMonitorLlmGateway(prompt_store)
 
             with patch.dict(os.environ, {"CODEX_API_KEY": ""}, clear=False):
-                payload = gateway.request_json(
-                    run_id="run-1",
-                    stage_key="judgment_group_a",
-                    attempt=1,
-                    instructions="你是市场监控裁决器。",
-                    input_payload={"observed_facts": ["SPY 站上 MA200"]},
-                    schema={"type": "object", "properties": {}},
-                )
+                with self.assertRaisesRegex(MarketMonitorError, "API Key 未配置"):
+                    gateway.request_json(
+                        run_id="run-1",
+                        stage_key="judgment_group_a",
+                        attempt=1,
+                        instructions="你是市场监控裁决器。",
+                        input_payload={"observed_facts": ["SPY 站上 MA200"]},
+                        schema={"type": "object", "properties": {}},
+                    )
 
-            self.assertIsNone(payload)
             prompts = prompt_store.list_prompts("run-1")
             self.assertEqual(len(prompts), 1)
             self.assertEqual(prompts[0].stage_key, "judgment_group_a")
@@ -41,7 +42,7 @@ class MarketMonitorOverlayTests(unittest.TestCase):
 
         self.assertEqual(payload, {"summary": "ok"})
 
-    def test_request_json_configures_client_timeout_and_falls_back_on_timeout(self) -> None:
+    def test_request_json_configures_client_timeout_and_raises_on_client_timeout(self) -> None:
         with TemporaryDirectory() as temp_dir:
             gateway = MarketMonitorLlmGateway(PromptCaptureStore(Path(temp_dir)))
             mock_client = MagicMock()
@@ -51,16 +52,16 @@ class MarketMonitorOverlayTests(unittest.TestCase):
                 "tradingagents.web.market_monitor.llm.OpenAI",
                 return_value=mock_client,
             ) as mock_openai:
-                payload = gateway.request_json(
-                    run_id="run-2",
-                    stage_key="judgment_group_b",
-                    attempt=1,
-                    instructions="测试超时处理",
-                    input_payload={"observed_facts": ["SPY 站上 MA200"]},
-                    schema={"type": "object", "properties": {}},
-                )
+                with self.assertRaisesRegex(MarketMonitorError, "模型请求失败"):
+                    gateway.request_json(
+                        run_id="run-2",
+                        stage_key="judgment_group_b",
+                        attempt=1,
+                        instructions="测试超时处理",
+                        input_payload={"observed_facts": ["SPY 站上 MA200"]},
+                        schema={"type": "object", "properties": {}},
+                    )
 
-        self.assertIsNone(payload)
         self.assertEqual(mock_openai.call_args.kwargs["timeout"], gateway.timeout_seconds)
 
     def test_request_json_uses_hard_timeout_guard_when_client_hangs(self) -> None:
@@ -80,18 +81,38 @@ class MarketMonitorOverlayTests(unittest.TestCase):
                 return_value=mock_client,
             ):
                 started = time.perf_counter()
-                payload = gateway.request_json(
-                    run_id="run-3",
-                    stage_key="execution_decision",
-                    attempt=1,
-                    instructions="测试硬超时",
-                    input_payload={"observed_facts": ["SPY 站上 MA200"]},
-                    schema={"type": "object", "properties": {}},
-                )
+                with self.assertRaisesRegex(MarketMonitorError, "模型请求超时"):
+                    gateway.request_json(
+                        run_id="run-3",
+                        stage_key="execution_decision",
+                        attempt=1,
+                        instructions="测试硬超时",
+                        input_payload={"observed_facts": ["SPY 站上 MA200"]},
+                        schema={"type": "object", "properties": {}},
+                    )
                 elapsed = time.perf_counter() - started
 
-        self.assertIsNone(payload)
         self.assertLess(elapsed, 0.15)
+
+    def test_request_json_rejects_when_inflight_limit_is_exhausted(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            gateway = MarketMonitorLlmGateway(PromptCaptureStore(Path(temp_dir)))
+            gateway.max_inflight_requests = 1
+            gateway._inflight_limiter = gateway._inflight_limiter.__class__(1)
+            self.assertTrue(gateway._inflight_limiter.acquire(blocking=False))
+
+            with patch.dict(os.environ, {"CODEX_API_KEY": "test-key"}, clear=False):
+                with self.assertRaisesRegex(MarketMonitorError, "并发请求过多"):
+                    gateway.request_json(
+                        run_id="run-4",
+                        stage_key="judgment_group_a",
+                        attempt=1,
+                        instructions="测试并发限流",
+                        input_payload={"observed_facts": ["SPY 站上 MA200"]},
+                        schema={"type": "object", "properties": {}},
+                    )
+
+            gateway._inflight_limiter.release()
 
 
 if __name__ == "__main__":

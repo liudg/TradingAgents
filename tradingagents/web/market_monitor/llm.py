@@ -2,13 +2,15 @@ from __future__ import annotations
 
 import json
 import os
-from queue import Queue
-from threading import Thread
+from queue import Empty, Queue
+from threading import BoundedSemaphore, Thread
 from typing import Any
 
 from openai import OpenAI
 
 from tradingagents.default_config import DEFAULT_CONFIG
+from .errors import MarketMonitorError
+from .io_utils import extract_json_payload
 from .prompt_store import PromptCaptureStore
 
 
@@ -18,8 +20,8 @@ class MarketMonitorLlmGateway:
         self.provider = str(DEFAULT_CONFIG.get("llm_provider", "codex")).strip().lower()
         self.model = str(DEFAULT_CONFIG.get("deep_think_llm", "gpt-5.4"))
         self.timeout_seconds = float(DEFAULT_CONFIG.get("market_monitor_llm_timeout_seconds", 20))
-        self.api_key = self._resolve_api_key()
-        self.base_url = self._resolve_base_url()
+        self.max_inflight_requests = int(DEFAULT_CONFIG.get("market_monitor_llm_max_inflight_requests", 4))
+        self._inflight_limiter = BoundedSemaphore(max(1, self.max_inflight_requests))
 
     def request_json(
         self,
@@ -45,18 +47,22 @@ class MarketMonitorLlmGateway:
             model=self.model,
             payload=prompt_payload,
         )
-        if not self.api_key:
-            return None
-
-        client_kwargs: dict[str, Any] = {
-            "api_key": self.api_key,
-            "timeout": self.timeout_seconds,
-        }
-        if self.base_url:
-            client_kwargs["base_url"] = self.base_url
-        client = OpenAI(**client_kwargs)
+        api_key = self._resolve_api_key()
+        base_url = self._resolve_base_url()
+        if not api_key:
+            raise MarketMonitorError(f"{self.provider} API Key 未配置")
+        if not self._inflight_limiter.acquire(blocking=False):
+            raise MarketMonitorError("市场监控 LLM 并发请求过多，请稍后重试")
 
         try:
+            client_kwargs: dict[str, Any] = {
+                "api_key": api_key,
+                "timeout": self.timeout_seconds,
+            }
+            if base_url:
+                client_kwargs["base_url"] = base_url
+            client = OpenAI(**client_kwargs)
+
             response = self._create_response_with_timeout(
                 client=client,
                 stage_key=stage_key,
@@ -65,13 +71,20 @@ class MarketMonitorLlmGateway:
                 schema=schema,
                 tools=tools or [],
             )
-        except Exception:
-            return None
+        except MarketMonitorError:
+            raise
+        except Exception as exc:
+            raise MarketMonitorError(f"{stage_key} 阶段模型请求失败: {exc}") from exc
+        finally:
+            self._inflight_limiter.release()
 
         if response is None:
-            return None
+            raise MarketMonitorError(f"{stage_key} 阶段模型请求超时")
         raw_output = getattr(response, "output_text", "") or ""
-        return self._extract_json_payload(raw_output)
+        payload = extract_json_payload(raw_output)
+        if payload is None:
+            raise MarketMonitorError(f"{stage_key} 阶段模型返回的不是合法 JSON")
+        return payload
 
     def _create_response_with_timeout(
         self,
@@ -112,7 +125,10 @@ class MarketMonitorLlmGateway:
         worker.join(timeout=self.timeout_seconds)
         if worker.is_alive():
             return None
-        kind, value = result_queue.get_nowait()
+        try:
+            kind, value = result_queue.get_nowait()
+        except Empty:
+            return None
         if kind == "error":
             raise value
         return value
@@ -127,19 +143,6 @@ class MarketMonitorLlmGateway:
             return str(DEFAULT_CONFIG.get("backend_url") or "").strip() or None
         return None
 
-    def _extract_json_payload(self, content: str) -> dict[str, Any] | None:
-        stripped = content.strip()
-        if not stripped:
-            return None
-        try:
-            return json.loads(stripped)
-        except json.JSONDecodeError:
-            pass
-        start = stripped.find("{")
-        end = stripped.rfind("}")
-        if start == -1 or end == -1 or end <= start:
-            return None
-        try:
-            return json.loads(stripped[start : end + 1])
-        except json.JSONDecodeError:
-            return None
+    @staticmethod
+    def _extract_json_payload(content: str) -> dict[str, Any] | None:
+        return extract_json_payload(content)

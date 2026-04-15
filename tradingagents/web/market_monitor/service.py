@@ -1,16 +1,18 @@
 from __future__ import annotations
 
 from concurrent.futures import Executor, ThreadPoolExecutor
-from datetime import date, datetime
+from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Any
 
 from .data import build_market_dataset
+from .errors import MarketMonitorError
 from .llm import MarketMonitorLlmGateway
 from .metrics import build_market_snapshot
 from .prompt_store import PromptCaptureStore
 from .run_store import MonitorRunStore
 from .schemas import (
+    EvidenceReferenceItem,
     ExecutionDecisionPack,
     JudgmentCard,
     MarketFactItem,
@@ -28,6 +30,8 @@ from .schemas import (
     MarketMonitorRunStageDetail,
     MarketMonitorRunStagesResponse,
     SearchEvidenceItem,
+    SEARCH_SLOT_KEYS,
+    STAGE_KEYS,
     SearchSlotPack,
 )
 from .universe import get_market_monitor_universe
@@ -43,11 +47,16 @@ class MarketMonitorService:
         self._run_store = MonitorRunStore(run_root)
         self._prompt_store = PromptCaptureStore(prompt_root, run_store=self._run_store)
         self._llm = MarketMonitorLlmGateway(self._prompt_store)
+        self._owns_executor = run_executor is None
         self._run_executor = run_executor or ThreadPoolExecutor(
             max_workers=2,
             thread_name_prefix="market-monitor",
         )
         self._recover_abandoned_runs()
+
+    def shutdown(self, wait: bool = False) -> None:
+        if self._owns_executor:
+            self._run_executor.shutdown(wait=wait)
 
     def create_run(self, request: MarketMonitorRunCreateRequest) -> MarketMonitorRunCreateResponse:
         as_of_date = request.as_of_date or date.today()
@@ -65,7 +74,7 @@ class MarketMonitorService:
                 update={
                     "status": "failed",
                     "current_stage": "failed",
-                    "finished_at": datetime.now(),
+                    "finished_at": datetime.now(timezone.utc),
                     "error_message": str(exc),
                 }
             )
@@ -95,7 +104,7 @@ class MarketMonitorService:
                 update={
                     "status": "completed",
                     "current_stage": "completed",
-                    "finished_at": datetime.now(),
+                    "finished_at": datetime.now(timezone.utc),
                     "result": result,
                 }
             )
@@ -118,7 +127,7 @@ class MarketMonitorService:
                 update={
                     "status": "failed",
                     "current_stage": "failed",
-                    "finished_at": datetime.now(),
+                    "finished_at": datetime.now(timezone.utc),
                     "error_message": str(exc),
                 }
             )
@@ -129,55 +138,75 @@ class MarketMonitorService:
         return self._run_store.get_run(run_id)
 
     def get_run_stages(self, run_id: str) -> MarketMonitorRunStagesResponse:
-        return self._run_store.get_stages(run_id)
+        run = self._run_store.get_run(run_id)
+        stages_response = self._run_store.get_stages(run_id)
+        return self._reconcile_stages_with_run(run, stages_response)
 
     def get_run_evidence(self, run_id: str) -> MarketMonitorRunEvidenceResponse:
         return self._run_store.get_evidence(run_id)
 
     def list_run_logs(self, run_id: str) -> list[MarketMonitorRunLogEntry]:
+        self._run_store.get_run(run_id)
         return self._run_store.list_logs(run_id)
 
     def list_run_prompts(self, run_id: str) -> list[MarketMonitorPromptSummary]:
+        self._run_store.get_run(run_id)
         return self._prompt_store.list_prompts(run_id)
 
     def get_prompt_detail(self, run_id: str, prompt_id: str) -> MarketMonitorPromptDetail:
+        self._run_store.get_run(run_id)
         return self._prompt_store.get_prompt(run_id, prompt_id)
 
     def _recover_abandoned_runs(self) -> None:
         for run in self._run_store.list_runs():
             if run.status != "running":
                 continue
+            try:
+                stages = self._run_store.get_stages(run.run_id).stages
+                failed_stage_key = run.current_stage if run.current_stage not in {"pending", "completed", "failed"} else ""
+                if not failed_stage_key and stages:
+                    failed_stage_key = stages[0].stage_key
+                if failed_stage_key:
+                    self._set_stage(
+                        stages,
+                        run.run_id,
+                        failed_stage_key,
+                        "failed",
+                        error={
+                            "type": "AbandonedRun",
+                            "message": "服务重启或后台任务中断，运行未能继续执行。",
+                        },
+                    )
 
-            stages = self._run_store.get_stages(run.run_id).stages
-            failed_stage_key = run.current_stage if run.current_stage not in {"pending", "completed", "failed"} else ""
-            if not failed_stage_key and stages:
-                failed_stage_key = stages[0].stage_key
-            if failed_stage_key:
-                self._set_stage(
-                    stages,
-                    run.run_id,
-                    failed_stage_key,
-                    "failed",
-                    error={
-                        "type": "AbandonedRun",
-                        "message": "服务重启或后台任务中断，运行未能继续执行。",
-                    },
+                recovered = run.model_copy(
+                    update={
+                        "status": "failed",
+                        "current_stage": "failed",
+                        "finished_at": datetime.now(timezone.utc),
+                        "error_message": "市场监控运行在服务重启或后台任务中断后未恢复，已标记为失败。",
+                    }
                 )
-
-            recovered = run.model_copy(
-                update={
-                    "status": "failed",
-                    "current_stage": "failed",
-                    "finished_at": datetime.now(),
-                    "error_message": "市场监控运行在服务重启或后台任务中断后未恢复，已标记为失败。",
-                }
-            )
-            self._run_store.save_run(recovered)
-            self._run_store.append_log(
-                run.run_id,
-                "Recovery",
-                "检测到未完成的历史运行，已在服务启动时标记为失败。",
-            )
+                self._run_store.save_run(recovered)
+                self._run_store.append_log(
+                    run.run_id,
+                    "Recovery",
+                    "检测到未完成的历史运行，已在服务启动时标记为失败。",
+                )
+            except Exception as exc:
+                corrupted = run.model_copy(
+                    update={
+                        "status": "failed",
+                        "current_stage": "failed",
+                        "finished_at": datetime.now(timezone.utc),
+                        "error_message": f"市场监控运行元数据损坏，恢复时失败：{exc}",
+                    }
+                )
+                self._run_store.save_run(corrupted)
+                self._run_store.append_log(
+                    run.run_id,
+                    "Recovery",
+                    f"检测到损坏的历史运行元数据，已标记失败：{exc}",
+                )
 
     def _run_input_bundle(
         self,
@@ -195,7 +224,7 @@ class MarketMonitorService:
         open_gaps = self._build_open_gaps(core_data)
         bundle = MarketInputBundle(
             as_of_date=as_of_date,
-            generated_at=datetime.now(),
+            generated_at=datetime.now(timezone.utc),
             local_market_data=local_market_data,
             derived_metrics=derived_metrics,
             available_local_data=available_local_data,
@@ -223,6 +252,23 @@ class MarketMonitorService:
     ) -> SearchSlotPack:
         self._set_stage(stages, run_id, "search_slots", "running")
         queries = self._build_slot_queries(input_bundle)
+        slot_properties = {
+            slot_key: {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "additionalProperties": False,
+                    "required": ["title", "summary", "source", "published_at"],
+                    "properties": {
+                        "title": {"type": "string"},
+                        "summary": {"type": "string"},
+                        "source": {"type": "string"},
+                        "published_at": {"type": "string"},
+                    },
+                },
+            }
+            for slot_key in SEARCH_SLOT_KEYS
+        }
         schema = {
             "type": "object",
             "additionalProperties": False,
@@ -230,28 +276,23 @@ class MarketMonitorService:
             "properties": {
                 "slots": {
                     "type": "object",
-                    "additionalProperties": {
-                        "type": "array",
-                        "items": {
-                            "type": "object",
-                            "additionalProperties": False,
-                            "required": ["title", "summary", "source", "published_at"],
-                            "properties": {
-                                "title": {"type": "string"},
-                                "summary": {"type": "string"},
-                                "source": {"type": "string"},
-                                "published_at": {"type": "string"},
-                            },
-                        },
-                    },
+                    "additionalProperties": False,
+                    "required": list(SEARCH_SLOT_KEYS),
+                    "properties": slot_properties,
                 }
-            },
+            }
         }
         payload = self._llm.request_json(
             run_id=run_id,
             stage_key="search_slots",
             attempt=1,
-            instructions="你是美国股市信息检索助手。只按给定槽位返回候选事实，不输出最终市场结论。",
+            instructions=(
+                "你是美国股市信息检索助手。"
+                "只按给定槽位返回候选事实，不输出最终市场结论。"
+                "必须覆盖所有给定槽位。"
+                "即使某个槽位没有命中结果，也必须返回该槽位对应的空数组。"
+                "不要新增未提供的槽位。"
+            ),
             input_payload={
                 "as_of_date": input_bundle.as_of_date.isoformat(),
                 "queries": queries,
@@ -274,6 +315,8 @@ class MarketMonitorService:
         slots: dict[str, list[SearchEvidenceItem]] = {}
         if payload and isinstance(payload.get("slots"), dict):
             for slot_key, items in payload["slots"].items():
+                if slot_key not in SEARCH_SLOT_KEYS:
+                    raise MarketMonitorError(f"search_slots 阶段返回了未知槽位: {slot_key}")
                 slots[slot_key] = [
                     SearchEvidenceItem(
                         slot_key=slot_key,
@@ -282,7 +325,7 @@ class MarketMonitorService:
                         summary=str(item.get("summary", "")),
                         source=str(item.get("source", "")),
                         published_at=str(item.get("published_at", "")) or None,
-                        captured_at=datetime.now(),
+                        captured_at=datetime.now(timezone.utc),
                     )
                     for item in items[:3]
                 ]
@@ -310,7 +353,7 @@ class MarketMonitorService:
         self._set_stage(stages, run_id, "fact_sheet", "running")
         observed_facts: list[MarketFactItem] = []
         filled_facts: list[MarketFactItem] = []
-        evidence_index: dict[str, list[dict[str, Any]]] = {}
+        evidence_index: dict[str, list[EvidenceReferenceItem]] = {}
         fact_confidence: dict[str, float] = {}
 
         for symbol, payload in input_bundle.local_market_data.items():
@@ -344,20 +387,23 @@ class MarketMonitorService:
                 )
                 fact_confidence[fact_id] = 0.65
                 evidence_index[fact_id] = [
-                    {
-                        "slot_key": slot_key,
-                        "query": item.query,
-                        "title": item.title,
-                        "source": item.source,
-                        "published_at": item.published_at,
-                    }
+                    EvidenceReferenceItem(
+                        slot_key=slot_key,
+                        query=item.query,
+                        title=item.title,
+                        source=item.source,
+                        published_at=item.published_at,
+                    )
                 ]
 
         fact_sheet = MarketFactSheet(
             observed_facts=observed_facts[:12],
             filled_facts=filled_facts[:12],
             open_gaps=input_bundle.open_gaps,
-            evidence_index=evidence_index,
+            evidence_index={
+                k: [ref.model_dump(mode="json") for ref in refs]
+                for k, refs in evidence_index.items()
+            },
             fact_confidence=fact_confidence,
         )
         self._run_store.save_evidence(
@@ -401,7 +447,13 @@ class MarketMonitorService:
             input_payload=fact_sheet.model_dump(mode="json"),
             schema=self._judgment_schema(["long_term_card", "system_risk_card"]),
         )
-        group_a_cards = self._fallback_group_a(fact_sheet, group_a)
+        try:
+            group_a_cards = {
+                "long_term_card": JudgmentCard.model_validate(group_a["long_term_card"]),
+                "system_risk_card": JudgmentCard.model_validate(group_a["system_risk_card"]),
+            }
+        except Exception as exc:
+            raise MarketMonitorError(f"judgment_group_a 阶段模型输出结构无效: {exc}") from exc
         self._set_stage(
             stages,
             run_id,
@@ -423,7 +475,14 @@ class MarketMonitorService:
             input_payload=fact_sheet.model_dump(mode="json"),
             schema=self._judgment_schema(["short_term_card", "event_risk_card", "panic_card"]),
         )
-        group_b_cards = self._fallback_group_b(fact_sheet, group_b)
+        try:
+            group_b_cards = {
+                "short_term_card": JudgmentCard.model_validate(group_b["short_term_card"]),
+                "event_risk_card": JudgmentCard.model_validate(group_b["event_risk_card"]),
+                "panic_card": JudgmentCard.model_validate(group_b["panic_card"]),
+            }
+        except Exception as exc:
+            raise MarketMonitorError(f"judgment_group_b 阶段模型输出结构无效: {exc}") from exc
         self._set_stage(
             stages,
             run_id,
@@ -476,7 +535,10 @@ class MarketMonitorService:
                 },
             },
         )
-        execution = self._fallback_execution(judgments, payload)
+        try:
+            execution = ExecutionDecisionPack.model_validate(payload)
+        except Exception as exc:
+            raise MarketMonitorError(f"execution_decision 阶段模型输出结构无效: {exc}") from exc
         self._set_stage(
             stages,
             run_id,
@@ -499,7 +561,7 @@ class MarketMonitorService:
         summary: dict[str, Any] | None = None,
         error: dict[str, Any] | None = None,
     ) -> None:
-        now = datetime.now()
+        now = datetime.now(timezone.utc)
         next_stages: list[MarketMonitorRunStageDetail] = []
         for stage in stages:
             if stage.stage_key != stage_key:
@@ -571,96 +633,45 @@ class MarketMonitorService:
             "properties": {key: card for key in keys},
         }
 
-    def _fallback_group_a(self, fact_sheet: MarketFactSheet, payload: dict[str, Any] | None) -> dict[str, JudgmentCard]:
-        if payload:
-            try:
-                return {
-                    "long_term_card": JudgmentCard.model_validate(payload["long_term_card"]),
-                    "system_risk_card": JudgmentCard.model_validate(payload["system_risk_card"]),
-                }
-            except Exception:
-                pass
-        observed = [item.statement for item in fact_sheet.observed_facts[:3]]
-        return {
-            "long_term_card": JudgmentCard(
-                label="偏多" if observed else "待确认",
-                summary="本地趋势代理整体偏稳，长线环境暂偏多。",
-                confidence=0.68 if observed else 0.2,
-                facts_used=observed,
-                uncertainties=fact_sheet.open_gaps[:2],
-                action="允许保留趋势仓，但继续关注补数结果。",
-            ),
-            "system_risk_card": JudgmentCard(
-                label="可控",
-                summary="当前系统性风险暂无明显失控迹象。",
-                confidence=0.7 if observed else 0.2,
-                facts_used=observed[:2],
-                uncertainties=fact_sheet.open_gaps[:2],
-                action="维持标准风险预算。",
-            ),
-        }
-
-    def _fallback_group_b(self, fact_sheet: MarketFactSheet, payload: dict[str, Any] | None) -> dict[str, JudgmentCard]:
-        if payload:
-            try:
-                return {
-                    "short_term_card": JudgmentCard.model_validate(payload["short_term_card"]),
-                    "event_risk_card": JudgmentCard.model_validate(payload["event_risk_card"]),
-                    "panic_card": JudgmentCard.model_validate(payload["panic_card"]),
-                }
-            except Exception:
-                pass
-        search_facts = [item.statement for item in fact_sheet.filled_facts[:3]]
-        return {
-            "short_term_card": JudgmentCard(
-                label="可做",
-                summary="短线环境允许参与，但不建议激进追价。",
-                confidence=0.66,
-                facts_used=[item.statement for item in fact_sheet.observed_facts[:2]],
-                uncertainties=fact_sheet.open_gaps[:1],
-                action="优先低吸与分批建仓。",
-            ),
-            "event_risk_card": JudgmentCard(
-                label="事件密集" if search_facts else "事件可控",
-                summary="未来三日存在需要持续跟踪的事件窗口。" if search_facts else "暂未补到显著事件密度。",
-                confidence=0.72 if search_facts else 0.45,
-                facts_used=search_facts,
-                uncertainties=fact_sheet.open_gaps[:2],
-                action="在重要事件前降低追价意愿。",
-            ),
-            "panic_card": JudgmentCard(
-                label="未激活",
-                summary="当前未见足够的恐慌反转证据。",
-                confidence=0.7,
-                facts_used=[item.statement for item in fact_sheet.observed_facts[:1]],
-                uncertainties=fact_sheet.open_gaps[:1],
-                action="无需切换至恐慌反转策略。",
-            ),
-        }
-
-    def _fallback_execution(
+    def _reconcile_stages_with_run(
         self,
-        judgments: MarketJudgmentPack,
-        payload: dict[str, Any] | None,
-    ) -> ExecutionDecisionPack:
-        if payload:
-            try:
-                return ExecutionDecisionPack.model_validate(payload)
-            except Exception:
-                pass
-        return ExecutionDecisionPack(
-            summary="维持偏多参与，但控制事件窗口内的追高和单笔风险。",
-            confidence=0.72,
-            decision_basis=[
-                judgments.long_term_card.summary,
-                judgments.system_risk_card.summary,
-                judgments.event_risk_card.summary,
-            ],
-            tradeoffs=["保持参与度，同时接受事件期节奏放缓"],
-            risk_flags=judgments.event_risk_card.uncertainties[:2],
-            actions=[
-                "总仓位 50%-70%",
-                "优先低吸，减少事件日前追高",
-                "单笔风险保持标准水平以下",
-            ],
-        )
+        run: MarketMonitorRunDetail,
+        stages_response: MarketMonitorRunStagesResponse,
+    ) -> MarketMonitorRunStagesResponse:
+        adjusted_stages: list[MarketMonitorRunStageDetail] = []
+        failed_stage_present = any(stage.status == "failed" for stage in stages_response.stages)
+
+        for stage in stages_response.stages:
+            updated_stage = stage
+            if run.status == "running" and run.current_stage in STAGE_KEYS and stage.stage_key == run.current_stage:
+                if stage.status != "running":
+                    updated_stage = stage.model_copy(
+                        update={
+                            "status": "running",
+                            "finished_at": None,
+                        }
+                    )
+            elif run.status == "completed" and stage.stage_key == "execution_decision" and stage.status != "completed":
+                updated_stage = stage.model_copy(
+                    update={
+                        "status": "completed",
+                        "finished_at": stage.finished_at or run.finished_at,
+                    }
+                )
+            elif (
+                run.status == "failed"
+                and not failed_stage_present
+                and run.current_stage in STAGE_KEYS
+                and stage.stage_key == run.current_stage
+            ):
+                updated_stage = stage.model_copy(
+                    update={
+                        "status": "failed",
+                        "finished_at": stage.finished_at or run.finished_at,
+                        "error": stage.error or {"message": run.error_message or "运行失败"},
+                    }
+                )
+            adjusted_stages.append(updated_stage)
+
+        return MarketMonitorRunStagesResponse(run_id=stages_response.run_id, stages=adjusted_stages)
+

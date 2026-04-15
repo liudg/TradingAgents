@@ -1,14 +1,14 @@
 from __future__ import annotations
 
-import json
 import re
-from datetime import date, datetime
+from datetime import date, datetime, timezone
 from pathlib import Path
-from tempfile import NamedTemporaryFile
 from typing import Any
 from uuid import uuid4
 
 from .cache import MARKET_MONITOR_CACHE_DIR
+from .errors import MarketMonitorNotFoundError
+from .io_utils import load_json, write_json_atomic
 from .schemas import (
     MarketMonitorRunDetail,
     MarketMonitorRunEvidenceResponse,
@@ -18,6 +18,13 @@ from .schemas import (
 )
 
 LOG_PATTERN = re.compile(r"^(?P<timestamp>[^ ]+) \[(?P<level>[^\]]+)\] (?P<content>.*)$")
+_SAFE_ID_PATTERN = re.compile(r"^[a-zA-Z0-9_-]{1,64}$")
+
+
+def _validate_id(value: str) -> str:
+    if not _SAFE_ID_PATTERN.match(value):
+        raise MarketMonitorNotFoundError(value)
+    return value
 
 
 class MonitorRunStore:
@@ -27,7 +34,7 @@ class MonitorRunStore:
 
     def create_run(self, as_of_date: date) -> MarketMonitorRunDetail:
         run_id = uuid4().hex
-        now = datetime.now()
+        now = datetime.now(timezone.utc)
         detail = MarketMonitorRunDetail(
             run_id=run_id,
             as_of_date=as_of_date,
@@ -59,18 +66,18 @@ class MonitorRunStore:
 
     def save_run(self, detail: MarketMonitorRunDetail) -> None:
         path = self._run_dir(detail.run_id, as_of_date=detail.as_of_date) / "run.json"
-        _write_json_atomic(path, detail.model_dump(mode="json"))
+        write_json_atomic(path, detail.model_dump(mode="json"))
 
     def get_run(self, run_id: str) -> MarketMonitorRunDetail:
-        payload = _load_json(self.resolve_run_dir(run_id) / "run.json")
+        payload = load_json(self.resolve_run_dir(run_id) / "run.json")
         if payload is None:
-            raise KeyError(run_id)
+            raise MarketMonitorNotFoundError(run_id)
         return MarketMonitorRunDetail.model_validate(payload)
 
     def list_runs(self) -> list[MarketMonitorRunDetail]:
         runs: list[MarketMonitorRunDetail] = []
         for path in self.root.glob("*/*/run.json"):
-            payload = _load_json(path)
+            payload = load_json(path)
             if payload is None:
                 continue
             try:
@@ -82,25 +89,25 @@ class MonitorRunStore:
 
     def save_stages(self, run_id: str, stages: list[MarketMonitorRunStageDetail]) -> None:
         payload = MarketMonitorRunStagesResponse(run_id=run_id, stages=stages)
-        _write_json_atomic((self._run_dir(run_id) / "stages.json"), payload.model_dump(mode="json"))
+        write_json_atomic((self._run_dir(run_id) / "stages.json"), payload.model_dump(mode="json"))
 
     def get_stages(self, run_id: str) -> MarketMonitorRunStagesResponse:
-        payload = _load_json(self.resolve_run_dir(run_id) / "stages.json")
+        payload = load_json(self.resolve_run_dir(run_id) / "stages.json")
         if payload is None:
-            raise KeyError(run_id)
+            raise MarketMonitorNotFoundError(run_id)
         return MarketMonitorRunStagesResponse.model_validate(payload)
 
     def save_evidence(self, run_id: str, evidence: MarketMonitorRunEvidenceResponse) -> None:
-        _write_json_atomic((self._run_dir(run_id) / "evidence.json"), evidence.model_dump(mode="json"))
+        write_json_atomic((self._run_dir(run_id) / "evidence.json"), evidence.model_dump(mode="json"))
 
     def get_evidence(self, run_id: str) -> MarketMonitorRunEvidenceResponse:
-        payload = _load_json(self.resolve_run_dir(run_id) / "evidence.json")
+        payload = load_json(self.resolve_run_dir(run_id) / "evidence.json")
         if payload is None:
-            raise KeyError(run_id)
+            raise MarketMonitorNotFoundError(run_id)
         return MarketMonitorRunEvidenceResponse.model_validate(payload)
 
     def append_log(self, run_id: str, level: str, content: str) -> None:
-        now = datetime.now().isoformat()
+        now = datetime.now(timezone.utc).isoformat()
         path = self._run_dir(run_id) / "events.log"
         path.parent.mkdir(parents=True, exist_ok=True)
         with path.open("a", encoding="utf-8") as handle:
@@ -130,6 +137,7 @@ class MonitorRunStore:
         return self.resolve_run_dir(run_id, as_of_date=as_of_date, create=True)
 
     def resolve_run_dir(self, run_id: str, as_of_date: date | None = None, create: bool = False) -> Path:
+        _validate_id(run_id)
         if as_of_date is not None:
             path = self.root / as_of_date.isoformat() / run_id
             if create:
@@ -143,25 +151,4 @@ class MonitorRunStore:
             path = self.root / run_id
             path.mkdir(parents=True, exist_ok=True)
             return path
-        raise KeyError(run_id)
-
-
-def _write_json_atomic(path: Path, payload: dict[str, Any]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with NamedTemporaryFile("w", encoding="utf-8", delete=False, dir=path.parent, suffix=".tmp") as handle:
-        temp_path = Path(handle.name)
-        handle.write(json.dumps(payload, ensure_ascii=False, indent=2, default=str))
-    try:
-        temp_path.replace(path)
-    finally:
-        if temp_path.exists():
-            temp_path.unlink(missing_ok=True)
-
-
-def _load_json(path: Path) -> dict[str, Any] | None:
-    if not path.exists():
-        return None
-    try:
-        return json.loads(path.read_text(encoding="utf-8"))
-    except Exception:
-        return None
+        raise MarketMonitorNotFoundError(run_id)

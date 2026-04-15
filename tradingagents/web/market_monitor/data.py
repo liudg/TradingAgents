@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from datetime import date, timedelta
 import time
 from typing import Dict, Iterable
@@ -9,6 +10,8 @@ from yfinance.exceptions import YFRateLimitError
 
 from tradingagents.dataflows.yfinance_proxy import get_yf
 from .cache import load_symbol_daily_cache, save_symbol_daily_cache
+
+logger = logging.getLogger(__name__)
 
 YFINANCE_DOWNLOAD_TIMEOUT_SECONDS = 10
 
@@ -175,6 +178,7 @@ def _download_single_symbol(symbol: str, as_of_date: date, lookback_days: int) -
         except YFRateLimitError:
             time.sleep(1.5 * (attempt + 1))
         except Exception:
+            logger.warning("下载 %s 日线数据失败", symbol, exc_info=True)
             return pd.DataFrame(columns=["Open", "High", "Low", "Close", "Volume"])
     return pd.DataFrame(columns=["Open", "High", "Low", "Close", "Volume"])
 

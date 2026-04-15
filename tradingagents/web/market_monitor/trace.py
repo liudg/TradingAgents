@@ -1,14 +1,14 @@
 from __future__ import annotations
 
-import json
 import re
-from datetime import date, datetime
+from datetime import date, datetime, timezone
 from pathlib import Path
-from tempfile import NamedTemporaryFile
 from typing import Any
 from uuid import uuid4
 
 from .cache import MARKET_MONITOR_CACHE_DIR
+from .errors import MarketMonitorError, MarketMonitorNotFoundError
+from .io_utils import load_json, write_json_atomic
 from .schemas import (
     MarketMonitorTraceDetail,
     MarketMonitorTraceLogEntry,
@@ -25,7 +25,7 @@ class MarketMonitorTraceLogger:
     def __init__(self, trace_root: Path, as_of_date: date, force_refresh: bool) -> None:
         self.trace_id = uuid4().hex
         self.as_of_date = as_of_date
-        self.started_at = datetime.now()
+        self.started_at = datetime.now(timezone.utc)
         self.finished_at: datetime | None = None
         self.trace_dir = trace_root / as_of_date.isoformat() / self.trace_id
         self.trace_dir.mkdir(parents=True, exist_ok=True)
@@ -55,7 +55,7 @@ class MarketMonitorTraceLogger:
         self._persist_running_snapshot()
 
     def log_event(self, level: str, content: str) -> None:
-        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
         normalized = content.replace("\r\n", "\n").replace("\n", " ")
         self.trace_dir.mkdir(parents=True, exist_ok=True)
         with self.log_path.open("a", encoding="utf-8") as handle:
@@ -85,18 +85,18 @@ class MarketMonitorTraceLogger:
         self._persist()
 
     def _persist(self) -> None:
-        self.finished_at = datetime.now()
+        self.finished_at = datetime.now(timezone.utc)
         self.payload["finished_at"] = self.finished_at.isoformat()
         self.payload["duration_ms"] = int(
             (self.finished_at - self.started_at).total_seconds() * 1000
         )
-        _write_json_atomic(self.snapshot_path, self.payload)
+        write_json_atomic(self.snapshot_path, self.payload)
 
     def _persist_running_snapshot(self) -> None:
         payload = dict(self.payload)
         payload["finished_at"] = None
         payload["duration_ms"] = None
-        _write_json_atomic(self.snapshot_path, payload)
+        write_json_atomic(self.snapshot_path, payload)
 
 
 class MarketMonitorTraceStore:
@@ -115,7 +115,7 @@ class MarketMonitorTraceStore:
     ) -> list[MarketMonitorTraceSummary]:
         summaries: list[MarketMonitorTraceSummary] = []
         for snapshot_path in self._iter_snapshot_paths(as_of_date):
-            payload = _load_json(snapshot_path)
+            payload = load_json(snapshot_path)
             if payload is None:
                 continue
             if status and payload.get("status") != status:
@@ -125,7 +125,7 @@ class MarketMonitorTraceStore:
             except Exception:
                 continue
         summaries.sort(key=lambda item: item.started_at, reverse=True)
-        return summaries[: max(limit, 1)]
+        return summaries[:limit] if limit > 0 else []
 
     def get_trace_detail(self, trace_id: str) -> MarketMonitorTraceDetail:
         payload = self._get_trace_payload(trace_id)
@@ -135,7 +135,7 @@ class MarketMonitorTraceStore:
         payload = self._get_trace_payload(trace_id)
         log_path = Path(str(payload.get("log_path") or ""))
         if not log_path.exists():
-            raise ValueError(f"Trace log file not found for {trace_id}")
+            raise MarketMonitorNotFoundError(f"Trace log file not found for {trace_id}")
         entries: list[MarketMonitorTraceLogEntry] = []
         for index, line in enumerate(log_path.read_text(encoding="utf-8").splitlines(), start=1):
             entries.append(_parse_trace_log_line(index, line))
@@ -144,10 +144,10 @@ class MarketMonitorTraceStore:
     def _get_trace_payload(self, trace_id: str) -> dict[str, Any]:
         snapshot_path = self._find_snapshot_path(trace_id)
         if snapshot_path is None:
-            raise KeyError(trace_id)
-        payload = _load_json(snapshot_path)
+            raise MarketMonitorNotFoundError(trace_id)
+        payload = load_json(snapshot_path)
         if payload is None:
-            raise ValueError(f"Trace snapshot is unreadable for {trace_id}")
+            raise MarketMonitorError(f"Trace snapshot is unreadable for {trace_id}")
         return payload
 
     def _iter_snapshot_paths(self, as_of_date: date | None) -> list[Path]:
@@ -163,31 +163,6 @@ class MarketMonitorTraceStore:
             if snapshot_path.parent.name == trace_id:
                 return snapshot_path
         return None
-
-
-def _write_json_atomic(path: Path, payload: dict[str, Any]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with NamedTemporaryFile("w", encoding="utf-8", delete=False, dir=path.parent, suffix=".tmp") as handle:
-        temp_path = Path(handle.name)
-        handle.write(json.dumps(payload, ensure_ascii=False, indent=2, default=_json_default))
-    try:
-        temp_path.replace(path)
-    finally:
-        if temp_path.exists():
-            temp_path.unlink(missing_ok=True)
-
-
-def _load_json(path: Path) -> dict[str, Any] | None:
-    try:
-        return json.loads(path.read_text(encoding="utf-8"))
-    except Exception:
-        return None
-
-
-def _json_default(value: Any) -> Any:
-    if isinstance(value, (datetime, date)):
-        return value.isoformat()
-    return str(value)
 
 
 def _parse_trace_log_line(line_no: int, raw_line: str) -> MarketMonitorTraceLogEntry:

@@ -3,11 +3,45 @@ from __future__ import annotations
 from datetime import date, datetime
 from typing import Any, Literal, Optional
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, JsonValue, field_validator
 
 
 RunStatus = Literal["pending", "running", "completed", "failed"]
 StageStatus = Literal["pending", "running", "completed", "failed", "skipped"]
+STAGE_KEYS = (
+    "input_bundle",
+    "search_slots",
+    "fact_sheet",
+    "judgment_group_a",
+    "judgment_group_b",
+    "execution_decision",
+)
+StageKey = Literal[
+    "input_bundle",
+    "search_slots",
+    "fact_sheet",
+    "judgment_group_a",
+    "judgment_group_b",
+    "execution_decision",
+]
+CurrentStage = Literal[
+    "pending",
+    "input_bundle",
+    "search_slots",
+    "fact_sheet",
+    "judgment_group_a",
+    "judgment_group_b",
+    "execution_decision",
+    "completed",
+    "failed",
+]
+SEARCH_SLOT_KEYS = (
+    "macro_calendar",
+    "earnings_watch",
+    "policy_geopolitics",
+    "risk_sentiment",
+    "market_structure_optional",
+)
 SearchSlotKey = Literal[
     "macro_calendar",
     "earnings_watch",
@@ -15,6 +49,7 @@ SearchSlotKey = Literal[
     "risk_sentiment",
     "market_structure_optional",
 ]
+StageMetadataValue = str | int | float | bool | None | list[str]
 
 
 class MarketMonitorRunCreateRequest(BaseModel):
@@ -44,6 +79,14 @@ class SearchEvidenceItem(BaseModel):
     captured_at: datetime | None = None
 
 
+class EvidenceReferenceItem(BaseModel):
+    slot_key: SearchSlotKey
+    query: str | None = None
+    title: str
+    source: str
+    published_at: str | None = None
+
+
 class MarketFactItem(BaseModel):
     fact_id: str
     statement: str
@@ -55,8 +98,8 @@ class MarketFactItem(BaseModel):
 class MarketInputBundle(BaseModel):
     as_of_date: date
     generated_at: datetime
-    local_market_data: dict[str, Any] = Field(default_factory=dict)
-    derived_metrics: dict[str, Any] = Field(default_factory=dict)
+    local_market_data: dict[str, JsonValue] = Field(default_factory=dict)
+    derived_metrics: dict[str, JsonValue] = Field(default_factory=dict)
     available_local_data: list[str] = Field(default_factory=list)
     open_gaps: list[str] = Field(default_factory=list)
 
@@ -69,7 +112,7 @@ class MarketFactSheet(BaseModel):
     observed_facts: list[MarketFactItem] = Field(default_factory=list)
     filled_facts: list[MarketFactItem] = Field(default_factory=list)
     open_gaps: list[str] = Field(default_factory=list)
-    evidence_index: dict[str, list[dict[str, Any]]] = Field(default_factory=dict)
+    evidence_index: dict[str, list[dict[str, JsonValue]]] = Field(default_factory=dict)
     fact_confidence: dict[str, float] = Field(default_factory=dict)
 
 
@@ -113,7 +156,7 @@ class MarketMonitorRunDetail(BaseModel):
     run_id: str
     as_of_date: date
     status: RunStatus
-    current_stage: str
+    current_stage: CurrentStage
     created_at: datetime
     started_at: datetime | None = None
     finished_at: datetime | None = None
@@ -122,13 +165,13 @@ class MarketMonitorRunDetail(BaseModel):
 
 
 class MarketMonitorRunStageDetail(BaseModel):
-    stage_key: str
+    stage_key: StageKey
     label: str
     status: StageStatus
     started_at: datetime | None = None
     finished_at: datetime | None = None
-    summary: dict[str, Any] = Field(default_factory=dict)
-    error: dict[str, Any] = Field(default_factory=dict)
+    summary: dict[str, StageMetadataValue] = Field(default_factory=dict)
+    error: dict[str, StageMetadataValue] = Field(default_factory=dict)
 
 
 class MarketMonitorRunStagesResponse(BaseModel):
@@ -138,8 +181,8 @@ class MarketMonitorRunStagesResponse(BaseModel):
 
 class MarketMonitorRunEvidenceResponse(BaseModel):
     run_id: str
-    evidence_index: dict[str, list[dict[str, Any]]] = Field(default_factory=dict)
-    search_slots: dict[str, list[dict[str, Any]]] = Field(default_factory=dict)
+    evidence_index: dict[str, list[EvidenceReferenceItem]] = Field(default_factory=dict)
+    search_slots: dict[SearchSlotKey, list[SearchEvidenceItem]] = Field(default_factory=dict)
     open_gaps: list[str] = Field(default_factory=list)
 
 
@@ -161,5 +204,35 @@ class MarketMonitorPromptSummary(BaseModel):
 
 
 class MarketMonitorPromptDetail(MarketMonitorPromptSummary):
-    payload: dict[str, Any] = Field(default_factory=dict)
+    payload: dict[str, JsonValue] = Field(default_factory=dict)
+
+
+class MarketMonitorTraceSummary(BaseModel):
+    trace_id: str
+    as_of_date: date
+    status: RunStatus
+    force_refresh: bool = False
+    started_at: datetime
+    finished_at: datetime | None = None
+    duration_ms: int | None = None
+    overall_confidence: float | None = None
+    long_term_label: str | None = None
+    execution_label: str | None = None
+
+
+class MarketMonitorTraceDetail(MarketMonitorTraceSummary):
+    request: dict[str, JsonValue] = Field(default_factory=dict)
+    cache_decision: dict[str, JsonValue] = Field(default_factory=dict)
+    dataset_summary: dict[str, JsonValue] = Field(default_factory=dict)
+    context_summary: dict[str, JsonValue] = Field(default_factory=dict)
+    assessment_summary: dict[str, JsonValue] = Field(default_factory=dict)
+    response_summary: dict[str, JsonValue] = Field(default_factory=dict)
+    error: dict[str, JsonValue] = Field(default_factory=dict)
+
+
+class MarketMonitorTraceLogEntry(BaseModel):
+    line_no: int
+    timestamp: datetime | None = None
+    level: str
+    content: str
 

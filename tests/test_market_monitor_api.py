@@ -92,7 +92,9 @@ class MarketMonitorRunApiTests(unittest.TestCase):
             search_slots={
                 "macro_calendar": [
                     {
+                        "slot_key": "macro_calendar",
                         "title": "FOMC schedule",
+                        "summary": "",
                         "source": "fed.gov",
                         "published_at": "2026-04-11T08:00:00",
                     }
@@ -183,6 +185,42 @@ class MarketMonitorRunApiTests(unittest.TestCase):
         self.assertEqual(prompts_response.json()[0]["stage_key"], "judgment_group_a")
         self.assertEqual(prompt_detail_response.status_code, 200)
         self.assertIn("instructions", prompt_detail_response.json()["payload"])
+
+    def test_prompts_api_returns_404_for_missing_run(self) -> None:
+        response = self.client.get("/api/market-monitor/runs/missing-run/prompts")
+
+        self.assertEqual(response.status_code, 404)
+        self.assertEqual(response.json()["detail"], "未找到市场监控提示词记录")
+
+    def test_logs_api_returns_404_for_missing_run(self) -> None:
+        response = self.client.get("/api/market-monitor/runs/missing-run/logs")
+
+        self.assertEqual(response.status_code, 404)
+        self.assertEqual(response.json()["detail"], "未找到市场监控日志")
+
+    def test_prompt_detail_api_returns_404_for_invalid_prompt_id(self) -> None:
+        run_id = "run-123"
+        created_at = datetime(2026, 4, 12, 9, 30, 0)
+        run_detail = MarketMonitorRunDetail(
+            run_id=run_id,
+            as_of_date=date(2026, 4, 11),
+            status="completed",
+            current_stage="completed",
+            created_at=created_at,
+            started_at=created_at,
+            finished_at=created_at,
+            error_message=None,
+            result=None,
+        )
+
+        with patch(
+            "tradingagents.web.api.app.market_monitor_service.get_run",
+            return_value=run_detail,
+        ):
+            response = self.client.get(f"/api/market-monitor/runs/{run_id}/prompts/bad-id")
+
+        self.assertEqual(response.status_code, 404)
+        self.assertEqual(response.json()["detail"], "未找到提示词详情")
 
 
 if __name__ == "__main__":

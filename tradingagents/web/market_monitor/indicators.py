@@ -51,7 +51,7 @@ def atr_percent(frame: pd.DataFrame, window: int = 14) -> float:
     ).max(axis=1)
     atr = true_range.rolling(window=window, min_periods=window).mean().iloc[-1]
     close = data["Close"].iloc[-1]
-    if not close or isnan(atr):
+    if close == 0 or isnan(atr):
         return 0.0
     return float(atr / close * 100.0)
 
