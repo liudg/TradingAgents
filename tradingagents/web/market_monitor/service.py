@@ -219,6 +219,7 @@ class MarketMonitorService:
         universe = get_market_monitor_universe()
         dataset = build_market_dataset(universe, as_of_date, force_refresh=force_refresh)
         core_data = dataset["core"]
+        cache_summary = dataset.get("cache_summary", {})
         local_market_data, derived_metrics = build_market_snapshot(core_data, universe["market_proxies"])
         available_local_data = sorted(local_market_data.keys())
         open_gaps = self._build_open_gaps(core_data)
@@ -239,9 +240,25 @@ class MarketMonitorService:
                 "available_local_data": available_local_data,
                 "derived_metric_keys": sorted(derived_metrics.keys()),
                 "open_gap_count": len(open_gaps),
+                "cache_counts": [
+                    f"cache_hit={cache_summary.get('counts', {}).get('cache_hit', 0)}",
+                    f"refreshed={cache_summary.get('counts', {}).get('refreshed', 0)}",
+                    f"stale_fallback={cache_summary.get('counts', {}).get('stale_fallback', 0)}",
+                    f"empty={cache_summary.get('counts', {}).get('empty', 0)}",
+                ],
+                "cache_symbols": cache_summary.get("symbols", []),
             },
         )
-        self._run_store.append_log(run_id, "InputBundle", f"完成本地输入摘要，覆盖 {len(available_local_data)} 个符号")
+        counts = cache_summary.get("counts", {})
+        self._run_store.append_log(
+            run_id,
+            "InputBundle",
+            "完成本地输入摘要，覆盖 "
+            f"{len(available_local_data)} 个符号；cache_hit={counts.get('cache_hit', 0)}，"
+            f"refreshed={counts.get('refreshed', 0)}，"
+            f"stale_fallback={counts.get('stale_fallback', 0)}，"
+            f"empty={counts.get('empty', 0)}",
+        )
         return bundle
 
     def _collect_search_slots(

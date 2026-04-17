@@ -1,31 +1,23 @@
 from __future__ import annotations
 
-import json
-import os
-import time
-from datetime import date, datetime
+from datetime import date
 from pathlib import Path
-from tempfile import NamedTemporaryFile
-from typing import Iterable
-from typing import Any
 
 import pandas as pd
 
 from tradingagents.default_config import DEFAULT_CONFIG
+from .io_utils import write_dataframe_csv_atomic
 
 
 MARKET_MONITOR_CACHE_DIR = Path(DEFAULT_CONFIG["data_cache_dir"]) / "market_monitor"
 MARKET_MONITOR_CACHE_DIR.mkdir(parents=True, exist_ok=True)
-ATOMIC_REPLACE_RETRY_DELAYS_SECONDS = (0.05, 0.15, 0.3)
+MARKET_MONITOR_DATA_DIR = MARKET_MONITOR_CACHE_DIR / "data"
+MARKET_MONITOR_DATA_DIR.mkdir(parents=True, exist_ok=True)
 
 
 def _symbol_cache_path(symbol: str) -> Path:
     safe_symbol = symbol.replace("^", "_idx_").replace("/", "_")
-    return MARKET_MONITOR_CACHE_DIR / f"{safe_symbol}_daily.csv"
-
-
-def _snapshot_cache_path(as_of_date: date) -> Path:
-    return MARKET_MONITOR_CACHE_DIR / f"snapshot_{as_of_date.isoformat()}.json"
+    return MARKET_MONITOR_DATA_DIR / f"{safe_symbol}.csv"
 
 
 def load_symbol_daily_cache(symbol: str, as_of_date: date) -> pd.DataFrame:
@@ -48,77 +40,4 @@ def save_symbol_daily_cache(symbol: str, frame: pd.DataFrame) -> None:
     serializable = frame.copy().reset_index()
     if "index" in serializable.columns and "Date" not in serializable.columns:
         serializable = serializable.rename(columns={"index": "Date"})
-    with NamedTemporaryFile("w", encoding="utf-8", delete=False, dir=path.parent, suffix=".tmp") as handle:
-        temp_path = Path(handle.name)
-    try:
-        serializable.to_csv(temp_path, index=False)
-        _replace_with_retry(temp_path, path)
-    finally:
-        if temp_path.exists():
-            temp_path.unlink(missing_ok=True)
-
-
-def load_snapshot_cache(as_of_date: date) -> dict[str, Any] | None:
-    path = _snapshot_cache_path(as_of_date)
-    if not path.exists():
-        return None
-    try:
-        payload = json.loads(path.read_text(encoding="utf-8"))
-    except Exception:
-        return None
-    return payload if isinstance(payload, dict) else None
-
-
-def save_snapshot_cache(as_of_date: date, payload: dict[str, Any]) -> None:
-    path = _snapshot_cache_path(as_of_date)
-    with NamedTemporaryFile("w", encoding="utf-8", delete=False, dir=path.parent, suffix=".tmp") as handle:
-        temp_path = Path(handle.name)
-        handle.write(json.dumps(payload, ensure_ascii=False, indent=2, default=_json_default))
-    try:
-        _replace_with_retry(temp_path, path)
-    finally:
-        if temp_path.exists():
-            temp_path.unlink(missing_ok=True)
-
-
-def _json_default(value: Any) -> Any:
-    if isinstance(value, (datetime, date)):
-        return value.isoformat()
-    return str(value)
-
-
-def _replace_with_retry(source: Path, target: Path) -> None:
-    attempts = len(ATOMIC_REPLACE_RETRY_DELAYS_SECONDS) + 1
-    for attempt in range(attempts):
-        try:
-            source.replace(target)
-            return
-        except PermissionError:
-            if attempt >= attempts - 1:
-                raise
-            time.sleep(ATOMIC_REPLACE_RETRY_DELAYS_SECONDS[attempt])
-
-
-def symbol_cache_status(symbol: str) -> dict[str, Any]:
-    path = _symbol_cache_path(symbol)
-    if not path.exists():
-        return {"exists": False}
-    return {
-        "exists": True,
-        "path": str(path),
-        "updated_at": datetime.fromtimestamp(os.path.getmtime(path)).isoformat(),
-    }
-
-
-def latest_symbol_cache_mtime(symbols: Iterable[str]) -> datetime | None:
-    latest: float | None = None
-    for symbol in symbols:
-        path = _symbol_cache_path(symbol)
-        if not path.exists():
-            continue
-        modified = os.path.getmtime(path)
-        if latest is None or modified > latest:
-            latest = modified
-    if latest is None:
-        return None
-    return datetime.fromtimestamp(latest)
+    write_dataframe_csv_atomic(path, serializable)

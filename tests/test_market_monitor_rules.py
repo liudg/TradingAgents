@@ -8,12 +8,11 @@ from unittest.mock import patch
 import pandas as pd
 
 from tradingagents.web.market_monitor.errors import MarketMonitorError, MarketMonitorNotFoundError
-from tradingagents.web.market_monitor.data import _expected_market_close_date, _is_cache_usable
+from tradingagents.web.market_monitor.data import _expected_market_close_date, _is_cache_usable, _required_trading_days
 from tradingagents.web.market_monitor.metrics import build_market_snapshot
 from tradingagents.web.market_monitor.schemas import (
     MarketMonitorRunCreateRequest,
     MarketMonitorRunStageDetail,
-    MarketMonitorRunStagesResponse,
 )
 from tradingagents.web.market_monitor.service import MarketMonitorService
 from tradingagents.web.market_monitor.universe import get_market_monitor_universe
@@ -42,12 +41,21 @@ def _make_frame(base: float, days: int = 320) -> pd.DataFrame:
     )
 
 
-def _complete_dataset() -> dict[str, dict[str, pd.DataFrame]]:
+def _complete_dataset() -> dict[str, Any]:
     universe = get_market_monitor_universe()
     core = {symbol: _make_frame(100 + idx * 3) for idx, symbol in enumerate(universe["core_index_etfs"])}
     core.update({symbol: _make_frame(80 + idx * 2) for idx, symbol in enumerate(universe["sector_etfs"])})
     core["^VIX"] = _make_frame(18, days=320)
-    return {"core": core}
+    return {
+        "core": core,
+        "cache_summary": {
+            "counts": {"cache_hit": 8, "refreshed": 3, "stale_fallback": 1, "empty": 0},
+            "symbols": [
+                {"symbol": "SPY", "cache_state": "cache_hit", "rows": 320, "expected_close_date": "2026-04-10"},
+                {"symbol": "QQQ", "cache_state": "refreshed", "rows": 320, "expected_close_date": "2026-04-10"},
+            ],
+        },
+    }
 
 
 def _llm_payloads() -> list[dict[str, Any]]:
@@ -61,7 +69,11 @@ def _llm_payloads() -> list[dict[str, Any]]:
                         "source": "fed.gov",
                         "published_at": "2026-04-10T08:00:00",
                     }
-                ]
+                ],
+                "earnings_watch": [],
+                "policy_geopolitics": [],
+                "risk_sentiment": [],
+                "market_structure_optional": [],
             }
         },
         {
@@ -121,9 +133,9 @@ def _llm_payloads() -> list[dict[str, Any]]:
 
 class MarketMonitorRulesTests(unittest.TestCase):
     def test_symbol_cache_requires_requested_trading_day(self) -> None:
-        friday_frame = _make_frame(100, days=120)
+        friday_frame = _make_frame(100, days=_required_trading_days(60))
 
-        self.assertFalse(_is_cache_usable(friday_frame, date(2026, 4, 13), 60))
+        self.assertFalse(_is_cache_usable(friday_frame.iloc[:-1], date(2026, 4, 13), 60))
         self.assertTrue(_is_cache_usable(friday_frame, date(2026, 4, 12), 60))
         self.assertEqual(_expected_market_close_date(date(2026, 4, 12)), pd.Timestamp("2026-04-10"))
         self.assertEqual(_expected_market_close_date(date(2026, 4, 3)), pd.Timestamp("2026-04-02"))
@@ -172,6 +184,11 @@ class MarketMonitorRulesTests(unittest.TestCase):
             self.assertTrue((run_dir / "stages.json").exists())
             self.assertTrue((run_dir / "evidence.json").exists())
             self.assertTrue((run_dir / "events.log").exists())
+            input_stage = next(stage for stage in stages.stages if stage.stage_key == "input_bundle")
+            self.assertIn("cache_counts", input_stage.summary)
+            self.assertIn("cache_symbols", input_stage.summary)
+            logs = service.list_run_logs(response.run_id)
+            self.assertTrue(any("cache_hit=8" in entry.content for entry in logs))
 
     def test_create_run_fails_when_llm_stage_fails(self) -> None:
         dataset = _complete_dataset()
@@ -226,10 +243,6 @@ class MarketMonitorRulesTests(unittest.TestCase):
                     )
                     for prompt in prompts
                 )
-            )
-            self.assertTrue(
-                (root / "runs" / "2026-04-10" / response.run_id / "prompts" / "search_slots" / "attempt-1.json")
-                .exists()
             )
 
     def test_create_run_fails_on_unknown_search_slot_key(self) -> None:

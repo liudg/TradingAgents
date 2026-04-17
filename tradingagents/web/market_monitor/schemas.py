@@ -49,7 +49,7 @@ SearchSlotKey = Literal[
     "risk_sentiment",
     "market_structure_optional",
 ]
-StageMetadataValue = str | int | float | bool | None | list[str]
+StageMetadataValue = str | int | float | bool | None | list[str] | list[dict[str, JsonValue]]
 
 
 class MarketMonitorRunCreateRequest(BaseModel):
@@ -205,34 +205,4 @@ class MarketMonitorPromptSummary(BaseModel):
 
 class MarketMonitorPromptDetail(MarketMonitorPromptSummary):
     payload: dict[str, JsonValue] = Field(default_factory=dict)
-
-
-class MarketMonitorTraceSummary(BaseModel):
-    trace_id: str
-    as_of_date: date
-    status: RunStatus
-    force_refresh: bool = False
-    started_at: datetime
-    finished_at: datetime | None = None
-    duration_ms: int | None = None
-    overall_confidence: float | None = None
-    long_term_label: str | None = None
-    execution_label: str | None = None
-
-
-class MarketMonitorTraceDetail(MarketMonitorTraceSummary):
-    request: dict[str, JsonValue] = Field(default_factory=dict)
-    cache_decision: dict[str, JsonValue] = Field(default_factory=dict)
-    dataset_summary: dict[str, JsonValue] = Field(default_factory=dict)
-    context_summary: dict[str, JsonValue] = Field(default_factory=dict)
-    assessment_summary: dict[str, JsonValue] = Field(default_factory=dict)
-    response_summary: dict[str, JsonValue] = Field(default_factory=dict)
-    error: dict[str, JsonValue] = Field(default_factory=dict)
-
-
-class MarketMonitorTraceLogEntry(BaseModel):
-    line_no: int
-    timestamp: datetime | None = None
-    level: str
-    content: str
 

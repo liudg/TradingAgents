@@ -3,7 +3,6 @@ from __future__ import annotations
 import re
 from datetime import date, datetime, timezone
 from pathlib import Path
-from typing import Any
 from uuid import uuid4
 
 from .cache import MARKET_MONITOR_CACHE_DIR
@@ -19,6 +18,7 @@ from .schemas import (
 
 LOG_PATTERN = re.compile(r"^(?P<timestamp>[^ ]+) \[(?P<level>[^\]]+)\] (?P<content>.*)$")
 _SAFE_ID_PATTERN = re.compile(r"^[a-zA-Z0-9_-]{1,64}$")
+_DATE_PATTERN = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 
 
 def _validate_id(value: str) -> str:
@@ -89,7 +89,7 @@ class MonitorRunStore:
 
     def save_stages(self, run_id: str, stages: list[MarketMonitorRunStageDetail]) -> None:
         payload = MarketMonitorRunStagesResponse(run_id=run_id, stages=stages)
-        write_json_atomic((self._run_dir(run_id) / "stages.json"), payload.model_dump(mode="json"))
+        write_json_atomic(self.resolve_run_dir(run_id) / "stages.json", payload.model_dump(mode="json"))
 
     def get_stages(self, run_id: str) -> MarketMonitorRunStagesResponse:
         payload = load_json(self.resolve_run_dir(run_id) / "stages.json")
@@ -98,7 +98,7 @@ class MonitorRunStore:
         return MarketMonitorRunStagesResponse.model_validate(payload)
 
     def save_evidence(self, run_id: str, evidence: MarketMonitorRunEvidenceResponse) -> None:
-        write_json_atomic((self._run_dir(run_id) / "evidence.json"), evidence.model_dump(mode="json"))
+        write_json_atomic(self.resolve_run_dir(run_id) / "evidence.json", evidence.model_dump(mode="json"))
 
     def get_evidence(self, run_id: str) -> MarketMonitorRunEvidenceResponse:
         payload = load_json(self.resolve_run_dir(run_id) / "evidence.json")
@@ -108,7 +108,7 @@ class MonitorRunStore:
 
     def append_log(self, run_id: str, level: str, content: str) -> None:
         now = datetime.now(timezone.utc).isoformat()
-        path = self._run_dir(run_id) / "events.log"
+        path = self.resolve_run_dir(run_id) / "events.log"
         path.parent.mkdir(parents=True, exist_ok=True)
         with path.open("a", encoding="utf-8") as handle:
             handle.write(f"{now} [{level}] {content}\n")
@@ -133,22 +133,15 @@ class MonitorRunStore:
             )
         return entries
 
-    def _run_dir(self, run_id: str, as_of_date: date | None = None) -> Path:
-        return self.resolve_run_dir(run_id, as_of_date=as_of_date, create=True)
-
-    def resolve_run_dir(self, run_id: str, as_of_date: date | None = None, create: bool = False) -> Path:
+    def _run_dir(self, run_id: str, as_of_date: date) -> Path:
         _validate_id(run_id)
-        if as_of_date is not None:
-            path = self.root / as_of_date.isoformat() / run_id
-            if create:
-                path.mkdir(parents=True, exist_ok=True)
-            return path
+        path = self.root / as_of_date.isoformat() / run_id
+        path.mkdir(parents=True, exist_ok=True)
+        return path
 
-        matches = [path for path in self.root.glob(f"*/{run_id}") if path.is_dir()]
+    def resolve_run_dir(self, run_id: str) -> Path:
+        _validate_id(run_id)
+        matches = [path for path in self.root.glob(f"*/{run_id}") if path.is_dir() and _DATE_PATTERN.match(path.parent.name)]
         if len(matches) == 1:
             return matches[0]
-        if not matches and create:
-            path = self.root / run_id
-            path.mkdir(parents=True, exist_ok=True)
-            return path
         raise MarketMonitorNotFoundError(run_id)

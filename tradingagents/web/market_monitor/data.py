@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import logging
-from datetime import date, timedelta
+import math
 import time
-from typing import Dict, Iterable
+from dataclasses import dataclass
+from datetime import date, timedelta
+from typing import Any, Dict, Iterable
 
 import pandas as pd
 from yfinance.exceptions import YFRateLimitError
@@ -14,6 +16,21 @@ from .cache import load_symbol_daily_cache, save_symbol_daily_cache
 logger = logging.getLogger(__name__)
 
 YFINANCE_DOWNLOAD_TIMEOUT_SECONDS = 10
+MIN_REQUIRED_TRADING_DAYS = 252
+
+
+@dataclass(frozen=True)
+class SymbolHistoryResult:
+    frame: pd.DataFrame
+    cache_state: str
+    fetched_live: bool
+    expected_close_date: pd.Timestamp
+
+
+@dataclass(frozen=True)
+class MarketDatasetResult:
+    core: Dict[str, pd.DataFrame]
+    cache_summary: dict[str, Any]
 
 
 def _normalize_ohlcv_frame(frame: pd.DataFrame) -> pd.DataFrame:
@@ -34,16 +51,31 @@ def fetch_daily_history(
     as_of_date: date,
     lookback_days: int = 420,
     force_refresh: bool = False,
-) -> Dict[str, pd.DataFrame]:
+) -> tuple[Dict[str, pd.DataFrame], dict[str, Any]]:
     symbol_list = list(dict.fromkeys(symbols))
 
     result: Dict[str, pd.DataFrame] = {}
+    symbol_summaries: list[dict[str, Any]] = []
+    counts = {"cache_hit": 0, "refreshed": 0, "stale_fallback": 0, "empty": 0}
     for symbol in symbol_list:
-        frame, fetched_live = _get_symbol_history(symbol, as_of_date, lookback_days, force_refresh=force_refresh)
-        result[symbol] = frame
-        if fetched_live:
+        history = _get_symbol_history(symbol, as_of_date, lookback_days, force_refresh=force_refresh)
+        result[symbol] = history.frame
+        if history.fetched_live:
             time.sleep(0.25)
-    return result
+        counts[history.cache_state] = counts.get(history.cache_state, 0) + 1
+        symbol_summaries.append(
+            {
+                "symbol": symbol,
+                "cache_state": history.cache_state,
+                "rows": int(len(history.frame.index)) if isinstance(history.frame.index, pd.Index) else 0,
+                "expected_close_date": history.expected_close_date.date().isoformat(),
+            }
+        )
+    return result, {
+        "force_refresh": force_refresh,
+        "symbols": symbol_summaries,
+        "counts": counts,
+    }
 
 
 def _get_symbol_history(
@@ -51,20 +83,40 @@ def _get_symbol_history(
     as_of_date: date,
     lookback_days: int,
     force_refresh: bool = False,
-) -> tuple[pd.DataFrame, bool]:
-    if not force_refresh:
-        cached = load_symbol_daily_cache(symbol, as_of_date)
-        if _is_cache_usable(cached, as_of_date, lookback_days):
-            return cached, False
+) -> SymbolHistoryResult:
+    expected_close_date = _expected_market_close_date(as_of_date)
+    cached = load_symbol_daily_cache(symbol, as_of_date)
+    if not force_refresh and _is_cache_usable(cached, as_of_date, lookback_days):
+        return SymbolHistoryResult(
+            frame=cached,
+            cache_state="cache_hit",
+            fetched_live=False,
+            expected_close_date=expected_close_date,
+        )
 
     fresh = _download_single_symbol(symbol, as_of_date, lookback_days)
     if not fresh.empty:
         save_symbol_daily_cache(symbol, fresh)
-        return fresh, True
+        return SymbolHistoryResult(
+            frame=fresh,
+            cache_state="refreshed",
+            fetched_live=True,
+            expected_close_date=expected_close_date,
+        )
 
-    if not force_refresh:
-        return load_symbol_daily_cache(symbol, as_of_date), False
-    return pd.DataFrame(columns=["Open", "High", "Low", "Close", "Volume"]), False
+    if not cached.empty:
+        return SymbolHistoryResult(
+            frame=cached,
+            cache_state="stale_fallback",
+            fetched_live=False,
+            expected_close_date=expected_close_date,
+        )
+    return SymbolHistoryResult(
+        frame=pd.DataFrame(columns=["Open", "High", "Low", "Close", "Volume"]),
+        cache_state="empty",
+        fetched_live=False,
+        expected_close_date=expected_close_date,
+    )
 
 
 def _is_cache_usable(frame: pd.DataFrame, as_of_date: date, lookback_days: int) -> bool:
@@ -72,14 +124,17 @@ def _is_cache_usable(frame: pd.DataFrame, as_of_date: date, lookback_days: int) 
         return False
     if not isinstance(frame.index, pd.DatetimeIndex):
         return False
-    required_start = pd.Timestamp(as_of_date - timedelta(days=lookback_days))
-    cached_start = frame.index.min()
     cached_end = frame.index.max()
-    if pd.isna(cached_start) or pd.isna(cached_end):
+    if pd.isna(cached_end):
         return False
-    if cached_start > required_start:
+    required_rows = _required_trading_days(lookback_days)
+    if len(frame.index) < required_rows:
         return False
     return cached_end >= _expected_market_close_date(as_of_date)
+
+
+def _required_trading_days(lookback_days: int) -> int:
+    return max(MIN_REQUIRED_TRADING_DAYS, math.ceil(lookback_days * 0.7))
 
 
 def _expected_market_close_date(as_of_date: date) -> pd.Timestamp:
@@ -187,8 +242,10 @@ def build_market_dataset(
     universe: dict[str, list[str]],
     as_of_date: date,
     force_refresh: bool = False,
-) -> dict[str, Dict[str, pd.DataFrame]]:
+) -> dict[str, Any]:
     core_and_sector = universe["core_index_etfs"] + universe["sector_etfs"] + ["^VIX"]
+    core, cache_summary = fetch_daily_history(core_and_sector, as_of_date, force_refresh=force_refresh)
     return {
-        "core": fetch_daily_history(core_and_sector, as_of_date, force_refresh=force_refresh),
+        "core": core,
+        "cache_summary": cache_summary,
     }

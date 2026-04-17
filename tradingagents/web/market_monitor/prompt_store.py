@@ -13,8 +13,11 @@ from .schemas import MarketMonitorPromptDetail, MarketMonitorPromptSummary
 
 class PromptCaptureStore:
     def __init__(self, root: Path | None = None, run_store: MonitorRunStore | None = None) -> None:
-        self.root = root or (MARKET_MONITOR_CACHE_DIR / "runs")
         self.run_store = run_store
+        if run_store is not None:
+            self.root = run_store.root
+        else:
+            self.root = root or (MARKET_MONITOR_CACHE_DIR / "runs")
         self.root.mkdir(parents=True, exist_ok=True)
 
     def capture_prompt(
