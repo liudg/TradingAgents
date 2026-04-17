@@ -311,9 +311,9 @@ function HistoryBlock(props: { points: MarketMonitorHistoryPoint[] }) {
 export function MarketMonitorPage() {
   const [refreshToken, setRefreshToken] = useState(0);
   const forceRefresh = refreshToken > 0;
-  const snapshotQuery = useMarketMonitorSnapshot(undefined, forceRefresh);
-  const historyQuery = useMarketMonitorHistory(20, undefined, forceRefresh);
-  const dataStatusQuery = useMarketMonitorDataStatus(undefined, forceRefresh);
+  const snapshotQuery = useMarketMonitorSnapshot(undefined, forceRefresh, refreshToken);
+  const historyQuery = useMarketMonitorHistory(20, undefined, forceRefresh, refreshToken);
+  const dataStatusQuery = useMarketMonitorDataStatus(undefined, forceRefresh, refreshToken);
 
   if (snapshotQuery.isError && !snapshotQuery.data) {
     return (

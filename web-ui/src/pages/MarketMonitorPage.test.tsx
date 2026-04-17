@@ -273,9 +273,54 @@ describe("MarketMonitorPage", () => {
     fireEvent.click(screen.getByText("刷新"));
 
     await waitFor(() => {
-      expect(mockUseMarketMonitorSnapshot).toHaveBeenLastCalledWith(undefined, true);
-      expect(mockUseMarketMonitorHistory).toHaveBeenLastCalledWith(20, undefined, true);
-      expect(mockUseMarketMonitorDataStatus).toHaveBeenLastCalledWith(undefined, true);
+      expect(mockUseMarketMonitorSnapshot).toHaveBeenLastCalledWith(undefined, true, 1);
+      expect(mockUseMarketMonitorHistory).toHaveBeenLastCalledWith(20, undefined, true, 1);
+      expect(mockUseMarketMonitorDataStatus).toHaveBeenLastCalledWith(undefined, true, 1);
+    });
+  });
+
+  it("issues a new forced refresh on every refresh click", async () => {
+    installMatchMedia();
+    mockUseMarketMonitorSnapshot.mockReset();
+    mockUseMarketMonitorHistory.mockReset();
+    mockUseMarketMonitorDataStatus.mockReset();
+
+    mockUseMarketMonitorSnapshot.mockImplementation(() => ({
+      isLoading: false,
+      isError: false,
+      data: buildSnapshot(),
+      error: null,
+      refetch: vi.fn(),
+    }));
+    mockUseMarketMonitorHistory.mockImplementation(() => ({
+      data: { as_of_date: "2026-04-11", points: [] },
+      refetch: vi.fn(),
+    }));
+    mockUseMarketMonitorDataStatus.mockImplementation(() => ({
+      data: {
+        timestamp: "2026-04-11T08:30:00Z",
+        as_of_date: "2026-04-11",
+        source_coverage: buildSnapshot().source_coverage,
+        degraded_factors: buildSnapshot().degraded_factors,
+        notes: buildSnapshot().notes,
+        open_gaps: [],
+      },
+      refetch: vi.fn(),
+    }));
+
+    render(<MarketMonitorPage />);
+    const refreshButton = screen.getByText("刷新");
+
+    fireEvent.click(refreshButton);
+    await waitFor(() => {
+      expect(mockUseMarketMonitorSnapshot).toHaveBeenLastCalledWith(undefined, true, 1);
+    });
+
+    fireEvent.click(refreshButton);
+    await waitFor(() => {
+      expect(mockUseMarketMonitorSnapshot).toHaveBeenLastCalledWith(undefined, true, 2);
+      expect(mockUseMarketMonitorHistory).toHaveBeenLastCalledWith(20, undefined, true, 2);
+      expect(mockUseMarketMonitorDataStatus).toHaveBeenLastCalledWith(undefined, true, 2);
     });
   });
 });

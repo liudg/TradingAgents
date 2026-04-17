@@ -125,9 +125,10 @@ export function useHistoricalBacktest(jobId: string) {
 export function useMarketMonitorSnapshot(
   asOfDate?: string,
   forceRefresh = false,
+  refreshKey = 0,
 ) {
   return useQuery({
-    queryKey: ["market-monitor-snapshot", asOfDate ?? null, forceRefresh],
+    queryKey: ["market-monitor-snapshot", asOfDate ?? null, forceRefresh, refreshKey],
     queryFn: () => fetchMarketMonitorSnapshot(asOfDate, forceRefresh),
   });
 }
@@ -136,9 +137,10 @@ export function useMarketMonitorHistory(
   days = 20,
   asOfDate?: string,
   forceRefresh = false,
+  refreshKey = 0,
 ) {
   return useQuery({
-    queryKey: ["market-monitor-history", days, asOfDate ?? null, forceRefresh],
+    queryKey: ["market-monitor-history", days, asOfDate ?? null, forceRefresh, refreshKey],
     queryFn: () => fetchMarketMonitorHistory(days, asOfDate, forceRefresh),
   });
 }
@@ -146,9 +148,10 @@ export function useMarketMonitorHistory(
 export function useMarketMonitorDataStatus(
   asOfDate?: string,
   forceRefresh = false,
+  refreshKey = 0,
 ) {
   return useQuery({
-    queryKey: ["market-monitor-data-status", asOfDate ?? null, forceRefresh],
+    queryKey: ["market-monitor-data-status", asOfDate ?? null, forceRefresh, refreshKey],
     queryFn: () => fetchMarketMonitorDataStatus(asOfDate, forceRefresh),
   });
 }
