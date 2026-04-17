@@ -50,6 +50,55 @@ SearchSlotKey = Literal[
     "market_structure_optional",
 ]
 StageMetadataValue = str | int | float | bool | None | list[str] | list[dict[str, JsonValue]]
+MarketMonitorSymbolCacheReadState = Literal[
+    "cache_missing",
+    "cache_corrupted",
+    "cache_invalid_structure",
+    "cache_stale",
+    "cache_hit",
+]
+MarketMonitorSymbolCacheState = Literal[
+    "cache_missing",
+    "cache_corrupted",
+    "cache_invalid_structure",
+    "cache_stale",
+    "cache_hit",
+    "refreshed",
+    "stale_fallback",
+    "empty",
+]
+
+
+class MarketMonitorSymbolCacheMetadata(BaseModel):
+    schema_version: int = 1
+    cache_kind: Literal["symbol_daily_history"] = "symbol_daily_history"
+    symbol: str
+    safe_symbol: str
+    created_at: datetime
+    updated_at: datetime
+    last_successful_refresh_at: datetime
+    last_successful_as_of_date: date
+    expected_close_date: date
+    date_range_start: date | None = None
+    date_range_end: date | None = None
+    trading_days: int = Field(..., ge=0)
+    columns: list[str] = Field(default_factory=list)
+    source: str = "yfinance"
+    source_params: dict[str, JsonValue] = Field(default_factory=dict)
+    max_staleness_days: int = Field(default=3, ge=0)
+    retention_expires_on: date | None = None
+    content_hash: str | None = None
+
+
+class MarketMonitorSymbolCacheReadResult(BaseModel):
+    state: MarketMonitorSymbolCacheReadState
+    symbol: str
+    safe_symbol: str
+    frame: Any = None
+    metadata: MarketMonitorSymbolCacheMetadata | None = None
+    reason: str | None = None
+    cache_end_date: date | None = None
+    last_successful_refresh_at: datetime | None = None
 
 
 class MarketMonitorRunCreateRequest(BaseModel):
@@ -201,6 +250,9 @@ class MarketMonitorPromptSummary(BaseModel):
     created_at: datetime
     model: str
     file_path: str | None = None
+    request_status: str = "captured"
+    request_error: str | None = None
+    status_updated_at: datetime | None = None
 
 
 class MarketMonitorPromptDetail(MarketMonitorPromptSummary):

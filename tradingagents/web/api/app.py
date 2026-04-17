@@ -31,7 +31,7 @@ from tradingagents.web.market_monitor.schemas import (
     MarketMonitorRunLogEntry,
     MarketMonitorRunStagesResponse,
 )
-from tradingagents.web.market_monitor.errors import MarketMonitorNotFoundError
+from tradingagents.web.market_monitor.errors import MarketMonitorCorruptedStateError, MarketMonitorNotFoundError
 from tradingagents.web.market_monitor.service import MarketMonitorService
 
 
@@ -181,6 +181,8 @@ def get_market_monitor_run(run_id: str) -> MarketMonitorRunDetail:
         return market_monitor_service.get_run(run_id)
     except MarketMonitorNotFoundError as exc:
         raise HTTPException(status_code=404, detail="未找到市场监控运行记录") from exc
+    except MarketMonitorCorruptedStateError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
 
 
 @app.get("/api/market-monitor/runs/{run_id}/stages", response_model=MarketMonitorRunStagesResponse)
@@ -189,6 +191,8 @@ def get_market_monitor_run_stages(run_id: str) -> MarketMonitorRunStagesResponse
         return market_monitor_service.get_run_stages(run_id)
     except MarketMonitorNotFoundError as exc:
         raise HTTPException(status_code=404, detail="未找到市场监控阶段记录") from exc
+    except MarketMonitorCorruptedStateError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
 
 
 @app.get("/api/market-monitor/runs/{run_id}/evidence", response_model=MarketMonitorRunEvidenceResponse)
@@ -197,6 +201,8 @@ def get_market_monitor_run_evidence(run_id: str) -> MarketMonitorRunEvidenceResp
         return market_monitor_service.get_run_evidence(run_id)
     except MarketMonitorNotFoundError as exc:
         raise HTTPException(status_code=404, detail="未找到市场监控证据记录") from exc
+    except MarketMonitorCorruptedStateError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
 
 
 @app.get("/api/market-monitor/runs/{run_id}/logs", response_model=list[MarketMonitorRunLogEntry])
@@ -213,6 +219,8 @@ def get_market_monitor_run_prompts(run_id: str) -> list[MarketMonitorPromptSumma
         return market_monitor_service.list_run_prompts(run_id)
     except MarketMonitorNotFoundError as exc:
         raise HTTPException(status_code=404, detail="未找到市场监控提示词记录") from exc
+    except MarketMonitorCorruptedStateError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
 
 
 @app.get(
@@ -224,6 +232,8 @@ def get_market_monitor_prompt_detail(run_id: str, prompt_id: str) -> MarketMonit
         return market_monitor_service.get_prompt_detail(run_id, prompt_id)
     except MarketMonitorNotFoundError as exc:
         raise HTTPException(status_code=404, detail="未找到提示词详情") from exc
+    except MarketMonitorCorruptedStateError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
 
 
 def run_api() -> None:

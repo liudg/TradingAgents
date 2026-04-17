@@ -5,6 +5,7 @@ from unittest.mock import patch
 from fastapi.testclient import TestClient
 
 from tradingagents.web.api.app import app
+from tradingagents.web.market_monitor.errors import MarketMonitorCorruptedStateError
 from tradingagents.web.market_monitor.schemas import (
     ExecutionDecisionPack,
     MarketMonitorPromptDetail,
@@ -198,6 +199,33 @@ class MarketMonitorRunApiTests(unittest.TestCase):
         self.assertEqual(response.status_code, 404)
         self.assertEqual(response.json()["detail"], "未找到市场监控日志")
 
+    def test_prompts_api_returns_409_for_corrupted_prompt_list(self) -> None:
+        run_id = "run-123"
+        created_at = datetime(2026, 4, 12, 9, 30, 0)
+        run_detail = MarketMonitorRunDetail(
+            run_id=run_id,
+            as_of_date=date(2026, 4, 11),
+            status="completed",
+            current_stage="completed",
+            created_at=created_at,
+            started_at=created_at,
+            finished_at=created_at,
+            error_message=None,
+            result=None,
+        )
+
+        with patch(
+            "tradingagents.web.api.app.market_monitor_service.get_run",
+            return_value=run_detail,
+        ), patch(
+            "tradingagents.web.api.app.market_monitor_service.list_run_prompts",
+            side_effect=MarketMonitorCorruptedStateError("提示词列表存在损坏文件 attempt-1.json"),
+        ):
+            response = self.client.get(f"/api/market-monitor/runs/{run_id}/prompts")
+
+        self.assertEqual(response.status_code, 409)
+        self.assertIn("提示词列表存在损坏文件", response.json()["detail"])
+
     def test_prompt_detail_api_returns_404_for_invalid_prompt_id(self) -> None:
         run_id = "run-123"
         created_at = datetime(2026, 4, 12, 9, 30, 0)
@@ -221,6 +249,33 @@ class MarketMonitorRunApiTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 404)
         self.assertEqual(response.json()["detail"], "未找到提示词详情")
+
+    def test_prompt_detail_api_returns_409_for_corrupted_prompt(self) -> None:
+        run_id = "run-123"
+        created_at = datetime(2026, 4, 12, 9, 30, 0)
+        run_detail = MarketMonitorRunDetail(
+            run_id=run_id,
+            as_of_date=date(2026, 4, 11),
+            status="completed",
+            current_stage="completed",
+            created_at=created_at,
+            started_at=created_at,
+            finished_at=created_at,
+            error_message=None,
+            result=None,
+        )
+
+        with patch(
+            "tradingagents.web.api.app.market_monitor_service.get_run",
+            return_value=run_detail,
+        ), patch(
+            "tradingagents.web.api.app.market_monitor_service.get_prompt_detail",
+            side_effect=MarketMonitorCorruptedStateError("judgment_group_a-attempt-1 提示词记录损坏"),
+        ):
+            response = self.client.get(f"/api/market-monitor/runs/{run_id}/prompts/judgment_group_a-attempt-1")
+
+        self.assertEqual(response.status_code, 409)
+        self.assertIn("提示词记录损坏", response.json()["detail"])
 
 
 if __name__ == "__main__":

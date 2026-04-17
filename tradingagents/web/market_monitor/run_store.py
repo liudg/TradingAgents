@@ -3,10 +3,13 @@ from __future__ import annotations
 import re
 from datetime import date, datetime, timezone
 from pathlib import Path
+from shutil import rmtree
 from uuid import uuid4
 
+from tradingagents.default_config import DEFAULT_CONFIG
+
 from .cache import MARKET_MONITOR_CACHE_DIR
-from .errors import MarketMonitorNotFoundError
+from .errors import MarketMonitorCorruptedStateError, MarketMonitorNotFoundError
 from .io_utils import load_json, write_json_atomic
 from .schemas import (
     MarketMonitorRunDetail,
@@ -19,6 +22,7 @@ from .schemas import (
 LOG_PATTERN = re.compile(r"^(?P<timestamp>[^ ]+) \[(?P<level>[^\]]+)\] (?P<content>.*)$")
 _SAFE_ID_PATTERN = re.compile(r"^[a-zA-Z0-9_-]{1,64}$")
 _DATE_PATTERN = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+_RUN_INDEX_FILE = "run_index.json"
 
 
 def _validate_id(value: str) -> str:
@@ -31,6 +35,7 @@ class MonitorRunStore:
     def __init__(self, root: Path | None = None) -> None:
         self.root = root or (MARKET_MONITOR_CACHE_DIR / "runs")
         self.root.mkdir(parents=True, exist_ok=True)
+        self._index_path = self.root / _RUN_INDEX_FILE
 
     def create_run(self, as_of_date: date) -> MarketMonitorRunDetail:
         run_id = uuid4().hex
@@ -65,14 +70,23 @@ class MonitorRunStore:
         return detail
 
     def save_run(self, detail: MarketMonitorRunDetail) -> None:
-        path = self._run_dir(detail.run_id, as_of_date=detail.as_of_date) / "run.json"
+        run_dir = self._run_dir(detail.run_id, as_of_date=detail.as_of_date)
+        path = run_dir / "run.json"
         write_json_atomic(path, detail.model_dump(mode="json"))
+        self._register_run_dir(detail.run_id, run_dir)
 
     def get_run(self, run_id: str) -> MarketMonitorRunDetail:
-        payload = load_json(self.resolve_run_dir(run_id) / "run.json")
+        path = self.resolve_run_dir(run_id) / "run.json"
+        try:
+            payload = load_json(path, raise_on_error=True)
+        except Exception as exc:
+            raise MarketMonitorCorruptedStateError(f"{run_id} 的运行元数据损坏: {exc}") from exc
         if payload is None:
             raise MarketMonitorNotFoundError(run_id)
-        return MarketMonitorRunDetail.model_validate(payload)
+        try:
+            return MarketMonitorRunDetail.model_validate(payload)
+        except Exception as exc:
+            raise MarketMonitorCorruptedStateError(f"{run_id} 的运行元数据结构无效: {exc}") from exc
 
     def list_runs(self) -> list[MarketMonitorRunDetail]:
         runs: list[MarketMonitorRunDetail] = []
@@ -92,19 +106,33 @@ class MonitorRunStore:
         write_json_atomic(self.resolve_run_dir(run_id) / "stages.json", payload.model_dump(mode="json"))
 
     def get_stages(self, run_id: str) -> MarketMonitorRunStagesResponse:
-        payload = load_json(self.resolve_run_dir(run_id) / "stages.json")
+        path = self.resolve_run_dir(run_id) / "stages.json"
+        try:
+            payload = load_json(path, raise_on_error=True)
+        except Exception as exc:
+            raise MarketMonitorCorruptedStateError(f"{run_id} 的阶段元数据损坏: {exc}") from exc
         if payload is None:
             raise MarketMonitorNotFoundError(run_id)
-        return MarketMonitorRunStagesResponse.model_validate(payload)
+        try:
+            return MarketMonitorRunStagesResponse.model_validate(payload)
+        except Exception as exc:
+            raise MarketMonitorCorruptedStateError(f"{run_id} 的阶段元数据结构无效: {exc}") from exc
 
     def save_evidence(self, run_id: str, evidence: MarketMonitorRunEvidenceResponse) -> None:
         write_json_atomic(self.resolve_run_dir(run_id) / "evidence.json", evidence.model_dump(mode="json"))
 
     def get_evidence(self, run_id: str) -> MarketMonitorRunEvidenceResponse:
-        payload = load_json(self.resolve_run_dir(run_id) / "evidence.json")
+        path = self.resolve_run_dir(run_id) / "evidence.json"
+        try:
+            payload = load_json(path, raise_on_error=True)
+        except Exception as exc:
+            raise MarketMonitorCorruptedStateError(f"{run_id} 的证据元数据损坏: {exc}") from exc
         if payload is None:
             raise MarketMonitorNotFoundError(run_id)
-        return MarketMonitorRunEvidenceResponse.model_validate(payload)
+        try:
+            return MarketMonitorRunEvidenceResponse.model_validate(payload)
+        except Exception as exc:
+            raise MarketMonitorCorruptedStateError(f"{run_id} 的证据元数据结构无效: {exc}") from exc
 
     def append_log(self, run_id: str, level: str, content: str) -> None:
         now = datetime.now(timezone.utc).isoformat()
@@ -141,7 +169,81 @@ class MonitorRunStore:
 
     def resolve_run_dir(self, run_id: str) -> Path:
         _validate_id(run_id)
-        matches = [path for path in self.root.glob(f"*/{run_id}") if path.is_dir() and _DATE_PATTERN.match(path.parent.name)]
-        if len(matches) == 1:
-            return matches[0]
+        indexed_path = self._resolve_indexed_run_dir(run_id)
+        if indexed_path is not None:
+            return indexed_path
+        recovered_path = self._recover_run_dir(run_id)
+        if recovered_path is not None:
+            self._register_run_dir(run_id, recovered_path)
+            return recovered_path
         raise MarketMonitorNotFoundError(run_id)
+
+    def cleanup_runs(self, retention_days: int, now: datetime | None = None) -> int:
+        if retention_days <= 0:
+            return 0
+        reference = now or datetime.now(timezone.utc)
+        removed = 0
+        for day_dir in self.root.iterdir():
+            if not day_dir.is_dir() or not _DATE_PATTERN.match(day_dir.name):
+                continue
+            try:
+                run_date = date.fromisoformat(day_dir.name)
+            except ValueError:
+                continue
+            age_days = (reference.date() - run_date).days
+            if age_days <= retention_days:
+                continue
+            rmtree(day_dir, ignore_errors=True)
+            removed += 1
+        if removed:
+            self._prune_run_index()
+        return removed
+
+    def _load_run_index(self) -> dict[str, str]:
+        payload = load_json(self._index_path) or {}
+        if not isinstance(payload, dict):
+            return {}
+        return {str(key): str(value) for key, value in payload.items()}
+
+    def _save_run_index(self, index: dict[str, str]) -> None:
+        write_json_atomic(self._index_path, index)
+
+    def _register_run_dir(self, run_id: str, run_dir: Path) -> None:
+        index = self._load_run_index()
+        relative_path = run_dir.relative_to(self.root).as_posix()
+        if index.get(run_id) == relative_path:
+            return
+        index[run_id] = relative_path
+        self._save_run_index(index)
+
+    def _resolve_indexed_run_dir(self, run_id: str) -> Path | None:
+        index = self._load_run_index()
+        relative_path = index.get(run_id)
+        if not relative_path:
+            return None
+        path = self.root / Path(relative_path)
+        if path.is_dir():
+            return path
+        index.pop(run_id, None)
+        self._save_run_index(index)
+        return None
+
+    def _recover_run_dir(self, run_id: str) -> Path | None:
+        for day_dir in self.root.iterdir():
+            if not day_dir.is_dir() or not _DATE_PATTERN.match(day_dir.name):
+                continue
+            candidate = day_dir / run_id
+            if candidate.is_dir():
+                return candidate
+        return None
+
+    def _prune_run_index(self) -> None:
+        index = self._load_run_index()
+        next_index = {
+            run_id: relative_path
+            for run_id, relative_path in index.items()
+            if (self.root / Path(relative_path)).is_dir()
+        }
+        if next_index == index:
+            return
+        self._save_run_index(next_index)

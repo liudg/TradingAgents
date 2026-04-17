@@ -21,6 +21,10 @@ DEFAULT_CONFIG = {
     "deep_think_llm": "gpt-5.4",
     "quick_think_llm": "gpt-5.4-mini",
     "backend_url": "http://127.0.0.1:8317/v1",
+    "market_monitor_symbol_cache_max_age_days": 3,
+    "market_monitor_symbol_cache_retention_days": 30,
+    "market_monitor_symbol_cache_cleanup_interval_seconds": 3600,
+    "market_monitor_run_retention_days": 30,
     # Provider-specific thinking configuration
     "google_thinking_level": None,      # "high", "minimal", etc.
     "openai_reasoning_effort": None,    # "medium", "high", "low"

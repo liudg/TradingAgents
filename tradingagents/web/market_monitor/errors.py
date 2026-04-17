@@ -8,3 +8,7 @@ class MarketMonitorError(RuntimeError):
 class MarketMonitorNotFoundError(MarketMonitorError):
     """Raised when a market monitor resource cannot be found."""
 
+
+class MarketMonitorCorruptedStateError(MarketMonitorError):
+    """Raised when a persisted market monitor resource exists but cannot be read."""
+

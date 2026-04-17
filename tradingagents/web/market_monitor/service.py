@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 from concurrent.futures import Executor, ThreadPoolExecutor
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
+from tradingagents.default_config import DEFAULT_CONFIG
+from .cache import cleanup_symbol_daily_cache
 from .data import build_market_dataset
 from .errors import MarketMonitorError
 from .llm import MarketMonitorLlmGateway
@@ -52,13 +54,36 @@ class MarketMonitorService:
             max_workers=2,
             thread_name_prefix="market-monitor",
         )
+        self._last_cache_cleanup_at: datetime | None = None
+        self._cleanup_retained_artifacts()
         self._recover_abandoned_runs()
 
     def shutdown(self, wait: bool = False) -> None:
         if self._owns_executor:
             self._run_executor.shutdown(wait=wait)
 
+    def _cleanup_retained_artifacts(self, now: datetime | None = None) -> None:
+        cleanup_symbol_daily_cache(
+            int(DEFAULT_CONFIG.get("market_monitor_symbol_cache_retention_days", 30)),
+            now=now,
+        )
+        self._last_cache_cleanup_at = now or datetime.now(timezone.utc)
+        self._run_store.cleanup_runs(int(DEFAULT_CONFIG.get("market_monitor_run_retention_days", 30)), now=now)
+
+    def _maybe_cleanup_retained_artifacts(self, now: datetime | None = None) -> None:
+        reference = now or datetime.now(timezone.utc)
+        interval_seconds = int(DEFAULT_CONFIG.get("market_monitor_symbol_cache_cleanup_interval_seconds", 3600))
+        if interval_seconds <= 0:
+            return
+        if self._last_cache_cleanup_at is None:
+            self._cleanup_retained_artifacts(now=reference)
+            return
+        if reference - self._last_cache_cleanup_at < timedelta(seconds=interval_seconds):
+            return
+        self._cleanup_retained_artifacts(now=reference)
+
     def create_run(self, request: MarketMonitorRunCreateRequest) -> MarketMonitorRunCreateResponse:
+        self._maybe_cleanup_retained_artifacts()
         as_of_date = request.as_of_date or date.today()
         run = self._run_store.create_run(as_of_date)
         self._run_store.append_log(run.run_id, "Request", f"启动市场监控运行：{as_of_date.isoformat()}")
@@ -241,23 +266,36 @@ class MarketMonitorService:
                 "derived_metric_keys": sorted(derived_metrics.keys()),
                 "open_gap_count": len(open_gaps),
                 "cache_counts": [
+                    f"cache_missing={cache_summary.get('counts', {}).get('cache_missing', 0)}",
+                    f"cache_corrupted={cache_summary.get('counts', {}).get('cache_corrupted', 0)}",
+                    f"cache_invalid_structure={cache_summary.get('counts', {}).get('cache_invalid_structure', 0)}",
+                    f"cache_stale={cache_summary.get('counts', {}).get('cache_stale', 0)}",
                     f"cache_hit={cache_summary.get('counts', {}).get('cache_hit', 0)}",
-                    f"refreshed={cache_summary.get('counts', {}).get('refreshed', 0)}",
-                    f"stale_fallback={cache_summary.get('counts', {}).get('stale_fallback', 0)}",
-                    f"empty={cache_summary.get('counts', {}).get('empty', 0)}",
+                ],
+                "result_counts": [
+                    f"cache_hit={cache_summary.get('result_counts', {}).get('cache_hit', 0)}",
+                    f"refreshed={cache_summary.get('result_counts', {}).get('refreshed', 0)}",
+                    f"stale_fallback={cache_summary.get('result_counts', {}).get('stale_fallback', 0)}",
+                    f"empty={cache_summary.get('result_counts', {}).get('empty', 0)}",
                 ],
                 "cache_symbols": cache_summary.get("symbols", []),
             },
         )
         counts = cache_summary.get("counts", {})
+        result_counts = cache_summary.get("result_counts", {})
         self._run_store.append_log(
             run_id,
             "InputBundle",
             "完成本地输入摘要，覆盖 "
-            f"{len(available_local_data)} 个符号；cache_hit={counts.get('cache_hit', 0)}，"
-            f"refreshed={counts.get('refreshed', 0)}，"
-            f"stale_fallback={counts.get('stale_fallback', 0)}，"
-            f"empty={counts.get('empty', 0)}",
+            f"{len(available_local_data)} 个符号；cache_missing={counts.get('cache_missing', 0)}，"
+            f"cache_corrupted={counts.get('cache_corrupted', 0)}，"
+            f"cache_invalid_structure={counts.get('cache_invalid_structure', 0)}，"
+            f"cache_stale={counts.get('cache_stale', 0)}，"
+            f"cache_hit={counts.get('cache_hit', 0)}；"
+            f"result_cache_hit={result_counts.get('cache_hit', 0)}，"
+            f"result_refreshed={result_counts.get('refreshed', 0)}，"
+            f"result_stale_fallback={result_counts.get('stale_fallback', 0)}，"
+            f"result_empty={result_counts.get('empty', 0)}",
         )
         return bundle
 

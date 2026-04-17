@@ -2,8 +2,7 @@ from __future__ import annotations
 
 import json
 import os
-from queue import Empty, Queue
-from threading import BoundedSemaphore, Thread
+from threading import BoundedSemaphore
 from typing import Any
 
 from openai import OpenAI
@@ -40,19 +39,34 @@ class MarketMonitorLlmGateway:
             "schema": schema,
             "tools": tools or [],
         }
-        self.prompt_store.capture_prompt(
+        prompt_detail = self.prompt_store.capture_prompt(
             run_id=run_id,
             stage_key=stage_key,
             attempt=attempt,
             model=self.model,
             payload=prompt_payload,
         )
+        prompt_id = prompt_detail.prompt_id
         api_key = self._resolve_api_key()
         base_url = self._resolve_base_url()
         if not api_key:
+            self.prompt_store.mark_prompt_status(
+                run_id,
+                prompt_id,
+                request_status="rejected",
+                request_error=f"{self.provider} API Key 未配置",
+            )
             raise MarketMonitorError(f"{self.provider} API Key 未配置")
         if not self._inflight_limiter.acquire(blocking=False):
+            self.prompt_store.mark_prompt_status(
+                run_id,
+                prompt_id,
+                request_status="rejected",
+                request_error="市场监控 LLM 并发请求过多，请稍后重试",
+            )
             raise MarketMonitorError("市场监控 LLM 并发请求过多，请稍后重试")
+
+        self.prompt_store.mark_prompt_status(run_id, prompt_id, request_status="dispatched")
 
         try:
             client_kwargs: dict[str, Any] = {
@@ -63,7 +77,7 @@ class MarketMonitorLlmGateway:
                 client_kwargs["base_url"] = base_url
             client = OpenAI(**client_kwargs)
 
-            response = self._create_response_with_timeout(
+            response = self._create_response(
                 client=client,
                 stage_key=stage_key,
                 instructions=instructions,
@@ -71,22 +85,39 @@ class MarketMonitorLlmGateway:
                 schema=schema,
                 tools=tools or [],
             )
-        except MarketMonitorError:
+        except MarketMonitorError as exc:
+            self.prompt_store.mark_prompt_status(
+                run_id,
+                prompt_id,
+                request_status="failed",
+                request_error=str(exc),
+            )
             raise
         except Exception as exc:
+            self.prompt_store.mark_prompt_status(
+                run_id,
+                prompt_id,
+                request_status="failed",
+                request_error=str(exc),
+            )
             raise MarketMonitorError(f"{stage_key} 阶段模型请求失败: {exc}") from exc
         finally:
             self._inflight_limiter.release()
 
-        if response is None:
-            raise MarketMonitorError(f"{stage_key} 阶段模型请求超时")
         raw_output = getattr(response, "output_text", "") or ""
         payload = extract_json_payload(raw_output)
         if payload is None:
+            self.prompt_store.mark_prompt_status(
+                run_id,
+                prompt_id,
+                request_status="failed",
+                request_error=f"{stage_key} 阶段模型返回的不是合法 JSON",
+            )
             raise MarketMonitorError(f"{stage_key} 阶段模型返回的不是合法 JSON")
+        self.prompt_store.mark_prompt_status(run_id, prompt_id, request_status="succeeded")
         return payload
 
-    def _create_response_with_timeout(
+    def _create_response(
         self,
         *,
         client: OpenAI,
@@ -95,43 +126,26 @@ class MarketMonitorLlmGateway:
         input_payload: dict[str, Any],
         schema: dict[str, Any],
         tools: list[dict[str, Any]],
-    ) -> Any | None:
-        result_queue: Queue[tuple[str, Any]] = Queue(maxsize=1)
-
-        def _invoke() -> None:
-            try:
-                response = client.responses.create(
-                    model=self.model,
-                    instructions=instructions,
-                    input=json.dumps(input_payload, ensure_ascii=False),
-                    reasoning={"effort": "low"},
-                    max_output_tokens=2200,
-                    text={
-                        "format": {
-                            "type": "json_schema",
-                            "name": stage_key,
-                            "strict": True,
-                            "schema": schema,
-                        }
-                    },
-                    tools=tools,
-                )
-                result_queue.put(("response", response))
-            except Exception as exc:
-                result_queue.put(("error", exc))
-
-        worker = Thread(target=_invoke, name=f"market-monitor-{stage_key}", daemon=True)
-        worker.start()
-        worker.join(timeout=self.timeout_seconds)
-        if worker.is_alive():
-            return None
+    ) -> Any:
         try:
-            kind, value = result_queue.get_nowait()
-        except Empty:
-            return None
-        if kind == "error":
-            raise value
-        return value
+            return client.responses.create(
+                model=self.model,
+                instructions=instructions,
+                input=json.dumps(input_payload, ensure_ascii=False),
+                reasoning={"effort": "low"},
+                max_output_tokens=2200,
+                text={
+                    "format": {
+                        "type": "json_schema",
+                        "name": stage_key,
+                        "strict": True,
+                        "schema": schema,
+                    }
+                },
+                tools=tools,
+            )
+        except TimeoutError as exc:
+            raise MarketMonitorError(f"{stage_key} 阶段模型请求超时") from exc
 
     def _resolve_api_key(self) -> str:
         if self.provider == "codex":

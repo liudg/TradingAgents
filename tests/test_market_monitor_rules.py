@@ -1,5 +1,5 @@
 import unittest
-from datetime import date, datetime
+from datetime import date, datetime, timezone
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from typing import Any, Callable
@@ -8,12 +8,13 @@ from unittest.mock import patch
 import pandas as pd
 
 from tradingagents.web.market_monitor.errors import MarketMonitorError, MarketMonitorNotFoundError
-from tradingagents.web.market_monitor.data import _expected_market_close_date, _is_cache_usable, _required_trading_days
+from tradingagents.web.market_monitor.data import _expected_market_close_date, _required_trading_days
 from tradingagents.web.market_monitor.metrics import build_market_snapshot
 from tradingagents.web.market_monitor.schemas import (
     MarketMonitorRunCreateRequest,
     MarketMonitorRunStageDetail,
 )
+from tradingagents.web.market_monitor.run_store import MonitorRunStore
 from tradingagents.web.market_monitor.service import MarketMonitorService
 from tradingagents.web.market_monitor.universe import get_market_monitor_universe
 
@@ -49,10 +50,40 @@ def _complete_dataset() -> dict[str, Any]:
     return {
         "core": core,
         "cache_summary": {
-            "counts": {"cache_hit": 8, "refreshed": 3, "stale_fallback": 1, "empty": 0},
+            "counts": {
+                "cache_missing": 1,
+                "cache_corrupted": 1,
+                "cache_invalid_structure": 1,
+                "cache_stale": 1,
+                "cache_hit": 8,
+            },
+            "result_counts": {
+                "cache_hit": 8,
+                "refreshed": 3,
+                "stale_fallback": 1,
+                "empty": 0,
+            },
             "symbols": [
-                {"symbol": "SPY", "cache_state": "cache_hit", "rows": 320, "expected_close_date": "2026-04-10"},
-                {"symbol": "QQQ", "cache_state": "refreshed", "rows": 320, "expected_close_date": "2026-04-10"},
+                {
+                    "symbol": "SPY",
+                    "cache_state": "cache_hit",
+                    "result_state": "cache_hit",
+                    "rows": 320,
+                    "expected_close_date": "2026-04-10",
+                    "cache_end_date": "2026-04-10",
+                    "last_successful_refresh_at": "2026-04-10T00:00:00+00:00",
+                    "reason": None,
+                },
+                {
+                    "symbol": "QQQ",
+                    "cache_state": "cache_missing",
+                    "result_state": "refreshed",
+                    "rows": 320,
+                    "expected_close_date": "2026-04-10",
+                    "cache_end_date": "2026-04-10",
+                    "last_successful_refresh_at": "2026-04-10T00:00:00+00:00",
+                    "reason": None,
+                },
             ],
         },
     }
@@ -133,12 +164,24 @@ def _llm_payloads() -> list[dict[str, Any]]:
 
 class MarketMonitorRulesTests(unittest.TestCase):
     def test_symbol_cache_requires_requested_trading_day(self) -> None:
-        friday_frame = _make_frame(100, days=_required_trading_days(60))
-
-        self.assertFalse(_is_cache_usable(friday_frame.iloc[:-1], date(2026, 4, 13), 60))
-        self.assertTrue(_is_cache_usable(friday_frame, date(2026, 4, 12), 60))
         self.assertEqual(_expected_market_close_date(date(2026, 4, 12)), pd.Timestamp("2026-04-10"))
         self.assertEqual(_expected_market_close_date(date(2026, 4, 3)), pd.Timestamp("2026-04-02"))
+
+    def test_run_store_resolves_from_index_and_backfills_legacy_directory(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            store = MonitorRunStore(Path(temp_dir) / "runs")
+            run = store.create_run(date(2026, 4, 10))
+            index_path = store.root / "run_index.json"
+            self.assertTrue(index_path.exists())
+            indexed = store.resolve_run_dir(run.run_id)
+            self.assertEqual(indexed, store.root / "2026-04-10" / run.run_id)
+
+            legacy_run_id = "legacy-run"
+            legacy_dir = store.root / "2026-04-09" / legacy_run_id
+            legacy_dir.mkdir(parents=True)
+            recovered = store.resolve_run_dir(legacy_run_id)
+            self.assertEqual(recovered, legacy_dir)
+            self.assertIn(legacy_run_id, index_path.read_text(encoding="utf-8"))
 
     def test_metrics_builder_returns_local_data_and_derived_metrics(self) -> None:
         dataset = _complete_dataset()
@@ -188,6 +231,7 @@ class MarketMonitorRulesTests(unittest.TestCase):
             self.assertIn("cache_counts", input_stage.summary)
             self.assertIn("cache_symbols", input_stage.summary)
             logs = service.list_run_logs(response.run_id)
+            self.assertTrue(any("cache_corrupted=1" in entry.content for entry in logs))
             self.assertTrue(any("cache_hit=8" in entry.content for entry in logs))
 
     def test_create_run_fails_when_llm_stage_fails(self) -> None:
@@ -380,6 +424,61 @@ class MarketMonitorRulesTests(unittest.TestCase):
             self.assertEqual(recovered.current_stage, "failed")
             self.assertIsNotNone(recovered.finished_at)
             self.assertIn("中断", recovered.error_message or "")
+
+    def test_service_cleanup_removes_expired_run_directories_on_startup(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            old_run_dir = root / "runs" / "2026-03-01" / "old-run"
+            old_run_dir.mkdir(parents=True)
+            (old_run_dir / "run.json").write_text("{}", encoding="utf-8")
+            fresh_run_dir = root / "runs" / "2026-04-10" / "fresh-run"
+            fresh_run_dir.mkdir(parents=True)
+            (fresh_run_dir / "run.json").write_text("{}", encoding="utf-8")
+
+            with patch("tradingagents.web.market_monitor.service.DEFAULT_CONFIG", {
+                **__import__("tradingagents.default_config", fromlist=["DEFAULT_CONFIG"]).DEFAULT_CONFIG,
+                "data_cache_dir": str(root / "cache"),
+                "market_monitor_symbol_cache_retention_days": 30,
+                "market_monitor_symbol_cache_cleanup_interval_seconds": 3600,
+                "market_monitor_run_retention_days": 30,
+            }), patch(
+                "tradingagents.web.market_monitor.service.cleanup_symbol_daily_cache",
+                return_value=1,
+            ) as cleanup_symbol_cache, patch(
+                "tradingagents.web.market_monitor.run_store.DEFAULT_CONFIG",
+                {
+                    **__import__("tradingagents.default_config", fromlist=["DEFAULT_CONFIG"]).DEFAULT_CONFIG,
+                    "market_monitor_run_retention_days": 30,
+                },
+            ), patch(
+                "tradingagents.web.market_monitor.run_store.datetime"
+            ) as mock_datetime:
+                mock_datetime.now.return_value = datetime(2026, 4, 17, tzinfo=datetime.now().astimezone().tzinfo)
+                mock_datetime.side_effect = datetime
+                service = MarketMonitorService(run_root=root / "runs", prompt_root=root / "prompts", run_executor=CapturingExecutor())
+
+            cleanup_symbol_cache.assert_called_once()
+            self.assertFalse(old_run_dir.exists())
+            self.assertTrue(fresh_run_dir.exists())
+            service.shutdown()
+
+    def test_service_create_run_triggers_runtime_cleanup_after_interval(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            executor = CapturingExecutor()
+            with patch("tradingagents.web.market_monitor.service.cleanup_symbol_daily_cache", return_value=0) as cleanup_symbol_cache:
+                service = MarketMonitorService(run_root=root / "runs", prompt_root=root / "prompts", run_executor=executor)
+                service._last_cache_cleanup_at = datetime(2026, 4, 10, tzinfo=timezone.utc)
+                with patch("tradingagents.web.market_monitor.service.datetime") as mock_datetime:
+                    mock_datetime.now.return_value = datetime(2026, 4, 10, 2, 0, tzinfo=timezone.utc)
+                    mock_datetime.side_effect = datetime
+                    with patch("tradingagents.web.market_monitor.service.DEFAULT_CONFIG", {
+                        **__import__("tradingagents.default_config", fromlist=["DEFAULT_CONFIG"]).DEFAULT_CONFIG,
+                        "market_monitor_symbol_cache_cleanup_interval_seconds": 3600,
+                    }):
+                        service.create_run(MarketMonitorRunCreateRequest(as_of_date=date(2026, 4, 10)))
+
+            self.assertGreaterEqual(cleanup_symbol_cache.call_count, 2)
 
 
 if __name__ == "__main__":

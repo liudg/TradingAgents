@@ -61,12 +61,14 @@ def write_dataframe_csv_atomic(path: Path, frame: Any) -> None:
             temp_path.unlink(missing_ok=True)
 
 
-def load_json(path: Path) -> dict[str, Any] | None:
+def load_json(path: Path, *, raise_on_error: bool = False) -> dict[str, Any] | None:
     if not path.exists():
         return None
     try:
         return json.loads(path.read_text(encoding="utf-8"))
     except Exception:
+        if raise_on_error:
+            raise
         return None
 
 

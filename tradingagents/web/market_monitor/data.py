@@ -11,7 +11,7 @@ import pandas as pd
 from yfinance.exceptions import YFRateLimitError
 
 from tradingagents.dataflows.yfinance_proxy import get_yf
-from .cache import load_symbol_daily_cache, save_symbol_daily_cache
+from .cache import evaluate_symbol_daily_cache, save_symbol_daily_cache
 
 logger = logging.getLogger(__name__)
 
@@ -23,14 +23,12 @@ MIN_REQUIRED_TRADING_DAYS = 252
 class SymbolHistoryResult:
     frame: pd.DataFrame
     cache_state: str
+    result_state: str
     fetched_live: bool
     expected_close_date: pd.Timestamp
-
-
-@dataclass(frozen=True)
-class MarketDatasetResult:
-    core: Dict[str, pd.DataFrame]
-    cache_summary: dict[str, Any]
+    reason: str | None = None
+    cache_end_date: str | None = None
+    last_successful_refresh_at: str | None = None
 
 
 def _normalize_ohlcv_frame(frame: pd.DataFrame) -> pd.DataFrame:
@@ -56,25 +54,43 @@ def fetch_daily_history(
 
     result: Dict[str, pd.DataFrame] = {}
     symbol_summaries: list[dict[str, Any]] = []
-    counts = {"cache_hit": 0, "refreshed": 0, "stale_fallback": 0, "empty": 0}
+    counts = {
+        "cache_missing": 0,
+        "cache_corrupted": 0,
+        "cache_invalid_structure": 0,
+        "cache_stale": 0,
+        "cache_hit": 0,
+    }
+    result_counts = {
+        "cache_hit": 0,
+        "refreshed": 0,
+        "stale_fallback": 0,
+        "empty": 0,
+    }
     for symbol in symbol_list:
         history = _get_symbol_history(symbol, as_of_date, lookback_days, force_refresh=force_refresh)
         result[symbol] = history.frame
         if history.fetched_live:
             time.sleep(0.25)
         counts[history.cache_state] = counts.get(history.cache_state, 0) + 1
+        result_counts[history.result_state] = result_counts.get(history.result_state, 0) + 1
         symbol_summaries.append(
             {
                 "symbol": symbol,
                 "cache_state": history.cache_state,
+                "result_state": history.result_state,
                 "rows": int(len(history.frame.index)) if isinstance(history.frame.index, pd.Index) else 0,
                 "expected_close_date": history.expected_close_date.date().isoformat(),
+                "cache_end_date": history.cache_end_date,
+                "last_successful_refresh_at": history.last_successful_refresh_at,
+                "reason": history.reason,
             }
         )
     return result, {
         "force_refresh": force_refresh,
         "symbols": symbol_summaries,
         "counts": counts,
+        "result_counts": result_counts,
     }
 
 
@@ -85,52 +101,72 @@ def _get_symbol_history(
     force_refresh: bool = False,
 ) -> SymbolHistoryResult:
     expected_close_date = _expected_market_close_date(as_of_date)
-    cached = load_symbol_daily_cache(symbol, as_of_date)
-    if not force_refresh and _is_cache_usable(cached, as_of_date, lookback_days):
+    required_rows = _required_trading_days(lookback_days)
+    cache_result = evaluate_symbol_daily_cache(symbol, as_of_date, required_rows, expected_close_date.date())
+    if not force_refresh and cache_result.state == "cache_hit":
         return SymbolHistoryResult(
-            frame=cached,
+            frame=cache_result.frame,
             cache_state="cache_hit",
+            result_state="cache_hit",
             fetched_live=False,
             expected_close_date=expected_close_date,
+            reason=cache_result.reason,
+            cache_end_date=cache_result.cache_end_date.isoformat() if cache_result.cache_end_date else None,
+            last_successful_refresh_at=cache_result.last_successful_refresh_at.isoformat() if cache_result.last_successful_refresh_at else None,
         )
 
     fresh = _download_single_symbol(symbol, as_of_date, lookback_days)
     if not fresh.empty:
-        save_symbol_daily_cache(symbol, fresh)
+        save_symbol_daily_cache(
+            symbol,
+            fresh,
+            as_of_date=as_of_date,
+            expected_close_date=expected_close_date.date(),
+            required_rows=required_rows,
+        )
         return SymbolHistoryResult(
             frame=fresh,
-            cache_state="refreshed",
+            cache_state=cache_result.state,
+            result_state="refreshed",
             fetched_live=True,
             expected_close_date=expected_close_date,
+            cache_end_date=fresh.index.max().date().isoformat() if not fresh.empty else None,
+            reason=cache_result.reason,
+            last_successful_refresh_at=cache_result.last_successful_refresh_at.isoformat() if cache_result.last_successful_refresh_at else None,
         )
 
-    if not cached.empty:
+    if cache_result.state == "cache_stale" and isinstance(cache_result.frame, pd.DataFrame) and not cache_result.frame.empty:
         return SymbolHistoryResult(
-            frame=cached,
-            cache_state="stale_fallback",
+            frame=cache_result.frame,
+            cache_state="cache_stale",
+            result_state="stale_fallback",
             fetched_live=False,
             expected_close_date=expected_close_date,
+            reason=cache_result.reason,
+            cache_end_date=cache_result.cache_end_date.isoformat() if cache_result.cache_end_date else None,
+            last_successful_refresh_at=cache_result.last_successful_refresh_at.isoformat() if cache_result.last_successful_refresh_at else None,
+        )
+    if cache_result.state in {"cache_missing", "cache_corrupted", "cache_invalid_structure", "cache_stale"}:
+        return SymbolHistoryResult(
+            frame=pd.DataFrame(columns=["Open", "High", "Low", "Close", "Volume"]),
+            cache_state=cache_result.state,
+            result_state="empty",
+            fetched_live=False,
+            expected_close_date=expected_close_date,
+            reason=cache_result.reason,
+            cache_end_date=cache_result.cache_end_date.isoformat() if cache_result.cache_end_date else None,
+            last_successful_refresh_at=cache_result.last_successful_refresh_at.isoformat() if cache_result.last_successful_refresh_at else None,
         )
     return SymbolHistoryResult(
         frame=pd.DataFrame(columns=["Open", "High", "Low", "Close", "Volume"]),
-        cache_state="empty",
+        cache_state=cache_result.state,
+        result_state="empty",
         fetched_live=False,
         expected_close_date=expected_close_date,
+        reason=cache_result.reason,
+        cache_end_date=cache_result.cache_end_date.isoformat() if cache_result.cache_end_date else None,
+        last_successful_refresh_at=cache_result.last_successful_refresh_at.isoformat() if cache_result.last_successful_refresh_at else None,
     )
-
-
-def _is_cache_usable(frame: pd.DataFrame, as_of_date: date, lookback_days: int) -> bool:
-    if frame.empty:
-        return False
-    if not isinstance(frame.index, pd.DatetimeIndex):
-        return False
-    cached_end = frame.index.max()
-    if pd.isna(cached_end):
-        return False
-    required_rows = _required_trading_days(lookback_days)
-    if len(frame.index) < required_rows:
-        return False
-    return cached_end >= _expected_market_close_date(as_of_date)
 
 
 def _required_trading_days(lookback_days: int) -> int:
