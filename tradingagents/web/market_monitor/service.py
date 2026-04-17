@@ -23,17 +23,20 @@ from .schemas import (
     MarketJudgmentPack,
     MarketMonitorPromptDetail,
     MarketMonitorPromptSummary,
+    MarketMonitorRunCleanupRequest,
+    MarketMonitorRunCleanupResponse,
     MarketMonitorRunCreateRequest,
     MarketMonitorRunCreateResponse,
+    MarketMonitorRunDeleteResponse,
     MarketMonitorRunDetail,
     MarketMonitorRunEvidenceResponse,
     MarketMonitorRunLogEntry,
     MarketMonitorRunResultSummary,
     MarketMonitorRunStageDetail,
     MarketMonitorRunStagesResponse,
+    MarketMonitorRunSummary,
     SearchEvidenceItem,
     SEARCH_SLOT_KEYS,
-    STAGE_KEYS,
     SearchSlotPack,
 )
 from .universe import get_market_monitor_universe
@@ -56,7 +59,6 @@ class MarketMonitorService:
         )
         self._last_cache_cleanup_at: datetime | None = None
         self._cleanup_retained_artifacts()
-        self._recover_abandoned_runs()
 
     def shutdown(self, wait: bool = False) -> None:
         if self._owns_executor:
@@ -68,7 +70,10 @@ class MarketMonitorService:
             now=now,
         )
         self._last_cache_cleanup_at = now or datetime.now(timezone.utc)
-        self._run_store.cleanup_runs(int(DEFAULT_CONFIG.get("market_monitor_run_retention_days", 30)), now=now)
+        self._run_store.cleanup_runs_by_retention(
+            int(DEFAULT_CONFIG.get("market_monitor_run_retention_days", 30)),
+            now=now,
+        )
 
     def _maybe_cleanup_retained_artifacts(self, now: datetime | None = None) -> None:
         reference = now or datetime.now(timezone.utc)
@@ -119,6 +124,20 @@ class MarketMonitorService:
             )
             raise
         return MarketMonitorRunCreateResponse(run_id=run.run_id, status="running")
+
+    def list_runs(self, statuses: list[str] | None = None, limit: int | None = None) -> list[MarketMonitorRunSummary]:
+        return self._run_store.list_runs(statuses=statuses, limit=limit)
+
+    def delete_run(self, run_id: str) -> MarketMonitorRunDeleteResponse:
+        self._run_store.delete_run(run_id)
+        return MarketMonitorRunDeleteResponse(run_id=run_id)
+
+    def cleanup_runs(self, request: MarketMonitorRunCleanupRequest) -> MarketMonitorRunCleanupResponse:
+        deleted_run_ids = self._run_store.cleanup_runs(request)
+        return MarketMonitorRunCleanupResponse(
+            deleted_run_ids=deleted_run_ids,
+            deleted_count=len(deleted_run_ids),
+        )
 
     def _execute_run_pipeline(self, run_id: str, as_of_date: date, force_refresh: bool) -> None:
         stages = self._run_store.get_stages(run_id).stages
@@ -195,9 +214,8 @@ class MarketMonitorService:
         return self._run_store.get_run(run_id)
 
     def get_run_stages(self, run_id: str) -> MarketMonitorRunStagesResponse:
-        run = self._run_store.get_run(run_id)
-        stages_response = self._run_store.get_stages(run_id)
-        return self._reconcile_stages_with_run(run, stages_response)
+        self._run_store.get_run(run_id)
+        return self._run_store.get_stages(run_id)
 
     def get_run_evidence(self, run_id: str) -> MarketMonitorRunEvidenceResponse:
         return self._run_store.get_evidence(run_id)
@@ -213,61 +231,6 @@ class MarketMonitorService:
     def get_prompt_detail(self, run_id: str, prompt_id: str) -> MarketMonitorPromptDetail:
         self._run_store.get_run(run_id)
         return self._prompt_store.get_prompt(run_id, prompt_id)
-
-    def _recover_abandoned_runs(self) -> None:
-        for run in self._run_store.list_runs():
-            if run.status != "running":
-                continue
-            try:
-                stages = self._run_store.get_stages(run.run_id).stages
-                failed_stage_key = run.current_stage if run.current_stage not in {"pending", "completed", "failed"} else ""
-                if not failed_stage_key and stages:
-                    failed_stage_key = stages[0].stage_key
-                if failed_stage_key:
-                    self._set_stage(
-                        stages,
-                        run.run_id,
-                        failed_stage_key,
-                        "failed",
-                        error={
-                            "type": "AbandonedRun",
-                            "message": "服务重启或后台任务中断，运行未能继续执行。",
-                        },
-                    )
-
-                recovered = run.model_copy(
-                    update={
-                        "status": "failed",
-                        "current_stage": "failed",
-                        "finished_at": datetime.now(timezone.utc),
-                        "error_message": "市场监控运行在服务重启或后台任务中断后未恢复，已标记为失败。",
-                    }
-                )
-                self._run_store.save_run(recovered)
-                self._run_store.append_event(
-                    run.run_id,
-                    "Recovery",
-                    "recovery_marked_failed",
-                    "检测到未完成的历史运行，已在服务启动时标记为失败。",
-                    stage_key=failed_stage_key or None,
-                )
-            except Exception as exc:
-                corrupted = run.model_copy(
-                    update={
-                        "status": "failed",
-                        "current_stage": "failed",
-                        "finished_at": datetime.now(timezone.utc),
-                        "error_message": f"市场监控运行元数据损坏，恢复时失败：{exc}",
-                    }
-                )
-                self._run_store.save_run(corrupted)
-                self._run_store.append_event(
-                    run.run_id,
-                    "Recovery",
-                    "recovery_metadata_corrupted",
-                    f"检测到损坏的历史运行元数据，已标记失败：{exc}",
-                    details={"error_type": exc.__class__.__name__},
-                )
 
     def _run_input_bundle(
         self,
@@ -378,7 +341,7 @@ class MarketMonitorService:
                     "required": list(SEARCH_SLOT_KEYS),
                     "properties": slot_properties,
                 }
-            }
+            },
         }
         payload = self._llm.request_json(
             run_id=run_id,
@@ -801,46 +764,3 @@ class MarketMonitorService:
             "required": keys,
             "properties": {key: card for key in keys},
         }
-
-    def _reconcile_stages_with_run(
-        self,
-        run: MarketMonitorRunDetail,
-        stages_response: MarketMonitorRunStagesResponse,
-    ) -> MarketMonitorRunStagesResponse:
-        adjusted_stages: list[MarketMonitorRunStageDetail] = []
-        failed_stage_present = any(stage.status == "failed" for stage in stages_response.stages)
-
-        for stage in stages_response.stages:
-            updated_stage = stage
-            if run.status == "running" and run.current_stage in STAGE_KEYS and stage.stage_key == run.current_stage:
-                if stage.status != "running":
-                    updated_stage = stage.model_copy(
-                        update={
-                            "status": "running",
-                            "finished_at": None,
-                        }
-                    )
-            elif run.status == "completed" and stage.stage_key == "execution_decision" and stage.status != "completed":
-                updated_stage = stage.model_copy(
-                    update={
-                        "status": "completed",
-                        "finished_at": stage.finished_at or run.finished_at,
-                    }
-                )
-            elif (
-                run.status == "failed"
-                and not failed_stage_present
-                and run.current_stage in STAGE_KEYS
-                and stage.stage_key == run.current_stage
-            ):
-                updated_stage = stage.model_copy(
-                    update={
-                        "status": "failed",
-                        "finished_at": stage.finished_at or run.finished_at,
-                        "error": stage.error or {"message": run.error_message or "运行失败"},
-                    }
-                )
-            adjusted_stages.append(updated_stage)
-
-        return MarketMonitorRunStagesResponse(run_id=stages_response.run_id, stages=adjusted_stages)
-

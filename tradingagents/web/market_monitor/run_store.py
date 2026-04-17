@@ -8,19 +8,21 @@ from shutil import rmtree
 from uuid import uuid4
 
 from .cache import MARKET_MONITOR_CACHE_DIR
-from .errors import MarketMonitorCorruptedStateError, MarketMonitorNotFoundError
+from .errors import MarketMonitorConflictError, MarketMonitorCorruptedStateError, MarketMonitorNotFoundError
 from .io_utils import load_json, write_json_atomic
 from .schemas import (
+    CleanupRunStatus,
+    MarketMonitorRunCleanupRequest,
     MarketMonitorRunDetail,
     MarketMonitorRunEvidenceResponse,
     MarketMonitorRunLogEntry,
     MarketMonitorRunStageDetail,
     MarketMonitorRunStagesResponse,
+    MarketMonitorRunSummary,
 )
 
 _SAFE_ID_PATTERN = re.compile(r"^[a-zA-Z0-9_-]{1,64}$")
 _DATE_PATTERN = re.compile(r"^\d{4}-\d{2}-\d{2}$")
-_RUN_INDEX_FILE = "run_index.json"
 _ARTIFACTS_DIR = "artifacts"
 _EVENTS_FILE = "events.jsonl"
 
@@ -35,7 +37,6 @@ class MonitorRunStore:
     def __init__(self, root: Path | None = None) -> None:
         self.root = root or (MARKET_MONITOR_CACHE_DIR / "runs")
         self.root.mkdir(parents=True, exist_ok=True)
-        self._index_path = self.root / _RUN_INDEX_FILE
 
     def create_run(self, as_of_date: date) -> MarketMonitorRunDetail:
         run_id = uuid4().hex
@@ -71,9 +72,7 @@ class MonitorRunStore:
 
     def save_run(self, detail: MarketMonitorRunDetail) -> None:
         run_dir = self._run_dir(detail.run_id, as_of_date=detail.as_of_date)
-        path = run_dir / "run.json"
-        write_json_atomic(path, detail.model_dump(mode="json"))
-        self._register_run_dir(detail.run_id, run_dir)
+        write_json_atomic(run_dir / "run.json", detail.model_dump(mode="json"))
 
     def get_run(self, run_id: str) -> MarketMonitorRunDetail:
         path = self.resolve_run_dir(run_id) / "run.json"
@@ -88,18 +87,33 @@ class MonitorRunStore:
         except Exception as exc:
             raise MarketMonitorCorruptedStateError(f"{run_id} 的运行元数据结构无效: {exc}") from exc
 
-    def list_runs(self) -> list[MarketMonitorRunDetail]:
-        runs: list[MarketMonitorRunDetail] = []
+    def list_runs(self, statuses: list[CleanupRunStatus] | None = None, limit: int | None = None) -> list[MarketMonitorRunSummary]:
+        runs: list[MarketMonitorRunSummary] = []
+        allowed_statuses = set(statuses or [])
         for path in self.root.glob("*/*/run.json"):
             payload = load_json(path)
             if payload is None:
                 continue
             try:
-                runs.append(MarketMonitorRunDetail.model_validate(payload))
+                detail = MarketMonitorRunDetail.model_validate(payload)
             except Exception:
                 continue
+            if allowed_statuses and detail.status not in allowed_statuses:
+                continue
+            runs.append(
+                MarketMonitorRunSummary(
+                    run_id=detail.run_id,
+                    as_of_date=detail.as_of_date,
+                    status=detail.status,
+                    current_stage=detail.current_stage,
+                    created_at=detail.created_at,
+                    started_at=detail.started_at,
+                    finished_at=detail.finished_at,
+                    error_message=detail.error_message,
+                )
+            )
         runs.sort(key=lambda item: item.created_at, reverse=True)
-        return runs
+        return runs[:limit] if limit is not None else runs
 
     def save_stages(self, run_id: str, stages: list[MarketMonitorRunStageDetail]) -> None:
         payload = MarketMonitorRunStagesResponse(run_id=run_id, stages=stages)
@@ -163,6 +177,60 @@ class MonitorRunStore:
         if not path.exists():
             return []
         return self._read_jsonl_logs(path)
+
+    def delete_run(self, run_id: str) -> None:
+        run = self.get_run(run_id)
+        if run.status == "running":
+            raise MarketMonitorConflictError("运行中的任务不能删除")
+        rmtree(self.resolve_run_dir(run_id), ignore_errors=True)
+
+    def cleanup_runs(self, request: MarketMonitorRunCleanupRequest, now: datetime | None = None) -> list[str]:
+        reference = now or datetime.now(timezone.utc)
+        statuses = set(request.statuses or [])
+        if request.delete_all_failed:
+            statuses.add("failed")
+        removed: list[str] = []
+        for run in self.list_runs():
+            if run.status == "running":
+                continue
+            if statuses and run.status not in statuses:
+                continue
+            if request.older_than_days is not None:
+                age_days = (reference.date() - run.as_of_date).days
+                if age_days < request.older_than_days:
+                    continue
+            self.delete_run(run.run_id)
+            removed.append(run.run_id)
+            if request.limit is not None and len(removed) >= request.limit:
+                break
+        return removed
+
+    def cleanup_runs_by_retention(self, retention_days: int, now: datetime | None = None) -> int:
+        if retention_days <= 0:
+            return 0
+        reference = now or datetime.now(timezone.utc)
+        removed = 0
+        for day_dir in self.root.iterdir():
+            if not day_dir.is_dir() or not _DATE_PATTERN.match(day_dir.name):
+                continue
+            try:
+                run_date = date.fromisoformat(day_dir.name)
+            except ValueError:
+                continue
+            age_days = (reference.date() - run_date).days
+            if age_days <= retention_days:
+                continue
+            for run_dir in day_dir.iterdir():
+                if not run_dir.is_dir():
+                    continue
+                payload = load_json(run_dir / "run.json") or {}
+                if payload.get("status") == "running":
+                    continue
+                rmtree(run_dir, ignore_errors=True)
+                removed += 1
+            if not any(day_dir.iterdir()):
+                rmtree(day_dir, ignore_errors=True)
+        return removed
 
     def _read_jsonl_logs(self, path: Path) -> list[MarketMonitorRunLogEntry]:
         entries: list[MarketMonitorRunLogEntry] = []
@@ -248,81 +316,10 @@ class MonitorRunStore:
 
     def resolve_run_dir(self, run_id: str) -> Path:
         _validate_id(run_id)
-        indexed_path = self._resolve_indexed_run_dir(run_id)
-        if indexed_path is not None:
-            return indexed_path
-        recovered_path = self._recover_run_dir(run_id)
-        if recovered_path is not None:
-            self._register_run_dir(run_id, recovered_path)
-            return recovered_path
-        raise MarketMonitorNotFoundError(run_id)
-
-    def cleanup_runs(self, retention_days: int, now: datetime | None = None) -> int:
-        if retention_days <= 0:
-            return 0
-        reference = now or datetime.now(timezone.utc)
-        removed = 0
-        for day_dir in self.root.iterdir():
-            if not day_dir.is_dir() or not _DATE_PATTERN.match(day_dir.name):
-                continue
-            try:
-                run_date = date.fromisoformat(day_dir.name)
-            except ValueError:
-                continue
-            age_days = (reference.date() - run_date).days
-            if age_days <= retention_days:
-                continue
-            rmtree(day_dir, ignore_errors=True)
-            removed += 1
-        if removed:
-            self._prune_run_index()
-        return removed
-
-    def _load_run_index(self) -> dict[str, str]:
-        payload = load_json(self._index_path) or {}
-        if not isinstance(payload, dict):
-            return {}
-        return {str(key): str(value) for key, value in payload.items()}
-
-    def _save_run_index(self, index: dict[str, str]) -> None:
-        write_json_atomic(self._index_path, index)
-
-    def _register_run_dir(self, run_id: str, run_dir: Path) -> None:
-        index = self._load_run_index()
-        relative_path = run_dir.relative_to(self.root).as_posix()
-        if index.get(run_id) == relative_path:
-            return
-        index[run_id] = relative_path
-        self._save_run_index(index)
-
-    def _resolve_indexed_run_dir(self, run_id: str) -> Path | None:
-        index = self._load_run_index()
-        relative_path = index.get(run_id)
-        if not relative_path:
-            return None
-        path = self.root / Path(relative_path)
-        if path.is_dir():
-            return path
-        index.pop(run_id, None)
-        self._save_run_index(index)
-        return None
-
-    def _recover_run_dir(self, run_id: str) -> Path | None:
         for day_dir in self.root.iterdir():
             if not day_dir.is_dir() or not _DATE_PATTERN.match(day_dir.name):
                 continue
             candidate = day_dir / run_id
             if candidate.is_dir():
                 return candidate
-        return None
-
-    def _prune_run_index(self) -> None:
-        index = self._load_run_index()
-        next_index = {
-            run_id: relative_path
-            for run_id, relative_path in index.items()
-            if (self.root / Path(relative_path)).is_dir()
-        }
-        if next_index == index:
-            return
-        self._save_run_index(next_index)
+        raise MarketMonitorNotFoundError(run_id)

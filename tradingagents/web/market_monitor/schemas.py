@@ -7,6 +7,7 @@ from pydantic import BaseModel, Field, JsonValue, field_validator
 
 
 RunStatus = Literal["pending", "running", "completed", "failed"]
+CleanupRunStatus = Literal["completed", "failed"]
 StageStatus = Literal["pending", "running", "completed", "failed", "skipped"]
 STAGE_KEYS = (
     "input_bundle",
@@ -116,6 +117,34 @@ class MarketMonitorRunCreateRequest(BaseModel):
 class MarketMonitorRunCreateResponse(BaseModel):
     run_id: str
     status: RunStatus
+
+
+class MarketMonitorRunSummary(BaseModel):
+    run_id: str
+    as_of_date: date
+    status: RunStatus
+    current_stage: CurrentStage
+    created_at: datetime
+    started_at: datetime | None = None
+    finished_at: datetime | None = None
+    error_message: str | None = None
+
+
+class MarketMonitorRunDeleteResponse(BaseModel):
+    run_id: str
+    deleted: bool = True
+
+
+class MarketMonitorRunCleanupRequest(BaseModel):
+    statuses: list[CleanupRunStatus] | None = None
+    older_than_days: int | None = Field(default=None, ge=0)
+    delete_all_failed: bool = False
+    limit: int | None = Field(default=None, ge=1)
+
+
+class MarketMonitorRunCleanupResponse(BaseModel):
+    deleted_run_ids: list[str] = Field(default_factory=list)
+    deleted_count: int = 0
 
 
 class SearchEvidenceItem(BaseModel):

@@ -7,10 +7,15 @@ from unittest.mock import patch
 
 import pandas as pd
 
-from tradingagents.web.market_monitor.errors import MarketMonitorError, MarketMonitorNotFoundError
+from tradingagents.web.market_monitor.errors import (
+    MarketMonitorConflictError,
+    MarketMonitorError,
+    MarketMonitorNotFoundError,
+)
 from tradingagents.web.market_monitor.data import _expected_market_close_date, _required_trading_days
 from tradingagents.web.market_monitor.metrics import build_market_snapshot
 from tradingagents.web.market_monitor.schemas import (
+    MarketMonitorRunCleanupRequest,
     MarketMonitorRunCreateRequest,
     MarketMonitorRunStageDetail,
 )
@@ -167,21 +172,15 @@ class MarketMonitorRulesTests(unittest.TestCase):
         self.assertEqual(_expected_market_close_date(date(2026, 4, 12)), pd.Timestamp("2026-04-10"))
         self.assertEqual(_expected_market_close_date(date(2026, 4, 3)), pd.Timestamp("2026-04-02"))
 
-    def test_run_store_resolves_from_index_and_backfills_legacy_directory(self) -> None:
+    def test_run_store_resolves_run_directory_without_index(self) -> None:
         with TemporaryDirectory() as temp_dir:
             store = MonitorRunStore(Path(temp_dir) / "runs")
             run = store.create_run(date(2026, 4, 10))
-            index_path = store.root / "run_index.json"
-            self.assertTrue(index_path.exists())
-            indexed = store.resolve_run_dir(run.run_id)
-            self.assertEqual(indexed, store.root / "2026-04-10" / run.run_id)
 
-            legacy_run_id = "legacy-run"
-            legacy_dir = store.root / "2026-04-09" / legacy_run_id
-            legacy_dir.mkdir(parents=True)
-            recovered = store.resolve_run_dir(legacy_run_id)
-            self.assertEqual(recovered, legacy_dir)
-            self.assertIn(legacy_run_id, index_path.read_text(encoding="utf-8"))
+            resolved = store.resolve_run_dir(run.run_id)
+
+            self.assertEqual(resolved, store.root / "2026-04-10" / run.run_id)
+            self.assertFalse((store.root / "run_index.json").exists())
 
     def test_metrics_builder_returns_local_data_and_derived_metrics(self) -> None:
         dataset = _complete_dataset()
@@ -374,7 +373,7 @@ class MarketMonitorRulesTests(unittest.TestCase):
             with self.assertRaises(MarketMonitorNotFoundError):
                 service.list_run_prompts("missing-run")
 
-    def test_get_run_stages_masks_completed_current_stage_while_run_is_still_running(self) -> None:
+    def test_get_run_stages_returns_persisted_stage_state_without_reconciliation(self) -> None:
         with TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
             service = MarketMonitorService(run_root=root / "runs", prompt_root=root / "prompts", run_executor=CapturingExecutor())
@@ -401,56 +400,9 @@ class MarketMonitorRulesTests(unittest.TestCase):
             stages = service.get_run_stages(run.run_id)
 
             execution_stage = next(stage for stage in stages.stages if stage.stage_key == "execution_decision")
-            self.assertEqual(execution_stage.status, "running")
-            self.assertIsNone(execution_stage.finished_at)
+            self.assertEqual(execution_stage.status, "completed")
 
-    def test_get_run_stages_marks_current_stage_failed_when_run_failed_but_stages_lag(self) -> None:
-        with TemporaryDirectory() as temp_dir:
-            root = Path(temp_dir)
-            service = MarketMonitorService(run_root=root / "runs", prompt_root=root / "prompts", run_executor=CapturingExecutor())
-            run = service._run_store.create_run(date(2026, 4, 10))
-            failed_detail = service._run_store.get_run(run.run_id).model_copy(
-                update={
-                    "status": "failed",
-                    "current_stage": "judgment_group_b",
-                    "finished_at": datetime(2026, 4, 10, 9, 30, 0),
-                    "error_message": "judgment_group_b failed",
-                }
-            )
-            service._run_store.save_run(failed_detail)
-            service._run_store.save_stages(
-                run.run_id,
-                [
-                    MarketMonitorRunStageDetail(stage_key="input_bundle", label="本地输入摘要", status="completed"),
-                    MarketMonitorRunStageDetail(stage_key="search_slots", label="搜索补数", status="completed"),
-                    MarketMonitorRunStageDetail(stage_key="fact_sheet", label="事实整编", status="completed"),
-                    MarketMonitorRunStageDetail(stage_key="judgment_group_a", label="环境与系统风险裁决", status="completed"),
-                    MarketMonitorRunStageDetail(stage_key="judgment_group_b", label="短线与事件裁决", status="running"),
-                    MarketMonitorRunStageDetail(stage_key="execution_decision", label="执行建议", status="pending"),
-                ],
-            )
-
-            stages = service.get_run_stages(run.run_id)
-
-            failed_stage = next(stage for stage in stages.stages if stage.stage_key == "judgment_group_b")
-            self.assertEqual(failed_stage.status, "failed")
-            self.assertTrue(failed_stage.error)
-
-    def test_service_recover_tolerates_missing_stage_file(self) -> None:
-        with TemporaryDirectory() as temp_dir:
-            root = Path(temp_dir)
-            first_service = MarketMonitorService(run_root=root / "runs", prompt_root=root / "prompts", run_executor=CapturingExecutor())
-            run = first_service._run_store.create_run(date(2026, 4, 10))
-            run_dir = first_service._run_store.resolve_run_dir(run.run_id)
-            (run_dir / "artifacts" / "stages.json").unlink()
-
-            restarted_service = MarketMonitorService(run_root=root / "runs", prompt_root=root / "prompts", run_executor=CapturingExecutor())
-
-            recovered = restarted_service.get_run(run.run_id)
-            self.assertEqual(recovered.status, "failed")
-            self.assertIn("损坏", recovered.error_message or "")
-
-    def test_service_recover_marks_abandoned_run_as_failed_after_restart(self) -> None:
+    def test_service_restart_does_not_recover_or_mutate_running_run(self) -> None:
         with TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
             first_service = MarketMonitorService(run_root=root / "runs", prompt_root=root / "prompts", run_executor=CapturingExecutor())
@@ -463,10 +415,76 @@ class MarketMonitorRulesTests(unittest.TestCase):
             restarted_service = MarketMonitorService(run_root=root / "runs", prompt_root=root / "prompts", run_executor=CapturingExecutor())
 
             recovered = restarted_service.get_run(response.run_id)
-            self.assertEqual(recovered.status, "failed")
-            self.assertEqual(recovered.current_stage, "failed")
-            self.assertIsNotNone(recovered.finished_at)
-            self.assertIn("中断", recovered.error_message or "")
+            self.assertEqual(recovered.status, "running")
+            self.assertEqual(recovered.current_stage, "pending")
+            self.assertIsNone(recovered.finished_at)
+
+    def test_service_restart_allows_new_run_to_execute_while_stale_run_remains_running(self) -> None:
+        dataset = _complete_dataset()
+        with TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            first_service = MarketMonitorService(
+                run_root=root / "runs",
+                prompt_root=root / "prompts",
+                run_executor=CapturingExecutor(),
+            )
+            stale_response = first_service.create_run(
+                MarketMonitorRunCreateRequest(as_of_date=date(2026, 4, 10))
+            )
+
+            restarted_executor = CapturingExecutor()
+            restarted_service = MarketMonitorService(
+                run_root=root / "runs",
+                prompt_root=root / "prompts",
+                run_executor=restarted_executor,
+            )
+
+            with patch(
+                "tradingagents.web.market_monitor.service.build_market_dataset",
+                return_value=dataset,
+            ), patch.object(
+                restarted_service._llm,
+                "request_json",
+                side_effect=_llm_payloads(),
+            ):
+                new_response = restarted_service.create_run(
+                    MarketMonitorRunCreateRequest(as_of_date=date(2026, 4, 10))
+                )
+                self.assertNotEqual(new_response.run_id, stale_response.run_id)
+                self.assertEqual(new_response.status, "running")
+                self.assertEqual(len(restarted_executor.calls), 1)
+                fn, args, kwargs = restarted_executor.calls[0]
+                fn(*args, **kwargs)
+
+            self.assertEqual(restarted_service.get_run(stale_response.run_id).status, "running")
+            self.assertEqual(restarted_service.get_run(new_response.run_id).status, "completed")
+
+    def test_delete_run_rejects_running_and_cleanup_skips_running(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            service = MarketMonitorService(run_root=root / "runs", prompt_root=root / "prompts", run_executor=CapturingExecutor())
+            running_run = service._run_store.create_run(date(2026, 4, 10))
+            failed_run = service._run_store.create_run(date(2026, 4, 9))
+            failed_detail = service._run_store.get_run(failed_run.run_id).model_copy(
+                update={
+                    "status": "failed",
+                    "current_stage": "failed",
+                    "finished_at": datetime(2026, 4, 10, 9, 30, 0),
+                    "error_message": "boom",
+                }
+            )
+            service._run_store.save_run(failed_detail)
+
+            with self.assertRaises(MarketMonitorConflictError):
+                service.delete_run(running_run.run_id)
+
+            cleanup = service.cleanup_runs(MarketMonitorRunCleanupRequest(delete_all_failed=True))
+
+            self.assertEqual(cleanup.deleted_run_ids, [failed_run.run_id])
+            self.assertEqual(cleanup.deleted_count, 1)
+            self.assertEqual(service.get_run(running_run.run_id).status, "running")
+            with self.assertRaises(MarketMonitorNotFoundError):
+                service.get_run(failed_run.run_id)
 
     def test_service_cleanup_removes_expired_run_directories_on_startup(self) -> None:
         with TemporaryDirectory() as temp_dir:

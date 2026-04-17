@@ -12,3 +12,7 @@ class MarketMonitorNotFoundError(MarketMonitorError):
 class MarketMonitorCorruptedStateError(MarketMonitorError):
     """Raised when a persisted market monitor resource exists but cannot be read."""
 
+
+class MarketMonitorConflictError(MarketMonitorError):
+    """Raised when a market monitor action conflicts with current run state."""
+

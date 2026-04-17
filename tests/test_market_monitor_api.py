@@ -5,19 +5,22 @@ from unittest.mock import patch
 from fastapi.testclient import TestClient
 
 from tradingagents.web.api.app import app
-from tradingagents.web.market_monitor.errors import MarketMonitorCorruptedStateError
+from tradingagents.web.market_monitor.errors import MarketMonitorConflictError, MarketMonitorCorruptedStateError
 from tradingagents.web.market_monitor.schemas import (
     ExecutionDecisionPack,
     MarketMonitorPromptDetail,
     MarketMonitorPromptSummary,
+    MarketMonitorRunCleanupResponse,
     MarketMonitorRunCreateRequest,
     MarketMonitorRunCreateResponse,
+    MarketMonitorRunDeleteResponse,
     MarketMonitorRunDetail,
     MarketMonitorRunEvidenceResponse,
     MarketMonitorRunLogEntry,
     MarketMonitorRunResultSummary,
     MarketMonitorRunStageDetail,
     MarketMonitorRunStagesResponse,
+    MarketMonitorRunSummary,
 )
 
 
@@ -186,6 +189,68 @@ class MarketMonitorRunApiTests(unittest.TestCase):
         self.assertEqual(prompts_response.json()[0]["stage_key"], "judgment_group_a")
         self.assertEqual(prompt_detail_response.status_code, 200)
         self.assertIn("instructions", prompt_detail_response.json()["payload"])
+
+    def test_list_runs_api_returns_summaries(self) -> None:
+        created_at = datetime(2026, 4, 12, 9, 30, 0)
+        runs = [
+            MarketMonitorRunSummary(
+                run_id="run-123",
+                as_of_date=date(2026, 4, 11),
+                status="failed",
+                current_stage="failed",
+                created_at=created_at,
+                started_at=created_at,
+                finished_at=created_at,
+                error_message="boom",
+            )
+        ]
+
+        with patch(
+            "tradingagents.web.api.app.market_monitor_service.list_runs",
+            return_value=runs,
+        ):
+            response = self.client.get("/api/market-monitor/runs")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()[0]["run_id"], "run-123")
+        self.assertEqual(response.json()[0]["status"], "failed")
+
+    def test_delete_run_api_returns_deleted_response(self) -> None:
+        with patch(
+            "tradingagents.web.api.app.market_monitor_service.delete_run",
+            return_value=MarketMonitorRunDeleteResponse(run_id="run-123", deleted=True),
+        ):
+            response = self.client.delete("/api/market-monitor/runs/run-123")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json(), {"run_id": "run-123", "deleted": True})
+
+    def test_delete_running_run_returns_409(self) -> None:
+        with patch(
+            "tradingagents.web.api.app.market_monitor_service.delete_run",
+            side_effect=MarketMonitorConflictError("运行中的任务不能删除"),
+        ):
+            response = self.client.delete("/api/market-monitor/runs/run-123")
+
+        self.assertEqual(response.status_code, 409)
+        self.assertEqual(response.json()["detail"], "运行中的任务不能删除")
+
+    def test_cleanup_runs_api_returns_deleted_ids(self) -> None:
+        with patch(
+            "tradingagents.web.api.app.market_monitor_service.cleanup_runs",
+            return_value=MarketMonitorRunCleanupResponse(
+                deleted_run_ids=["run-a", "run-b"],
+                deleted_count=2,
+            ),
+        ):
+            response = self.client.post(
+                "/api/market-monitor/runs/cleanup",
+                json={"delete_all_failed": True},
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["deleted_count"], 2)
+        self.assertEqual(response.json()["deleted_run_ids"], ["run-a", "run-b"])
 
     def test_prompts_api_returns_404_for_missing_run(self) -> None:
         response = self.client.get("/api/market-monitor/runs/missing-run/prompts")

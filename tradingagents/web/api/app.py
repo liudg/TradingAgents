@@ -24,14 +24,22 @@ from tradingagents.web.schemas import (
 from tradingagents.web.market_monitor.schemas import (
     MarketMonitorPromptDetail,
     MarketMonitorPromptSummary,
+    MarketMonitorRunCleanupRequest,
+    MarketMonitorRunCleanupResponse,
     MarketMonitorRunCreateRequest,
     MarketMonitorRunCreateResponse,
+    MarketMonitorRunDeleteResponse,
     MarketMonitorRunDetail,
     MarketMonitorRunEvidenceResponse,
     MarketMonitorRunLogEntry,
     MarketMonitorRunStagesResponse,
+    MarketMonitorRunSummary,
 )
-from tradingagents.web.market_monitor.errors import MarketMonitorCorruptedStateError, MarketMonitorNotFoundError
+from tradingagents.web.market_monitor.errors import (
+    MarketMonitorConflictError,
+    MarketMonitorCorruptedStateError,
+    MarketMonitorNotFoundError,
+)
 from tradingagents.web.market_monitor.service import MarketMonitorService
 
 
@@ -175,6 +183,18 @@ def create_market_monitor_run(
     return market_monitor_service.create_run(request)
 
 
+@app.get("/api/market-monitor/runs", response_model=list[MarketMonitorRunSummary])
+def list_market_monitor_runs() -> list[MarketMonitorRunSummary]:
+    return market_monitor_service.list_runs()
+
+
+@app.post("/api/market-monitor/runs/cleanup", response_model=MarketMonitorRunCleanupResponse)
+def cleanup_market_monitor_runs(
+    request: MarketMonitorRunCleanupRequest,
+) -> MarketMonitorRunCleanupResponse:
+    return market_monitor_service.cleanup_runs(request)
+
+
 @app.get("/api/market-monitor/runs/{run_id}", response_model=MarketMonitorRunDetail)
 def get_market_monitor_run(run_id: str) -> MarketMonitorRunDetail:
     try:
@@ -182,6 +202,16 @@ def get_market_monitor_run(run_id: str) -> MarketMonitorRunDetail:
     except MarketMonitorNotFoundError as exc:
         raise HTTPException(status_code=404, detail="未找到市场监控运行记录") from exc
     except MarketMonitorCorruptedStateError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
+@app.delete("/api/market-monitor/runs/{run_id}", response_model=MarketMonitorRunDeleteResponse)
+def delete_market_monitor_run(run_id: str) -> MarketMonitorRunDeleteResponse:
+    try:
+        return market_monitor_service.delete_run(run_id)
+    except MarketMonitorNotFoundError as exc:
+        raise HTTPException(status_code=404, detail="未找到市场监控运行记录") from exc
+    except MarketMonitorConflictError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
 
 
