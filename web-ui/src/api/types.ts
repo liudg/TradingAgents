@@ -238,86 +238,155 @@ export interface HistoricalBacktestDetail extends HistoricalBacktestSummary {
   memory_entries: BacktestMemoryEntry[];
 }
 
-export interface ExecutionDecisionPack {
+export interface MarketMonitorLayerMetric {
+  score: number;
+  delta_5d: number;
+  valid?: boolean | null;
+  preferred?: boolean | null;
+}
+
+export interface MarketMonitorScoreCard {
+  score: number;
+  zone: string;
+  delta_1d: number;
+  delta_5d: number;
+  slope_state: string;
   summary: string;
-  confidence: number;
-  decision_basis: string[];
-  tradeoffs: string[];
-  risk_flags: string[];
-  actions: string[];
+  action: string;
+  recommended_exposure?: string | null;
 }
 
-export interface MarketMonitorRunResultSummary {
-  long_term_label: string;
-  system_risk_label: string;
-  short_term_label: string;
-  event_risk_label: string;
-  panic_label: string;
-  execution_summary: string;
-  execution: ExecutionDecisionPack;
+export interface MarketMonitorSystemRiskCard extends MarketMonitorScoreCard {
+  liquidity_stress_score: number;
+  risk_appetite_score: number;
+  pcr_percentile?: number | null;
+  pcr_absolute?: number | null;
+  pcr_panic_flag?: boolean | null;
 }
 
-export interface MarketMonitorRunCreateResponse {
-  run_id: string;
-  status: "pending" | "running" | "completed" | "failed";
+export interface MarketMonitorStyleEffectiveness {
+  tactic_layer: {
+    trend_breakout: MarketMonitorLayerMetric;
+    dip_buy: MarketMonitorLayerMetric;
+    oversold_bounce: MarketMonitorLayerMetric;
+    top_tactic: string;
+    avoid_tactic: string;
+  };
+  asset_layer: {
+    large_cap_tech: MarketMonitorLayerMetric;
+    small_cap_momentum: MarketMonitorLayerMetric;
+    defensive: MarketMonitorLayerMetric;
+    energy_cyclical: MarketMonitorLayerMetric;
+    financials: MarketMonitorLayerMetric;
+    preferred_assets: string[];
+    avoid_assets: string[];
+  };
 }
 
-export interface MarketMonitorRunDetail {
-  run_id: string;
+export interface MarketMonitorActionModifier {
+  new_position_allowed?: boolean | null;
+  overnight_allowed?: boolean | null;
+  single_position_cap_multiplier?: number | null;
+  note?: string | null;
+}
+
+export interface MarketMonitorEventRiskFlag {
+  index_level: {
+    active: boolean;
+    type?: string | null;
+    days_to_event?: number | null;
+    action_modifier?: MarketMonitorActionModifier | null;
+  };
+  stock_level: {
+    earnings_stocks: string[];
+    rule?: string | null;
+  };
+}
+
+export interface MarketMonitorExecutionCard {
+  regime_label: string;
+  conflict_mode: string;
+  total_exposure_range: string;
+  new_position_allowed: boolean;
+  chase_breakout_allowed: boolean;
+  dip_buy_allowed: boolean;
+  overnight_allowed: boolean;
+  leverage_allowed: boolean;
+  single_position_cap: string;
+  daily_risk_budget: string;
+  tactic_preference: string;
+  preferred_assets: string[];
+  avoid_assets: string[];
+  signal_confirmation: {
+    current_regime_days: number;
+    downgrade_unlock_in_days: number;
+    note: string;
+  };
+  event_risk_flag: MarketMonitorEventRiskFlag;
+  summary: string;
+}
+
+export interface MarketMonitorPanicCard {
+  score: number;
+  zone: string;
+  state: string;
+  panic_extreme_score: number;
+  selling_exhaustion_score: number;
+  reversal_confirmation_score: number;
+  action: string;
+  system_risk_override?: string | null;
+  stop_loss: string;
+  profit_rule: string;
+  timeout_warning: boolean;
+  days_held: number;
+  early_entry_allowed: boolean;
+  max_position_hint: string;
+}
+
+export interface MarketMonitorSourceCoverage {
+  completeness: "high" | "medium" | "low";
+  available_sources: string[];
+  missing_sources: string[];
+  degraded: boolean;
+}
+
+export interface MarketMonitorSnapshotResponse {
+  timestamp: string;
   as_of_date: string;
-  status: "pending" | "running" | "completed" | "failed";
-  current_stage: string;
-  created_at: string;
-  started_at?: string | null;
-  finished_at?: string | null;
-  error_message?: string | null;
-  result?: MarketMonitorRunResultSummary | null;
+  data_freshness: string;
+  long_term_score: MarketMonitorScoreCard;
+  short_term_score: MarketMonitorScoreCard;
+  system_risk_score: MarketMonitorSystemRiskCard;
+  style_effectiveness: MarketMonitorStyleEffectiveness;
+  execution_card: MarketMonitorExecutionCard;
+  panic_reversal_score: MarketMonitorPanicCard;
+  event_risk_flag: MarketMonitorEventRiskFlag;
+  source_coverage: MarketMonitorSourceCoverage;
+  degraded_factors: string[];
+  notes: string[];
 }
 
-export interface MarketMonitorRunStageDetail {
-  stage_key: string;
-  label: string;
-  status: "pending" | "running" | "completed" | "failed" | "skipped";
-  started_at?: string | null;
-  finished_at?: string | null;
-  summary: Record<string, unknown>;
-  error?: Record<string, unknown>;
+export interface MarketMonitorHistoryPoint {
+  trade_date: string;
+  long_term_score: number;
+  short_term_score: number;
+  system_risk_score: number;
+  panic_score: number;
+  regime_label: string;
 }
 
-export interface MarketMonitorRunStagesResponse {
-  run_id: string;
-  stages: MarketMonitorRunStageDetail[];
+export interface MarketMonitorHistoryResponse {
+  as_of_date: string;
+  points: MarketMonitorHistoryPoint[];
 }
 
-export interface MarketMonitorRunEvidenceResponse {
-  run_id: string;
-  evidence_index: Record<string, Record<string, unknown>[]>;
-  search_slots: Record<string, Record<string, unknown>[]>;
+export interface MarketMonitorDataStatusResponse {
+  timestamp: string;
+  as_of_date: string;
+  source_coverage: MarketMonitorSourceCoverage;
+  degraded_factors: string[];
+  notes: string[];
   open_gaps: string[];
-}
-
-export interface MarketMonitorRunLogEntry {
-  line_no: number;
-  timestamp: string | null;
-  level: string;
-  event_type?: string | null;
-  stage_key?: string | null;
-  content: string;
-  details?: Record<string, unknown>;
-}
-
-export interface MarketMonitorPromptSummary {
-  prompt_id: string;
-  run_id: string;
-  stage_key: string;
-  attempt: number;
-  created_at: string;
-  model: string;
-  file_path?: string | null;
-}
-
-export interface MarketMonitorPromptDetail extends MarketMonitorPromptSummary {
-  payload: Record<string, unknown>;
 }
 
 export class ApiError extends Error {

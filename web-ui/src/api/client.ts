@@ -11,13 +11,9 @@ import {
   HistoricalBacktestSummary,
   HistoricalReportDetail,
   HistoricalReportSummary,
-  MarketMonitorPromptDetail,
-  MarketMonitorPromptSummary,
-  MarketMonitorRunCreateResponse,
-  MarketMonitorRunDetail,
-  MarketMonitorRunEvidenceResponse,
-  MarketMonitorRunLogEntry,
-  MarketMonitorRunStagesResponse,
+  MarketMonitorDataStatusResponse,
+  MarketMonitorHistoryResponse,
+  MarketMonitorSnapshotResponse,
   MetadataOptionsResponse,
 } from "./types";
 
@@ -116,43 +112,36 @@ export async function fetchHistoricalBacktest(jobId: string) {
   );
 }
 
-export async function createMarketMonitorRun() {
-  return requestJson<MarketMonitorRunCreateResponse>("/api/market-monitor/runs", {
-    method: "POST",
-    body: JSON.stringify({}),
-  });
+export async function fetchMarketMonitorSnapshot(
+  asOfDate?: string,
+  forceRefresh = false,
+) {
+  const params = new URLSearchParams();
+  if (asOfDate) params.set("as_of_date", asOfDate);
+  if (forceRefresh) params.set("force_refresh", "true");
+  const suffix = params.toString() ? `?${params.toString()}` : "";
+  return requestJson<MarketMonitorSnapshotResponse>(`/api/market-monitor/snapshot${suffix}`);
 }
 
-export async function fetchMarketMonitorRun(runId: string) {
-  return requestJson<MarketMonitorRunDetail>(`/api/market-monitor/runs/${runId}`);
+export async function fetchMarketMonitorHistory(
+  days = 20,
+  asOfDate?: string,
+  forceRefresh = false,
+) {
+  const params = new URLSearchParams();
+  params.set("days", String(days));
+  if (asOfDate) params.set("as_of_date", asOfDate);
+  if (forceRefresh) params.set("force_refresh", "true");
+  return requestJson<MarketMonitorHistoryResponse>(`/api/market-monitor/history?${params.toString()}`);
 }
 
-export async function fetchMarketMonitorRunStages(runId: string) {
-  return requestJson<MarketMonitorRunStagesResponse>(
-    `/api/market-monitor/runs/${runId}/stages`,
-  );
-}
-
-export async function fetchMarketMonitorRunEvidence(runId: string) {
-  return requestJson<MarketMonitorRunEvidenceResponse>(
-    `/api/market-monitor/runs/${runId}/evidence`,
-  );
-}
-
-export async function fetchMarketMonitorRunLogs(runId: string) {
-  return requestJson<MarketMonitorRunLogEntry[]>(
-    `/api/market-monitor/runs/${runId}/logs`,
-  );
-}
-
-export async function fetchMarketMonitorRunPrompts(runId: string) {
-  return requestJson<MarketMonitorPromptSummary[]>(
-    `/api/market-monitor/runs/${runId}/prompts`,
-  );
-}
-
-export async function fetchMarketMonitorPromptDetail(runId: string, promptId: string) {
-  return requestJson<MarketMonitorPromptDetail>(
-    `/api/market-monitor/runs/${runId}/prompts/${promptId}`,
-  );
+export async function fetchMarketMonitorDataStatus(
+  asOfDate?: string,
+  forceRefresh = false,
+) {
+  const params = new URLSearchParams();
+  if (asOfDate) params.set("as_of_date", asOfDate);
+  if (forceRefresh) params.set("force_refresh", "true");
+  const suffix = params.toString() ? `?${params.toString()}` : "";
+  return requestJson<MarketMonitorDataStatusResponse>(`/api/market-monitor/data-status${suffix}`);
 }

@@ -2,6 +2,7 @@ export type MarketMonitorCardHelpKey =
   | "long_term_card"
   | "short_term_card"
   | "system_risk_card"
+  | "style_effectiveness_card"
   | "execution_card"
   | "event_risk_card"
   | "panic_card";
@@ -34,11 +35,17 @@ export const MARKET_MONITOR_CARD_HELP: Record<
     rules:
       "模型优先读取 VIX、大小盘相对表现和代理广度，再补充外部风险事件，输出正常、承压或高风险判断。",
   },
+  style_effectiveness_card: {
+    title: "风格有效性",
+    purpose: "判断当前更适合哪种手法，以及哪些资产方向更值得优先关注。",
+    rules:
+      "页面分为策略手法层和资产风格层两部分，分别展示最佳手法、回避手法、偏好资产与回避资产。",
+  },
   execution_card: {
-    title: "执行建议",
+    title: "执行动作卡",
     purpose: "把市场判断翻译成仓位、追高、低吸、隔夜和杠杆等可执行动作。",
     rules:
-      "模型综合长线、短线、系统风险和事件风险，直接生成结构化执行建议，而不是从固定规则矩阵推导。",
+      "页面直接展示 regime、总仓位、动作开关、单票上限与风险预算，不再围绕旧的运行轨迹结果做映射。",
   },
   event_risk_card: {
     title: "事件风险",

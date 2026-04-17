@@ -3,7 +3,7 @@ from datetime import date, timedelta
 
 from pydantic import ValidationError
 
-from tradingagents.web.market_monitor.schemas import MarketMonitorRunCreateRequest
+from tradingagents.web.market_monitor.schemas import MarketMonitorSnapshotRequest
 
 
 class MarketMonitorI18nTests(unittest.TestCase):
@@ -11,7 +11,7 @@ class MarketMonitorI18nTests(unittest.TestCase):
         tomorrow = date.today() + timedelta(days=1)
 
         with self.assertRaises(ValidationError) as context:
-            MarketMonitorRunCreateRequest(as_of_date=tomorrow)
+            MarketMonitorSnapshotRequest(as_of_date=tomorrow)
 
         self.assertIn("as_of_date 不能晚于今天", str(context.exception))
 

@@ -22,25 +22,13 @@ from tradingagents.web.schemas import (
     MetadataOptionsResponse,
 )
 from tradingagents.web.market_monitor.schemas import (
-    MarketMonitorPromptDetail,
-    MarketMonitorPromptSummary,
-    MarketMonitorRunCleanupRequest,
-    MarketMonitorRunCleanupResponse,
-    MarketMonitorRunCreateRequest,
-    MarketMonitorRunCreateResponse,
-    MarketMonitorRunDeleteResponse,
-    MarketMonitorRunDetail,
-    MarketMonitorRunEvidenceResponse,
-    MarketMonitorRunLogEntry,
-    MarketMonitorRunStagesResponse,
-    MarketMonitorRunSummary,
+    MarketMonitorDataStatusResponse,
+    MarketMonitorHistoryRequest,
+    MarketMonitorHistoryResponse,
+    MarketMonitorSnapshotRequest,
+    MarketMonitorSnapshotResponse,
 )
-from tradingagents.web.market_monitor.errors import (
-    MarketMonitorConflictError,
-    MarketMonitorCorruptedStateError,
-    MarketMonitorNotFoundError,
-)
-from tradingagents.web.market_monitor.service import MarketMonitorService
+from tradingagents.web.market_monitor.snapshot_service import MarketMonitorSnapshotService
 
 
 load_dotenv()
@@ -52,7 +40,7 @@ app = FastAPI(
 )
 job_manager = AnalysisJobManager()
 backtest_manager = BacktestJobManager()
-market_monitor_service = MarketMonitorService()
+market_monitor_service = MarketMonitorSnapshotService()
 
 
 @app.post("/api/analysis-jobs", response_model=AnalysisJobCreateResponse)
@@ -176,94 +164,42 @@ def get_historical_backtest(job_id: str) -> HistoricalBacktestDetail:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
 
 
-@app.post("/api/market-monitor/runs", response_model=MarketMonitorRunCreateResponse)
-def create_market_monitor_run(
-    request: MarketMonitorRunCreateRequest,
-) -> MarketMonitorRunCreateResponse:
-    return market_monitor_service.create_run(request)
+@app.get("/api/market-monitor/snapshot", response_model=MarketMonitorSnapshotResponse)
+def get_market_monitor_snapshot(
+    as_of_date: date | None = None,
+    force_refresh: bool = False,
+) -> MarketMonitorSnapshotResponse:
+    request = MarketMonitorSnapshotRequest(
+        as_of_date=as_of_date,
+        force_refresh=force_refresh,
+    )
+    return market_monitor_service.get_snapshot(request)
 
 
-@app.get("/api/market-monitor/runs", response_model=list[MarketMonitorRunSummary])
-def list_market_monitor_runs() -> list[MarketMonitorRunSummary]:
-    return market_monitor_service.list_runs()
+@app.get("/api/market-monitor/history", response_model=MarketMonitorHistoryResponse)
+def get_market_monitor_history(
+    as_of_date: date | None = None,
+    days: int = 20,
+    force_refresh: bool = False,
+) -> MarketMonitorHistoryResponse:
+    request = MarketMonitorHistoryRequest(
+        as_of_date=as_of_date,
+        days=days,
+        force_refresh=force_refresh,
+    )
+    return market_monitor_service.get_history(request)
 
 
-@app.post("/api/market-monitor/runs/cleanup", response_model=MarketMonitorRunCleanupResponse)
-def cleanup_market_monitor_runs(
-    request: MarketMonitorRunCleanupRequest,
-) -> MarketMonitorRunCleanupResponse:
-    return market_monitor_service.cleanup_runs(request)
-
-
-@app.get("/api/market-monitor/runs/{run_id}", response_model=MarketMonitorRunDetail)
-def get_market_monitor_run(run_id: str) -> MarketMonitorRunDetail:
-    try:
-        return market_monitor_service.get_run(run_id)
-    except MarketMonitorNotFoundError as exc:
-        raise HTTPException(status_code=404, detail="未找到市场监控运行记录") from exc
-    except MarketMonitorCorruptedStateError as exc:
-        raise HTTPException(status_code=409, detail=str(exc)) from exc
-
-
-@app.delete("/api/market-monitor/runs/{run_id}", response_model=MarketMonitorRunDeleteResponse)
-def delete_market_monitor_run(run_id: str) -> MarketMonitorRunDeleteResponse:
-    try:
-        return market_monitor_service.delete_run(run_id)
-    except MarketMonitorNotFoundError as exc:
-        raise HTTPException(status_code=404, detail="未找到市场监控运行记录") from exc
-    except MarketMonitorConflictError as exc:
-        raise HTTPException(status_code=409, detail=str(exc)) from exc
-
-
-@app.get("/api/market-monitor/runs/{run_id}/stages", response_model=MarketMonitorRunStagesResponse)
-def get_market_monitor_run_stages(run_id: str) -> MarketMonitorRunStagesResponse:
-    try:
-        return market_monitor_service.get_run_stages(run_id)
-    except MarketMonitorNotFoundError as exc:
-        raise HTTPException(status_code=404, detail="未找到市场监控阶段记录") from exc
-    except MarketMonitorCorruptedStateError as exc:
-        raise HTTPException(status_code=409, detail=str(exc)) from exc
-
-
-@app.get("/api/market-monitor/runs/{run_id}/evidence", response_model=MarketMonitorRunEvidenceResponse)
-def get_market_monitor_run_evidence(run_id: str) -> MarketMonitorRunEvidenceResponse:
-    try:
-        return market_monitor_service.get_run_evidence(run_id)
-    except MarketMonitorNotFoundError as exc:
-        raise HTTPException(status_code=404, detail="未找到市场监控证据记录") from exc
-    except MarketMonitorCorruptedStateError as exc:
-        raise HTTPException(status_code=409, detail=str(exc)) from exc
-
-
-@app.get("/api/market-monitor/runs/{run_id}/logs", response_model=list[MarketMonitorRunLogEntry])
-def get_market_monitor_run_logs(run_id: str) -> list[MarketMonitorRunLogEntry]:
-    try:
-        return market_monitor_service.list_run_logs(run_id)
-    except MarketMonitorNotFoundError as exc:
-        raise HTTPException(status_code=404, detail="未找到市场监控日志") from exc
-
-
-@app.get("/api/market-monitor/runs/{run_id}/prompts", response_model=list[MarketMonitorPromptSummary])
-def get_market_monitor_run_prompts(run_id: str) -> list[MarketMonitorPromptSummary]:
-    try:
-        return market_monitor_service.list_run_prompts(run_id)
-    except MarketMonitorNotFoundError as exc:
-        raise HTTPException(status_code=404, detail="未找到市场监控提示词记录") from exc
-    except MarketMonitorCorruptedStateError as exc:
-        raise HTTPException(status_code=409, detail=str(exc)) from exc
-
-
-@app.get(
-    "/api/market-monitor/runs/{run_id}/prompts/{prompt_id}",
-    response_model=MarketMonitorPromptDetail,
-)
-def get_market_monitor_prompt_detail(run_id: str, prompt_id: str) -> MarketMonitorPromptDetail:
-    try:
-        return market_monitor_service.get_prompt_detail(run_id, prompt_id)
-    except MarketMonitorNotFoundError as exc:
-        raise HTTPException(status_code=404, detail="未找到提示词详情") from exc
-    except MarketMonitorCorruptedStateError as exc:
-        raise HTTPException(status_code=409, detail=str(exc)) from exc
+@app.get("/api/market-monitor/data-status", response_model=MarketMonitorDataStatusResponse)
+def get_market_monitor_data_status(
+    as_of_date: date | None = None,
+    force_refresh: bool = False,
+) -> MarketMonitorDataStatusResponse:
+    request = MarketMonitorSnapshotRequest(
+        as_of_date=as_of_date,
+        force_refresh=force_refresh,
+    )
+    return market_monitor_service.get_data_status(request)
 
 
 def run_api() -> None:

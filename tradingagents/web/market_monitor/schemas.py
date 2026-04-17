@@ -1,56 +1,11 @@
 from __future__ import annotations
 
 from datetime import date, datetime
-from typing import Any, Literal, Optional
+from typing import Any, Literal
 
-from pydantic import BaseModel, Field, JsonValue, field_validator
+from pydantic import BaseModel, Field, field_validator
 
 
-RunStatus = Literal["pending", "running", "completed", "failed"]
-CleanupRunStatus = Literal["completed", "failed"]
-StageStatus = Literal["pending", "running", "completed", "failed", "skipped"]
-STAGE_KEYS = (
-    "input_bundle",
-    "search_slots",
-    "fact_sheet",
-    "judgment_group_a",
-    "judgment_group_b",
-    "execution_decision",
-)
-StageKey = Literal[
-    "input_bundle",
-    "search_slots",
-    "fact_sheet",
-    "judgment_group_a",
-    "judgment_group_b",
-    "execution_decision",
-]
-CurrentStage = Literal[
-    "pending",
-    "input_bundle",
-    "search_slots",
-    "fact_sheet",
-    "judgment_group_a",
-    "judgment_group_b",
-    "execution_decision",
-    "completed",
-    "failed",
-]
-SEARCH_SLOT_KEYS = (
-    "macro_calendar",
-    "earnings_watch",
-    "policy_geopolitics",
-    "risk_sentiment",
-    "market_structure_optional",
-)
-SearchSlotKey = Literal[
-    "macro_calendar",
-    "earnings_watch",
-    "policy_geopolitics",
-    "risk_sentiment",
-    "market_structure_optional",
-]
-StageMetadataValue = str | int | float | bool | None | list[str] | list[dict[str, JsonValue]]
 MarketMonitorSymbolCacheReadState = Literal[
     "cache_missing",
     "cache_corrupted",
@@ -85,7 +40,7 @@ class MarketMonitorSymbolCacheMetadata(BaseModel):
     trading_days: int = Field(..., ge=0)
     columns: list[str] = Field(default_factory=list)
     source: str = "yfinance"
-    source_params: dict[str, JsonValue] = Field(default_factory=dict)
+    source_params: dict[str, Any] = Field(default_factory=dict)
     max_staleness_days: int = Field(default=3, ge=0)
     retention_expires_on: date | None = None
     content_hash: str | None = None
@@ -102,191 +57,187 @@ class MarketMonitorSymbolCacheReadResult(BaseModel):
     last_successful_refresh_at: datetime | None = None
 
 
-class MarketMonitorRunCreateRequest(BaseModel):
-    as_of_date: Optional[date] = None
+class MarketMonitorSnapshotRequest(BaseModel):
+    as_of_date: date | None = None
     force_refresh: bool = False
 
     @field_validator("as_of_date")
     @classmethod
-    def validate_as_of_date(cls, value: Optional[date]) -> Optional[date]:
+    def validate_as_of_date(cls, value: date | None) -> date | None:
         if value and value > date.today():
             raise ValueError("as_of_date 不能晚于今天")
         return value
 
 
-class MarketMonitorRunCreateResponse(BaseModel):
-    run_id: str
-    status: RunStatus
+class MarketMonitorHistoryRequest(BaseModel):
+    as_of_date: date | None = None
+    days: int = Field(default=20, ge=1, le=60)
+    force_refresh: bool = False
+
+    @field_validator("as_of_date")
+    @classmethod
+    def validate_as_of_date(cls, value: date | None) -> date | None:
+        if value and value > date.today():
+            raise ValueError("as_of_date 不能晚于今天")
+        return value
 
 
-class MarketMonitorRunSummary(BaseModel):
-    run_id: str
-    as_of_date: date
-    status: RunStatus
-    current_stage: CurrentStage
-    created_at: datetime
-    started_at: datetime | None = None
-    finished_at: datetime | None = None
-    error_message: str | None = None
+class MarketMonitorLayerMetric(BaseModel):
+    score: float = Field(..., ge=0, le=100)
+    delta_5d: float
+    valid: bool | None = None
+    preferred: bool | None = None
 
 
-class MarketMonitorRunDeleteResponse(BaseModel):
-    run_id: str
-    deleted: bool = True
-
-
-class MarketMonitorRunCleanupRequest(BaseModel):
-    statuses: list[CleanupRunStatus] | None = None
-    older_than_days: int | None = Field(default=None, ge=0)
-    delete_all_failed: bool = False
-    limit: int | None = Field(default=None, ge=1)
-
-
-class MarketMonitorRunCleanupResponse(BaseModel):
-    deleted_run_ids: list[str] = Field(default_factory=list)
-    deleted_count: int = 0
-
-
-class SearchEvidenceItem(BaseModel):
-    slot_key: SearchSlotKey
-    query: str | None = None
-    title: str
-    summary: str = ""
-    source: str
-    published_at: str | None = None
-    captured_at: datetime | None = None
-
-
-class EvidenceReferenceItem(BaseModel):
-    slot_key: SearchSlotKey
-    query: str | None = None
-    title: str
-    source: str
-    published_at: str | None = None
-
-
-class MarketFactItem(BaseModel):
-    fact_id: str
-    statement: str
-    source_type: Literal["local", "search"]
-    confidence: float = Field(..., ge=0, le=1)
-    evidence_refs: list[str] = Field(default_factory=list)
-
-
-class MarketInputBundle(BaseModel):
-    as_of_date: date
-    generated_at: datetime
-    local_market_data: dict[str, JsonValue] = Field(default_factory=dict)
-    derived_metrics: dict[str, JsonValue] = Field(default_factory=dict)
-    available_local_data: list[str] = Field(default_factory=list)
-    open_gaps: list[str] = Field(default_factory=list)
-
-
-class SearchSlotPack(BaseModel):
-    slots: dict[str, list[SearchEvidenceItem]] = Field(default_factory=dict)
-
-
-class MarketFactSheet(BaseModel):
-    observed_facts: list[MarketFactItem] = Field(default_factory=list)
-    filled_facts: list[MarketFactItem] = Field(default_factory=list)
-    open_gaps: list[str] = Field(default_factory=list)
-    evidence_index: dict[str, list[dict[str, JsonValue]]] = Field(default_factory=dict)
-    fact_confidence: dict[str, float] = Field(default_factory=dict)
-
-
-class JudgmentCard(BaseModel):
-    label: str
+class MarketMonitorScoreCard(BaseModel):
+    score: float = Field(..., ge=0, le=100)
+    zone: str
+    delta_1d: float
+    delta_5d: float
+    slope_state: str
     summary: str
-    confidence: float = Field(..., ge=0, le=1)
-    facts_used: list[str] = Field(default_factory=list)
-    uncertainties: list[str] = Field(default_factory=list)
     action: str
+    recommended_exposure: str | None = None
 
 
-class MarketJudgmentPack(BaseModel):
-    long_term_card: JudgmentCard
-    short_term_card: JudgmentCard
-    system_risk_card: JudgmentCard
-    event_risk_card: JudgmentCard
-    panic_card: JudgmentCard
+class MarketMonitorSystemRiskCard(MarketMonitorScoreCard):
+    liquidity_stress_score: float = Field(..., ge=0, le=100)
+    risk_appetite_score: float = Field(..., ge=0, le=100)
+    pcr_percentile: float | None = None
+    pcr_absolute: float | None = None
+    pcr_panic_flag: bool | None = None
 
 
-class ExecutionDecisionPack(BaseModel):
+class MarketMonitorStyleTacticLayer(BaseModel):
+    trend_breakout: MarketMonitorLayerMetric
+    dip_buy: MarketMonitorLayerMetric
+    oversold_bounce: MarketMonitorLayerMetric
+    top_tactic: str
+    avoid_tactic: str
+
+
+class MarketMonitorStyleAssetLayer(BaseModel):
+    large_cap_tech: MarketMonitorLayerMetric
+    small_cap_momentum: MarketMonitorLayerMetric
+    defensive: MarketMonitorLayerMetric
+    energy_cyclical: MarketMonitorLayerMetric
+    financials: MarketMonitorLayerMetric
+    preferred_assets: list[str] = Field(default_factory=list)
+    avoid_assets: list[str] = Field(default_factory=list)
+
+
+class MarketMonitorStyleEffectiveness(BaseModel):
+    tactic_layer: MarketMonitorStyleTacticLayer
+    asset_layer: MarketMonitorStyleAssetLayer
+
+
+class MarketMonitorActionModifier(BaseModel):
+    new_position_allowed: bool | None = None
+    overnight_allowed: bool | None = None
+    single_position_cap_multiplier: float | None = None
+    note: str | None = None
+
+
+class MarketMonitorIndexEventRisk(BaseModel):
+    active: bool = False
+    type: str | None = None
+    days_to_event: int | None = None
+    action_modifier: MarketMonitorActionModifier | None = None
+
+
+class MarketMonitorStockEventRisk(BaseModel):
+    earnings_stocks: list[str] = Field(default_factory=list)
+    rule: str | None = None
+
+
+class MarketMonitorEventRiskFlag(BaseModel):
+    index_level: MarketMonitorIndexEventRisk = Field(default_factory=MarketMonitorIndexEventRisk)
+    stock_level: MarketMonitorStockEventRisk = Field(default_factory=MarketMonitorStockEventRisk)
+
+
+class MarketMonitorSignalConfirmation(BaseModel):
+    current_regime_days: int
+    downgrade_unlock_in_days: int
+    note: str
+
+
+class MarketMonitorExecutionCard(BaseModel):
+    regime_label: str
+    conflict_mode: str
+    total_exposure_range: str
+    new_position_allowed: bool
+    chase_breakout_allowed: bool
+    dip_buy_allowed: bool
+    overnight_allowed: bool
+    leverage_allowed: bool
+    single_position_cap: str
+    daily_risk_budget: str
+    tactic_preference: str
+    preferred_assets: list[str] = Field(default_factory=list)
+    avoid_assets: list[str] = Field(default_factory=list)
+    signal_confirmation: MarketMonitorSignalConfirmation
+    event_risk_flag: MarketMonitorEventRiskFlag
     summary: str
-    confidence: float = Field(..., ge=0, le=1)
-    decision_basis: list[str] = Field(default_factory=list)
-    tradeoffs: list[str] = Field(default_factory=list)
-    risk_flags: list[str] = Field(default_factory=list)
-    actions: list[str] = Field(default_factory=list)
 
 
-class MarketMonitorRunResultSummary(BaseModel):
-    long_term_label: str
-    system_risk_label: str
-    short_term_label: str
-    event_risk_label: str
-    panic_label: str
-    execution_summary: str
-    execution: ExecutionDecisionPack
+class MarketMonitorPanicCard(BaseModel):
+    score: float = Field(..., ge=0, le=100)
+    zone: str
+    state: str
+    panic_extreme_score: float = Field(..., ge=0, le=100)
+    selling_exhaustion_score: float = Field(..., ge=0, le=100)
+    reversal_confirmation_score: float = Field(..., ge=0, le=100)
+    action: str
+    system_risk_override: str | None = None
+    stop_loss: str
+    profit_rule: str
+    timeout_warning: bool
+    days_held: int
+    early_entry_allowed: bool
+    max_position_hint: str
 
 
-class MarketMonitorRunDetail(BaseModel):
-    run_id: str
+class MarketMonitorSourceCoverage(BaseModel):
+    completeness: Literal["high", "medium", "low"]
+    available_sources: list[str] = Field(default_factory=list)
+    missing_sources: list[str] = Field(default_factory=list)
+    degraded: bool = False
+
+
+class MarketMonitorSnapshotResponse(BaseModel):
+    timestamp: datetime
     as_of_date: date
-    status: RunStatus
-    current_stage: CurrentStage
-    created_at: datetime
-    started_at: datetime | None = None
-    finished_at: datetime | None = None
-    error_message: str | None = None
-    result: MarketMonitorRunResultSummary | None = None
+    data_freshness: str
+    long_term_score: MarketMonitorScoreCard
+    short_term_score: MarketMonitorScoreCard
+    system_risk_score: MarketMonitorSystemRiskCard
+    style_effectiveness: MarketMonitorStyleEffectiveness
+    execution_card: MarketMonitorExecutionCard
+    panic_reversal_score: MarketMonitorPanicCard
+    event_risk_flag: MarketMonitorEventRiskFlag
+    source_coverage: MarketMonitorSourceCoverage
+    degraded_factors: list[str] = Field(default_factory=list)
+    notes: list[str] = Field(default_factory=list)
 
 
-class MarketMonitorRunStageDetail(BaseModel):
-    stage_key: StageKey
-    label: str
-    status: StageStatus
-    started_at: datetime | None = None
-    finished_at: datetime | None = None
-    summary: dict[str, StageMetadataValue] = Field(default_factory=dict)
-    error: dict[str, StageMetadataValue] = Field(default_factory=dict)
+class MarketMonitorHistoryPoint(BaseModel):
+    trade_date: date
+    long_term_score: float = Field(..., ge=0, le=100)
+    short_term_score: float = Field(..., ge=0, le=100)
+    system_risk_score: float = Field(..., ge=0, le=100)
+    panic_score: float = Field(..., ge=0, le=100)
+    regime_label: str
 
 
-class MarketMonitorRunStagesResponse(BaseModel):
-    run_id: str
-    stages: list[MarketMonitorRunStageDetail] = Field(default_factory=list)
+class MarketMonitorHistoryResponse(BaseModel):
+    as_of_date: date
+    points: list[MarketMonitorHistoryPoint] = Field(default_factory=list)
 
 
-class MarketMonitorRunEvidenceResponse(BaseModel):
-    run_id: str
-    evidence_index: dict[str, list[EvidenceReferenceItem]] = Field(default_factory=dict)
-    search_slots: dict[SearchSlotKey, list[SearchEvidenceItem]] = Field(default_factory=dict)
+class MarketMonitorDataStatusResponse(BaseModel):
+    timestamp: datetime
+    as_of_date: date
+    source_coverage: MarketMonitorSourceCoverage
+    degraded_factors: list[str] = Field(default_factory=list)
+    notes: list[str] = Field(default_factory=list)
     open_gaps: list[str] = Field(default_factory=list)
-
-
-class MarketMonitorRunLogEntry(BaseModel):
-    line_no: int
-    timestamp: datetime | None = None
-    level: str
-    event_type: str | None = None
-    stage_key: str | None = None
-    content: str
-    details: dict[str, JsonValue] = Field(default_factory=dict)
-
-
-class MarketMonitorPromptSummary(BaseModel):
-    prompt_id: str
-    run_id: str
-    stage_key: str
-    attempt: int
-    created_at: datetime
-    model: str
-    file_path: str | None = None
-    request_status: str = "captured"
-    request_error: str | None = None
-    status_updated_at: datetime | None = None
-
-
-class MarketMonitorPromptDetail(MarketMonitorPromptSummary):
-    payload: dict[str, JsonValue] = Field(default_factory=dict)
-

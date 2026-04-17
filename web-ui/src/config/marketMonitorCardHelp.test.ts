@@ -9,6 +9,7 @@ const REQUIRED_KEYS: MarketMonitorCardHelpKey[] = [
   "long_term_card",
   "short_term_card",
   "system_risk_card",
+  "style_effectiveness_card",
   "execution_card",
   "event_risk_card",
   "panic_card",
