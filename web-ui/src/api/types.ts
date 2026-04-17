@@ -300,7 +300,10 @@ export interface MarketMonitorRunLogEntry {
   line_no: number;
   timestamp: string | null;
   level: string;
+  event_type?: string | null;
+  stage_key?: string | null;
   content: string;
+  details?: Record<string, unknown>;
 }
 
 export interface MarketMonitorPromptSummary {

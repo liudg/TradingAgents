@@ -239,7 +239,10 @@ class MarketMonitorRunLogEntry(BaseModel):
     line_no: int
     timestamp: datetime | None = None
     level: str
+    event_type: str | None = None
+    stage_key: str | None = None
     content: str
+    details: dict[str, JsonValue] = Field(default_factory=dict)
 
 
 class MarketMonitorPromptSummary(BaseModel):

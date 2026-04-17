@@ -195,6 +195,30 @@ class MarketMonitorRulesTests(unittest.TestCase):
         self.assertIn("breadth_above_200dma_pct", derived_metrics)
         self.assertIn("spy_range_position_3m_pct", derived_metrics)
 
+    def test_run_store_list_logs_tolerates_invalid_jsonl_line(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            store = MonitorRunStore(Path(temp_dir) / "runs")
+            run = store.create_run(date(2026, 4, 10))
+            events_path = store.resolve_run_dir(run.run_id) / "artifacts" / "events.jsonl"
+            events_path.parent.mkdir(parents=True, exist_ok=True)
+            events_path.write_text(
+                '{"timestamp":"2026-04-10T08:00:00+00:00","level":"Stage","message":"ok"}\nnot-json\n',
+                encoding="utf-8",
+            )
+
+            logs = store.list_logs(run.run_id)
+
+            self.assertEqual(logs[0].level, "Stage")
+            self.assertEqual(logs[0].content, "ok")
+            self.assertIsNone(logs[0].event_type)
+            self.assertIsNone(logs[0].stage_key)
+            self.assertEqual(logs[0].details, {})
+            self.assertEqual(logs[1].level, "Raw")
+            self.assertEqual(logs[1].content, "not-json")
+            self.assertIsNone(logs[1].event_type)
+            self.assertIsNone(logs[1].stage_key)
+            self.assertEqual(logs[1].details, {})
+
     def test_create_run_persists_completed_stages(self) -> None:
         dataset = _complete_dataset()
         with TemporaryDirectory() as temp_dir:
@@ -224,15 +248,34 @@ class MarketMonitorRulesTests(unittest.TestCase):
             self.assertIsNotNone(detail.result)
             run_dir = root / "runs" / "2026-04-10" / response.run_id
             self.assertTrue((run_dir / "run.json").exists())
-            self.assertTrue((run_dir / "stages.json").exists())
-            self.assertTrue((run_dir / "evidence.json").exists())
-            self.assertTrue((run_dir / "events.log").exists())
+            self.assertTrue((run_dir / "artifacts" / "stages.json").exists())
+            self.assertTrue((run_dir / "artifacts" / "evidence.json").exists())
+            self.assertTrue((run_dir / "artifacts" / "events.jsonl").exists())
             input_stage = next(stage for stage in stages.stages if stage.stage_key == "input_bundle")
             self.assertIn("cache_counts", input_stage.summary)
             self.assertIn("cache_symbols", input_stage.summary)
             logs = service.list_run_logs(response.run_id)
             self.assertTrue(any("cache_corrupted=1" in entry.content for entry in logs))
             self.assertTrue(any("cache_hit=8" in entry.content for entry in logs))
+            self.assertTrue(any(entry.level == "Response" and entry.content == "市场监控运行完成" for entry in logs))
+            self.assertTrue(
+                any(
+                    entry.level == "Stage"
+                    and entry.event_type == "stage_completed"
+                    and entry.stage_key == "input_bundle"
+                    and entry.details.get("cache_counts")
+                    for entry in logs
+                )
+            )
+            self.assertTrue(
+                any(
+                    entry.level == "Stage"
+                    and entry.event_type == "stage_completed"
+                    and entry.stage_key == "execution_decision"
+                    and entry.details.get("confidence") == 0.72
+                    for entry in logs
+                )
+            )
 
     def test_create_run_fails_when_llm_stage_fails(self) -> None:
         dataset = _complete_dataset()
@@ -399,7 +442,7 @@ class MarketMonitorRulesTests(unittest.TestCase):
             first_service = MarketMonitorService(run_root=root / "runs", prompt_root=root / "prompts", run_executor=CapturingExecutor())
             run = first_service._run_store.create_run(date(2026, 4, 10))
             run_dir = first_service._run_store.resolve_run_dir(run.run_id)
-            (run_dir / "stages.json").unlink()
+            (run_dir / "artifacts" / "stages.json").unlink()
 
             restarted_service = MarketMonitorService(run_root=root / "runs", prompt_root=root / "prompts", run_executor=CapturingExecutor())
 
@@ -445,12 +488,6 @@ class MarketMonitorRulesTests(unittest.TestCase):
                 "tradingagents.web.market_monitor.service.cleanup_symbol_daily_cache",
                 return_value=1,
             ) as cleanup_symbol_cache, patch(
-                "tradingagents.web.market_monitor.run_store.DEFAULT_CONFIG",
-                {
-                    **__import__("tradingagents.default_config", fromlist=["DEFAULT_CONFIG"]).DEFAULT_CONFIG,
-                    "market_monitor_run_retention_days": 30,
-                },
-            ), patch(
                 "tradingagents.web.market_monitor.run_store.datetime"
             ) as mock_datetime:
                 mock_datetime.now.return_value = datetime(2026, 4, 17, tzinfo=datetime.now().astimezone().tzinfo)

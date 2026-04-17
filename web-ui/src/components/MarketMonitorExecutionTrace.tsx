@@ -1,9 +1,19 @@
 import { Alert, Card, List, Space, Tag, Typography } from "antd";
 
-import {
-  MarketMonitorTraceDetail,
-  MarketMonitorTraceLogEntry,
-} from "../api/types";
+import type { MarketMonitorRunLogEntry } from "../api/types";
+
+interface MarketMonitorTraceDetail {
+  status?: string | null;
+  request?: Record<string, unknown>;
+  cache_decision?: Record<string, unknown>;
+  dataset_summary?: Record<string, unknown>;
+  context_summary?: Record<string, unknown>;
+  assessment_summary?: Record<string, unknown>;
+  response_summary?: Record<string, unknown>;
+  error?: Record<string, unknown>;
+}
+
+type MarketMonitorTraceLogEntry = MarketMonitorRunLogEntry;
 import { formatDateTime } from "../utils/format";
 
 type TraceStepStatus = "waiting" | "running" | "completed" | "failed" | "skipped";
@@ -52,6 +62,15 @@ const STEP_INDEX_BY_LEVEL = new Map(
   TRACE_STEPS.flatMap((step, index) => step.levels.map((level) => [level, index] as const)),
 );
 
+const STEP_INDEX_BY_STAGE_KEY = new Map([
+  ["input_bundle", 1],
+  ["search_slots", 2],
+  ["fact_sheet", 2],
+  ["judgment_group_a", 4],
+  ["judgment_group_b", 4],
+  ["execution_decision", 5],
+]);
+
 function getStepStatusTag(status: TraceStepStatus) {
   if (status === "completed") return <Tag color="success">已完成</Tag>;
   if (status === "running") return <Tag color="processing">进行中</Tag>;
@@ -62,6 +81,14 @@ function getStepStatusTag(status: TraceStepStatus) {
 
 function hasStageData(value: unknown) {
   return Boolean(value) && typeof value === "object" && Object.keys(value as Record<string, unknown>).length > 0;
+}
+
+function getStepIndex(log: MarketMonitorTraceLogEntry) {
+  if (log.stage_key) {
+    const byStageKey = STEP_INDEX_BY_STAGE_KEY.get(log.stage_key);
+    if (byStageKey !== undefined) return byStageKey;
+  }
+  return STEP_INDEX_BY_LEVEL.get(log.level);
 }
 
 function deriveLatestByStage(
@@ -77,7 +104,7 @@ function deriveLatestByStage(
       continue;
     }
 
-    const stepIndex = STEP_INDEX_BY_LEVEL.get(log.level);
+    const stepIndex = getStepIndex(log);
     if (stepIndex === undefined) continue;
     latestByStep.set(stepIndex, log);
   }
@@ -87,8 +114,9 @@ function deriveLatestByStage(
   );
   const lastCompletedStageIndex =
     completedStageIndexes.length > 0 ? completedStageIndexes[completedStageIndexes.length - 1] : -1;
+  const latestLoggedStepIndex = latestByStep.size > 0 ? Math.max(...latestByStep.keys()) : -1;
 
-  return { latestByStep, errorLog, lastCompletedStageIndex };
+  return { latestByStep, errorLog, lastCompletedStageIndex, latestLoggedStepIndex };
 }
 
 function isCacheHit(traceDetail?: MarketMonitorTraceDetail | null) {
@@ -100,13 +128,11 @@ function buildTraceSteps(
   traceDetail: MarketMonitorTraceDetail | null | undefined,
   isCompleted: boolean,
 ): TraceStepItem[] {
-  const { latestByStep, errorLog, lastCompletedStageIndex } = deriveLatestByStage(logs, traceDetail);
+  const { latestByStep, errorLog, lastCompletedStageIndex, latestLoggedStepIndex } = deriveLatestByStage(logs, traceDetail);
   const runningStepIndex =
-    traceDetail?.status === "running" && lastCompletedStageIndex >= 0 && lastCompletedStageIndex < TRACE_STEPS.length - 1
-      ? lastCompletedStageIndex + 1
-      : traceDetail?.status === "running" && lastCompletedStageIndex === -1
-        ? 0
-        : null;
+    traceDetail?.status === "running"
+      ? Math.max(lastCompletedStageIndex, latestLoggedStepIndex, 0)
+      : null;
   const cacheHit = isCacheHit(traceDetail);
 
   let failedStepIndex: number | null = null;
@@ -127,8 +153,6 @@ function buildTraceSteps(
 
     if (failedStepIndex !== null && index === failedStepIndex) {
       status = "failed";
-    } else if (completedByStage) {
-      status = "completed";
     } else if (
       cacheHit &&
       traceDetail?.status === "completed" &&
@@ -137,6 +161,8 @@ function buildTraceSteps(
       status = "skipped";
     } else if (runningStepIndex !== null && index === runningStepIndex) {
       status = "running";
+    } else if (completedByStage) {
+      status = "completed";
     } else if (isCompleted && latest) {
       status = "completed";
     }

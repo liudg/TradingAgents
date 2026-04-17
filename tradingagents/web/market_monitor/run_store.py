@@ -1,12 +1,11 @@
 from __future__ import annotations
 
+import json
 import re
 from datetime import date, datetime, timezone
 from pathlib import Path
 from shutil import rmtree
 from uuid import uuid4
-
-from tradingagents.default_config import DEFAULT_CONFIG
 
 from .cache import MARKET_MONITOR_CACHE_DIR
 from .errors import MarketMonitorCorruptedStateError, MarketMonitorNotFoundError
@@ -19,10 +18,11 @@ from .schemas import (
     MarketMonitorRunStagesResponse,
 )
 
-LOG_PATTERN = re.compile(r"^(?P<timestamp>[^ ]+) \[(?P<level>[^\]]+)\] (?P<content>.*)$")
 _SAFE_ID_PATTERN = re.compile(r"^[a-zA-Z0-9_-]{1,64}$")
 _DATE_PATTERN = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 _RUN_INDEX_FILE = "run_index.json"
+_ARTIFACTS_DIR = "artifacts"
+_EVENTS_FILE = "events.jsonl"
 
 
 def _validate_id(value: str) -> str:
@@ -103,10 +103,10 @@ class MonitorRunStore:
 
     def save_stages(self, run_id: str, stages: list[MarketMonitorRunStageDetail]) -> None:
         payload = MarketMonitorRunStagesResponse(run_id=run_id, stages=stages)
-        write_json_atomic(self.resolve_run_dir(run_id) / "stages.json", payload.model_dump(mode="json"))
+        write_json_atomic(self._artifact_path(run_id, "stages.json"), payload.model_dump(mode="json"))
 
     def get_stages(self, run_id: str) -> MarketMonitorRunStagesResponse:
-        path = self.resolve_run_dir(run_id) / "stages.json"
+        path = self._artifact_path(run_id, "stages.json")
         try:
             payload = load_json(path, raise_on_error=True)
         except Exception as exc:
@@ -119,10 +119,10 @@ class MonitorRunStore:
             raise MarketMonitorCorruptedStateError(f"{run_id} 的阶段元数据结构无效: {exc}") from exc
 
     def save_evidence(self, run_id: str, evidence: MarketMonitorRunEvidenceResponse) -> None:
-        write_json_atomic(self.resolve_run_dir(run_id) / "evidence.json", evidence.model_dump(mode="json"))
+        write_json_atomic(self._artifact_path(run_id, "evidence.json"), evidence.model_dump(mode="json"))
 
     def get_evidence(self, run_id: str) -> MarketMonitorRunEvidenceResponse:
-        path = self.resolve_run_dir(run_id) / "evidence.json"
+        path = self._artifact_path(run_id, "evidence.json")
         try:
             payload = load_json(path, raise_on_error=True)
         except Exception as exc:
@@ -134,29 +134,100 @@ class MonitorRunStore:
         except Exception as exc:
             raise MarketMonitorCorruptedStateError(f"{run_id} 的证据元数据结构无效: {exc}") from exc
 
-    def append_log(self, run_id: str, level: str, content: str) -> None:
-        now = datetime.now(timezone.utc).isoformat()
-        path = self.resolve_run_dir(run_id) / "events.log"
+    def append_event(
+        self,
+        run_id: str,
+        level: str,
+        event_type: str,
+        message: str,
+        *,
+        stage_key: str | None = None,
+        details: dict[str, object] | None = None,
+    ) -> None:
+        path = self._artifact_path(run_id, _EVENTS_FILE)
         path.parent.mkdir(parents=True, exist_ok=True)
+        record = {
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "level": level,
+            "event_type": event_type,
+            "stage_key": stage_key,
+            "message": message,
+            "details": details or {},
+        }
         with path.open("a", encoding="utf-8") as handle:
-            handle.write(f"{now} [{level}] {content}\n")
+            handle.write(json.dumps(record, ensure_ascii=False, default=str))
+            handle.write("\n")
 
     def list_logs(self, run_id: str) -> list[MarketMonitorRunLogEntry]:
-        path = self.resolve_run_dir(run_id) / "events.log"
+        path = self._artifact_path(run_id, _EVENTS_FILE)
         if not path.exists():
             return []
+        return self._read_jsonl_logs(path)
+
+    def _read_jsonl_logs(self, path: Path) -> list[MarketMonitorRunLogEntry]:
         entries: list[MarketMonitorRunLogEntry] = []
         for index, line in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1):
-            match = LOG_PATTERN.match(line)
-            if not match:
-                entries.append(MarketMonitorRunLogEntry(line_no=index, timestamp=None, level="Raw", content=line))
+            if not line.strip():
                 continue
+            try:
+                payload = json.loads(line)
+            except json.JSONDecodeError:
+                entries.append(
+                    MarketMonitorRunLogEntry(
+                        line_no=index,
+                        timestamp=None,
+                        level="Raw",
+                        event_type=None,
+                        stage_key=None,
+                        content=line,
+                        details={},
+                    )
+                )
+                continue
+            if not isinstance(payload, dict):
+                entries.append(
+                    MarketMonitorRunLogEntry(
+                        line_no=index,
+                        timestamp=None,
+                        level="Raw",
+                        event_type=None,
+                        stage_key=None,
+                        content=line,
+                        details={},
+                    )
+                )
+                continue
+            timestamp = None
+            raw_timestamp = payload.get("timestamp")
+            if isinstance(raw_timestamp, str):
+                try:
+                    timestamp = datetime.fromisoformat(raw_timestamp)
+                except ValueError:
+                    timestamp = None
+            message = payload.get("message")
+            if not isinstance(message, str) or not message:
+                message = str(payload.get("content") or line)
+            level = payload.get("level")
+            if not isinstance(level, str) or not level:
+                level = "Info"
+            event_type = payload.get("event_type")
+            if not isinstance(event_type, str) or not event_type:
+                event_type = None
+            stage_key = payload.get("stage_key")
+            if not isinstance(stage_key, str) or not stage_key:
+                stage_key = None
+            details = payload.get("details")
+            if not isinstance(details, dict):
+                details = {}
             entries.append(
                 MarketMonitorRunLogEntry(
                     line_no=index,
-                    timestamp=datetime.fromisoformat(match.group("timestamp")),
-                    level=match.group("level"),
-                    content=match.group("content"),
+                    timestamp=timestamp,
+                    level=level,
+                    event_type=event_type,
+                    stage_key=stage_key,
+                    content=message,
+                    details=details,
                 )
             )
         return entries
@@ -166,6 +237,14 @@ class MonitorRunStore:
         path = self.root / as_of_date.isoformat() / run_id
         path.mkdir(parents=True, exist_ok=True)
         return path
+
+    def _artifacts_dir(self, run_id: str) -> Path:
+        path = self.resolve_run_dir(run_id) / _ARTIFACTS_DIR
+        path.mkdir(parents=True, exist_ok=True)
+        return path
+
+    def _artifact_path(self, run_id: str, filename: str) -> Path:
+        return self._artifacts_dir(run_id) / filename
 
     def resolve_run_dir(self, run_id: str) -> Path:
         _validate_id(run_id)

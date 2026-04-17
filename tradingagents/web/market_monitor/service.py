@@ -86,7 +86,13 @@ class MarketMonitorService:
         self._maybe_cleanup_retained_artifacts()
         as_of_date = request.as_of_date or date.today()
         run = self._run_store.create_run(as_of_date)
-        self._run_store.append_log(run.run_id, "Request", f"启动市场监控运行：{as_of_date.isoformat()}")
+        self._run_store.append_event(
+            run.run_id,
+            "Request",
+            "run_created",
+            f"启动市场监控运行：{as_of_date.isoformat()}",
+            details={"as_of_date": as_of_date.isoformat(), "force_refresh": request.force_refresh},
+        )
         try:
             self._run_executor.submit(
                 self._execute_run_pipeline,
@@ -104,12 +110,25 @@ class MarketMonitorService:
                 }
             )
             self._run_store.save_run(detail)
-            self._run_store.append_log(run.run_id, "Error", f"{exc.__class__.__name__}: {exc}")
+            self._run_store.append_event(
+                run.run_id,
+                "Error",
+                "run_submit_failed",
+                f"{exc.__class__.__name__}: {exc}",
+                details={"error_type": exc.__class__.__name__},
+            )
             raise
         return MarketMonitorRunCreateResponse(run_id=run.run_id, status="running")
 
     def _execute_run_pipeline(self, run_id: str, as_of_date: date, force_refresh: bool) -> None:
         stages = self._run_store.get_stages(run_id).stages
+        self._run_store.append_event(
+            run_id,
+            "System",
+            "pipeline_started",
+            "市场监控运行开始执行后台流水线",
+            details={"as_of_date": as_of_date.isoformat(), "force_refresh": force_refresh},
+        )
         try:
             input_bundle = self._run_input_bundle(run_id, as_of_date, force_refresh, stages)
             search_pack = self._collect_search_slots(run_id, input_bundle, stages)
@@ -134,7 +153,13 @@ class MarketMonitorService:
                 }
             )
             self._run_store.save_run(detail)
-            self._run_store.append_log(run_id, "Response", "市场监控运行完成")
+            self._run_store.append_event(
+                run_id,
+                "Response",
+                "run_completed",
+                "市场监控运行完成",
+                details={"current_stage": "completed"},
+            )
         except Exception as exc:
             current_stage = self._run_store.get_run(run_id).current_stage
             if current_stage not in {"pending", "completed", "failed"}:
@@ -157,7 +182,14 @@ class MarketMonitorService:
                 }
             )
             self._run_store.save_run(detail)
-            self._run_store.append_log(run_id, "Error", f"{exc.__class__.__name__}: {exc}")
+            self._run_store.append_event(
+                run_id,
+                "Error",
+                "run_failed",
+                f"{exc.__class__.__name__}: {exc}",
+                stage_key=current_stage if current_stage not in {"pending", "completed", "failed"} else None,
+                details={"error_type": exc.__class__.__name__},
+            )
 
     def get_run(self, run_id: str) -> MarketMonitorRunDetail:
         return self._run_store.get_run(run_id)
@@ -212,10 +244,12 @@ class MarketMonitorService:
                     }
                 )
                 self._run_store.save_run(recovered)
-                self._run_store.append_log(
+                self._run_store.append_event(
                     run.run_id,
                     "Recovery",
+                    "recovery_marked_failed",
                     "检测到未完成的历史运行，已在服务启动时标记为失败。",
+                    stage_key=failed_stage_key or None,
                 )
             except Exception as exc:
                 corrupted = run.model_copy(
@@ -227,10 +261,12 @@ class MarketMonitorService:
                     }
                 )
                 self._run_store.save_run(corrupted)
-                self._run_store.append_log(
+                self._run_store.append_event(
                     run.run_id,
                     "Recovery",
+                    "recovery_metadata_corrupted",
                     f"检测到损坏的历史运行元数据，已标记失败：{exc}",
+                    details={"error_type": exc.__class__.__name__},
                 )
 
     def _run_input_bundle(
@@ -283,9 +319,10 @@ class MarketMonitorService:
         )
         counts = cache_summary.get("counts", {})
         result_counts = cache_summary.get("result_counts", {})
-        self._run_store.append_log(
+        self._run_store.append_event(
             run_id,
             "InputBundle",
+            "stage_completed",
             "完成本地输入摘要，覆盖 "
             f"{len(available_local_data)} 个符号；cache_missing={counts.get('cache_missing', 0)}，"
             f"cache_corrupted={counts.get('cache_corrupted', 0)}，"
@@ -296,6 +333,12 @@ class MarketMonitorService:
             f"result_refreshed={result_counts.get('refreshed', 0)}，"
             f"result_stale_fallback={result_counts.get('stale_fallback', 0)}，"
             f"result_empty={result_counts.get('empty', 0)}",
+            stage_key="input_bundle",
+            details={
+                "available_symbol_count": len(available_local_data),
+                "cache_counts": counts,
+                "result_counts": result_counts,
+            },
         )
         return bundle
 
@@ -395,7 +438,14 @@ class MarketMonitorService:
                 "filled_slots": sorted(key for key, values in slots.items() if values),
             },
         )
-        self._run_store.append_log(run_id, "Search", f"完成槽位搜索，命中 {sum(len(items) for items in slots.values())} 条候选结果")
+        self._run_store.append_event(
+            run_id,
+            "Search",
+            "stage_completed",
+            f"完成槽位搜索，命中 {sum(len(items) for items in slots.values())} 条候选结果",
+            stage_key="search_slots",
+            details={"result_count": sum(len(items) for items in slots.values())},
+        )
         return search_pack
 
     def _build_fact_sheet(
@@ -484,7 +534,17 @@ class MarketMonitorService:
                 "open_gap_count": len(input_bundle.open_gaps),
             },
         )
-        self._run_store.append_log(run_id, "FactSheet", "事实整编完成")
+        self._run_store.append_event(
+            run_id,
+            "FactSheet",
+            "stage_completed",
+            "事实整编完成",
+            stage_key="fact_sheet",
+            details={
+                "observed_fact_count": len(observed_facts),
+                "filled_fact_count": len(filled_facts),
+            },
+        )
         return fact_sheet
 
     def _build_judgments(
@@ -519,7 +579,17 @@ class MarketMonitorService:
                 "system_risk_label": group_a_cards["system_risk_card"].label,
             },
         )
-        self._run_store.append_log(run_id, "JudgmentA", "完成长期环境与系统风险裁决")
+        self._run_store.append_event(
+            run_id,
+            "JudgmentA",
+            "stage_completed",
+            "完成长期环境与系统风险裁决",
+            stage_key="judgment_group_a",
+            details={
+                "long_term_label": group_a_cards["long_term_card"].label,
+                "system_risk_label": group_a_cards["system_risk_card"].label,
+            },
+        )
 
         self._set_stage(stages, run_id, "judgment_group_b", "running")
         group_b = self._llm.request_json(
@@ -549,7 +619,18 @@ class MarketMonitorService:
                 "panic_label": group_b_cards["panic_card"].label,
             },
         )
-        self._run_store.append_log(run_id, "JudgmentB", "完成短线、事件与恐慌裁决")
+        self._run_store.append_event(
+            run_id,
+            "JudgmentB",
+            "stage_completed",
+            "完成短线、事件与恐慌裁决",
+            stage_key="judgment_group_b",
+            details={
+                "short_term_label": group_b_cards["short_term_card"].label,
+                "event_risk_label": group_b_cards["event_risk_card"].label,
+                "panic_label": group_b_cards["panic_card"].label,
+            },
+        )
 
         return MarketJudgmentPack(
             long_term_card=group_a_cards["long_term_card"],
@@ -604,7 +685,14 @@ class MarketMonitorService:
                 "confidence": execution.confidence,
             },
         )
-        self._run_store.append_log(run_id, "Execution", "执行建议生成完成")
+        self._run_store.append_event(
+            run_id,
+            "Execution",
+            "stage_completed",
+            "执行建议生成完成",
+            stage_key="execution_decision",
+            details={"confidence": execution.confidence},
+        )
         return execution
 
     def _set_stage(
@@ -640,6 +728,32 @@ class MarketMonitorService:
         run_status = "failed" if status == "failed" else "running"
         detail = self._run_store.get_run(run_id).model_copy(update={"current_stage": stage_key, "status": run_status})
         self._run_store.save_run(detail)
+        if status == "running":
+            self._run_store.append_event(
+                run_id,
+                "Stage",
+                "stage_started",
+                f"阶段开始：{stage_key}",
+                stage_key=stage_key,
+            )
+        elif status == "completed":
+            self._run_store.append_event(
+                run_id,
+                "Stage",
+                "stage_completed",
+                f"阶段完成：{stage_key}",
+                stage_key=stage_key,
+                details=summary or {},
+            )
+        elif status == "failed":
+            self._run_store.append_event(
+                run_id,
+                "Stage",
+                "stage_failed",
+                f"阶段失败：{stage_key}",
+                stage_key=stage_key,
+                details={"error": error or {}},
+            )
 
     def _build_open_gaps(self, core_data: dict[str, Any]) -> list[str]:
         gaps: list[str] = []

@@ -98,18 +98,21 @@ describe("MarketMonitorExecutionTrace", () => {
             timestamp: "2026-04-11T01:16:34",
             level: "Request",
             content: "市场监控快照请求开始：2026-04-11",
+            details: {},
           },
           {
             line_no: 2,
             timestamp: "2026-04-11T01:17:24",
             level: "Assessment",
             content: "LLM 裁决失败",
+            details: {},
           },
           {
             line_no: 3,
             timestamp: "2026-04-11T01:17:24",
             level: "Error",
             content: "RuntimeError: 上游服务不可用",
+            details: {},
           },
         ]}
         traceDetail={{
@@ -127,6 +130,40 @@ describe("MarketMonitorExecutionTrace", () => {
     expect(screen.getByText("生成 LLM 裁决")).toBeInTheDocument();
     expect(screen.getByText("执行失败")).toBeInTheDocument();
     expect(screen.getByText("RuntimeError: 上游服务不可用")).toBeInTheDocument();
+  });
+
+  it("prefers stage_key over level when grouping run logs", () => {
+    const steps = buildTraceSteps(
+      [
+        {
+          line_no: 1,
+          timestamp: "2026-04-11T01:16:34",
+          level: "Stage",
+          event_type: "stage_started",
+          stage_key: "input_bundle",
+          content: "阶段开始：input_bundle",
+          details: {},
+        },
+        {
+          line_no: 2,
+          timestamp: "2026-04-11T01:16:40",
+          level: "Stage",
+          event_type: "stage_completed",
+          stage_key: "execution_decision",
+          content: "阶段完成：execution_decision",
+          details: { confidence: 0.72 },
+        },
+      ],
+      {
+        ...runningTraceDetail,
+        status: "completed",
+        response_summary: { summary: "维持偏多参与" },
+      },
+      true,
+    );
+
+    expect(steps.find((item) => item.key === "cache")?.content).toBe("阶段开始：input_bundle");
+    expect(steps.find((item) => item.key === "response")?.content).toBe("阶段完成：execution_decision");
   });
 
   it("shows a loading hint before trace logs arrive", () => {
