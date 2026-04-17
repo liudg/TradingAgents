@@ -211,6 +211,54 @@ class MarketMonitorApiTests(unittest.TestCase):
         self.assertEqual(payload["source_coverage"]["completeness"], "medium")
         self.assertIn("缺少交易所级 breadth 原始数据", payload["open_gaps"])
 
+    def test_snapshot_api_passes_force_refresh_flag(self) -> None:
+        snapshot = self._build_snapshot()
+        with patch(
+            "tradingagents.web.api.app.market_monitor_service.get_snapshot",
+            return_value=snapshot,
+        ) as service_mock:
+            response = self.client.get("/api/market-monitor/snapshot?force_refresh=true")
+
+        self.assertEqual(response.status_code, 200)
+        request = service_mock.call_args.args[0]
+        self.assertTrue(request.force_refresh)
+
+    def test_history_api_passes_force_refresh_flag(self) -> None:
+        history = MarketMonitorHistoryResponse(as_of_date=date(2026, 4, 11), points=[])
+        with patch(
+            "tradingagents.web.api.app.market_monitor_service.get_history",
+            return_value=history,
+        ) as service_mock:
+            response = self.client.get("/api/market-monitor/history?days=20&force_refresh=true")
+
+        self.assertEqual(response.status_code, 200)
+        request = service_mock.call_args.args[0]
+        self.assertTrue(request.force_refresh)
+
+    def test_data_status_api_passes_force_refresh_flag(self) -> None:
+        data_status = MarketMonitorDataStatusResponse(
+            timestamp=datetime(2026, 4, 12, 9, 30, 0, tzinfo=timezone.utc),
+            as_of_date=date(2026, 4, 11),
+            source_coverage=MarketMonitorSourceCoverage(
+                completeness="medium",
+                available_sources=["ETF/指数日线"],
+                missing_sources=["交易所级 breadth"],
+                degraded=True,
+            ),
+            degraded_factors=["广度因子使用 ETF 代理池近似"],
+            notes=["已按代理池与降级规则输出结果。"],
+            open_gaps=["缺少交易所级 breadth 原始数据"],
+        )
+        with patch(
+            "tradingagents.web.api.app.market_monitor_service.get_data_status",
+            return_value=data_status,
+        ) as service_mock:
+            response = self.client.get("/api/market-monitor/data-status?force_refresh=true")
+
+        self.assertEqual(response.status_code, 200)
+        request = service_mock.call_args.args[0]
+        self.assertTrue(request.force_refresh)
+
 
 if __name__ == "__main__":
     unittest.main()

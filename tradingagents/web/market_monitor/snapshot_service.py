@@ -60,7 +60,7 @@ class MarketMonitorSnapshotService:
         attempts = 0
         while len(points) < request.days and attempts < request.days * 3:
             attempts += 1
-            if cursor.weekday() >= 5:
+            if _expected_market_close_date(cursor).date() != cursor:
                 cursor -= timedelta(days=1)
                 continue
             dataset = build_market_dataset(self._universe, cursor, force_refresh=request.force_refresh)

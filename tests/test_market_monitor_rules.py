@@ -152,6 +152,25 @@ class MarketMonitorRulesTests(unittest.TestCase):
         self.assertEqual(sorted(point.trade_date for point in history.points), [point.trade_date for point in history.points])
         self.assertTrue(all(point.regime_label for point in history.points))
 
+    def test_snapshot_service_history_skips_holidays(self) -> None:
+        dataset = _complete_dataset()
+        service = MarketMonitorSnapshotService()
+
+        with patch(
+            "tradingagents.web.market_monitor.snapshot_service.build_market_dataset",
+            return_value=dataset,
+        ) as build_dataset_mock:
+            history = service.get_history(
+                MarketMonitorHistoryRequest(as_of_date=date(2026, 4, 3), days=2)
+            )
+
+        self.assertEqual(history.as_of_date, date(2026, 4, 3))
+        self.assertEqual([point.trade_date for point in history.points], [date(2026, 4, 1), date(2026, 4, 2)])
+        self.assertEqual(
+            [call.args[1] for call in build_dataset_mock.call_args_list],
+            [date(2026, 4, 2), date(2026, 4, 1)],
+        )
+
     def test_snapshot_service_event_risk_weekday_rules(self) -> None:
         service = MarketMonitorSnapshotService()
 

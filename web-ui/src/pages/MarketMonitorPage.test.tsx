@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
 import { MarketMonitorPage } from "./MarketMonitorPage";
@@ -8,9 +8,9 @@ const mockUseMarketMonitorHistory = vi.fn();
 const mockUseMarketMonitorDataStatus = vi.fn();
 
 vi.mock("../api/hooks", () => ({
-  useMarketMonitorSnapshot: () => mockUseMarketMonitorSnapshot(),
-  useMarketMonitorHistory: () => mockUseMarketMonitorHistory(),
-  useMarketMonitorDataStatus: () => mockUseMarketMonitorDataStatus(),
+  useMarketMonitorSnapshot: (...args: unknown[]) => mockUseMarketMonitorSnapshot(...args),
+  useMarketMonitorHistory: (...args: unknown[]) => mockUseMarketMonitorHistory(...args),
+  useMarketMonitorDataStatus: (...args: unknown[]) => mockUseMarketMonitorDataStatus(...args),
 }));
 
 function installMatchMedia() {
@@ -164,6 +164,9 @@ function buildSnapshot() {
 describe("MarketMonitorPage", () => {
   it("renders snapshot cards with new formal API", () => {
     installMatchMedia();
+    mockUseMarketMonitorSnapshot.mockReset();
+    mockUseMarketMonitorHistory.mockReset();
+    mockUseMarketMonitorDataStatus.mockReset();
 
     mockUseMarketMonitorSnapshot.mockImplementation(() => ({
       isLoading: false,
@@ -211,6 +214,9 @@ describe("MarketMonitorPage", () => {
 
   it("shows loading state before snapshot returns", () => {
     installMatchMedia();
+    mockUseMarketMonitorSnapshot.mockReset();
+    mockUseMarketMonitorHistory.mockReset();
+    mockUseMarketMonitorDataStatus.mockReset();
 
     mockUseMarketMonitorSnapshot.mockImplementation(() => ({
       isLoading: true,
@@ -231,5 +237,45 @@ describe("MarketMonitorPage", () => {
     render(<MarketMonitorPage />);
 
     expect(screen.getByText("正在加载市场监控快照")).toBeInTheDocument();
+  });
+
+  it("refreshes with force refresh enabled after clicking refresh", async () => {
+    installMatchMedia();
+    mockUseMarketMonitorSnapshot.mockReset();
+    mockUseMarketMonitorHistory.mockReset();
+    mockUseMarketMonitorDataStatus.mockReset();
+
+    mockUseMarketMonitorSnapshot.mockImplementation(() => ({
+      isLoading: false,
+      isError: false,
+      data: buildSnapshot(),
+      error: null,
+      refetch: vi.fn(),
+    }));
+    mockUseMarketMonitorHistory.mockImplementation(() => ({
+      data: { as_of_date: "2026-04-11", points: [] },
+      refetch: vi.fn(),
+    }));
+    mockUseMarketMonitorDataStatus.mockImplementation(() => ({
+      data: {
+        timestamp: "2026-04-11T08:30:00Z",
+        as_of_date: "2026-04-11",
+        source_coverage: buildSnapshot().source_coverage,
+        degraded_factors: buildSnapshot().degraded_factors,
+        notes: buildSnapshot().notes,
+        open_gaps: [],
+      },
+      refetch: vi.fn(),
+    }));
+
+    render(<MarketMonitorPage />);
+
+    fireEvent.click(screen.getByText("刷新"));
+
+    await waitFor(() => {
+      expect(mockUseMarketMonitorSnapshot).toHaveBeenLastCalledWith(undefined, true);
+      expect(mockUseMarketMonitorHistory).toHaveBeenLastCalledWith(20, undefined, true);
+      expect(mockUseMarketMonitorDataStatus).toHaveBeenLastCalledWith(undefined, true);
+    });
   });
 });

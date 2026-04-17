@@ -12,7 +12,7 @@ import {
   Typography,
 } from "antd";
 import { ExclamationCircleOutlined, ReloadOutlined } from "@ant-design/icons";
-import { type ReactNode } from "react";
+import { type ReactNode, useState } from "react";
 
 import {
   useMarketMonitorDataStatus,
@@ -309,9 +309,11 @@ function HistoryBlock(props: { points: MarketMonitorHistoryPoint[] }) {
 }
 
 export function MarketMonitorPage() {
-  const snapshotQuery = useMarketMonitorSnapshot();
-  const historyQuery = useMarketMonitorHistory(20);
-  const dataStatusQuery = useMarketMonitorDataStatus();
+  const [refreshToken, setRefreshToken] = useState(0);
+  const forceRefresh = refreshToken > 0;
+  const snapshotQuery = useMarketMonitorSnapshot(undefined, forceRefresh);
+  const historyQuery = useMarketMonitorHistory(20, undefined, forceRefresh);
+  const dataStatusQuery = useMarketMonitorDataStatus(undefined, forceRefresh);
 
   if (snapshotQuery.isError && !snapshotQuery.data) {
     return (
@@ -341,9 +343,7 @@ export function MarketMonitorPage() {
             className="page-card-extra-button ant-btn ant-btn-default"
             onClick={(event) => {
               event.preventDefault();
-              snapshotQuery.refetch();
-              historyQuery.refetch();
-              dataStatusQuery.refetch();
+              setRefreshToken((value) => value + 1);
             }}
           >
             <ReloadOutlined /> 刷新
