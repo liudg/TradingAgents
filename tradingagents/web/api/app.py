@@ -1,3 +1,5 @@
+from datetime import date
+
 import uvicorn
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException
@@ -21,14 +23,16 @@ from tradingagents.web.schemas import (
     HistoricalReportSummary,
     MetadataOptionsResponse,
 )
+from tradingagents.web.market_monitor.manager import MarketMonitorRunManager
 from tradingagents.web.market_monitor.schemas import (
+    HistoricalMarketMonitorRunDetail,
+    HistoricalMarketMonitorRunSummary,
     MarketMonitorDataStatusResponse,
     MarketMonitorHistoryRequest,
     MarketMonitorHistoryResponse,
     MarketMonitorSnapshotRequest,
     MarketMonitorSnapshotResponse,
 )
-from tradingagents.web.market_monitor.snapshot_service import MarketMonitorSnapshotService
 
 
 load_dotenv()
@@ -40,7 +44,8 @@ app = FastAPI(
 )
 job_manager = AnalysisJobManager()
 backtest_manager = BacktestJobManager()
-market_monitor_service = MarketMonitorSnapshotService()
+market_monitor_manager = MarketMonitorRunManager()
+market_monitor_service = market_monitor_manager.service
 
 
 @app.post("/api/analysis-jobs", response_model=AnalysisJobCreateResponse)
@@ -173,7 +178,7 @@ def get_market_monitor_snapshot(
         as_of_date=as_of_date,
         force_refresh=force_refresh,
     )
-    return market_monitor_service.get_snapshot(request)
+    return market_monitor_manager.run_snapshot(request)
 
 
 @app.get("/api/market-monitor/history", response_model=MarketMonitorHistoryResponse)
@@ -187,7 +192,7 @@ def get_market_monitor_history(
         days=days,
         force_refresh=force_refresh,
     )
-    return market_monitor_service.get_history(request)
+    return market_monitor_manager.run_history(request)
 
 
 @app.get("/api/market-monitor/data-status", response_model=MarketMonitorDataStatusResponse)
@@ -199,7 +204,34 @@ def get_market_monitor_data_status(
         as_of_date=as_of_date,
         force_refresh=force_refresh,
     )
-    return market_monitor_service.get_data_status(request)
+    return market_monitor_manager.run_data_status(request)
+
+
+@app.get("/api/market-monitor/runs", response_model=list[HistoricalMarketMonitorRunSummary])
+def list_market_monitor_runs() -> list[HistoricalMarketMonitorRunSummary]:
+    return market_monitor_manager.list_historical_runs()
+
+
+@app.get(
+    "/api/market-monitor/runs/{run_id}",
+    response_model=HistoricalMarketMonitorRunDetail,
+)
+def get_market_monitor_run(run_id: str) -> HistoricalMarketMonitorRunDetail:
+    try:
+        return market_monitor_manager.get_historical_run(run_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="Market monitor run not found") from exc
+
+
+@app.get(
+    "/api/market-monitor/runs/{run_id}/logs",
+    response_model=list[AnalysisJobLogEntry],
+)
+def get_market_monitor_run_logs(run_id: str) -> list[AnalysisJobLogEntry]:
+    try:
+        return market_monitor_manager.list_run_logs(run_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="Market monitor run not found") from exc
 
 
 def run_api() -> None:

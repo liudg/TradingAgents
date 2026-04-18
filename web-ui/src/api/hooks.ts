@@ -14,6 +14,9 @@ import {
   fetchHistoricalReports,
   fetchMarketMonitorDataStatus,
   fetchMarketMonitorHistory,
+  fetchMarketMonitorRun,
+  fetchMarketMonitorRunLogs,
+  fetchMarketMonitorRuns,
   fetchMarketMonitorSnapshot,
   fetchMetadataOptions,
 } from "./client";
@@ -153,5 +156,28 @@ export function useMarketMonitorDataStatus(
   return useQuery({
     queryKey: ["market-monitor-data-status", asOfDate ?? null, forceRefresh, refreshKey],
     queryFn: () => fetchMarketMonitorDataStatus(asOfDate, forceRefresh),
+  });
+}
+
+export function useMarketMonitorRuns() {
+  return useQuery({
+    queryKey: ["market-monitor-runs"],
+    queryFn: fetchMarketMonitorRuns,
+  });
+}
+
+export function useMarketMonitorRun(runId: string) {
+  return useQuery({
+    queryKey: ["market-monitor-run", runId],
+    queryFn: () => fetchMarketMonitorRun(runId),
+    enabled: Boolean(runId),
+  });
+}
+
+export function useMarketMonitorRunLogs(runId: string) {
+  return useQuery({
+    queryKey: ["market-monitor-run-logs", runId],
+    queryFn: () => fetchMarketMonitorRunLogs(runId),
+    enabled: Boolean(runId),
   });
 }

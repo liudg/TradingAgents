@@ -364,6 +364,7 @@ export interface MarketMonitorSnapshotResponse {
   source_coverage: MarketMonitorSourceCoverage;
   degraded_factors: string[];
   notes: string[];
+  run_id?: string | null;
 }
 
 export interface MarketMonitorHistoryPoint {
@@ -378,6 +379,7 @@ export interface MarketMonitorHistoryPoint {
 export interface MarketMonitorHistoryResponse {
   as_of_date: string;
   points: MarketMonitorHistoryPoint[];
+  run_id?: string | null;
 }
 
 export interface MarketMonitorDataStatusResponse {
@@ -387,6 +389,40 @@ export interface MarketMonitorDataStatusResponse {
   degraded_factors: string[];
   notes: string[];
   open_gaps: string[];
+  run_id?: string | null;
+}
+
+export interface MarketMonitorRunRequest {
+  trigger_endpoint: "snapshot" | "history" | "data_status";
+  as_of_date?: string | null;
+  days?: number | null;
+  force_refresh: boolean;
+}
+
+export interface HistoricalMarketMonitorRunSummary {
+  run_id: string;
+  trigger_endpoint: "snapshot" | "history" | "data_status";
+  as_of_date: string;
+  days?: number | null;
+  status: JobStatus;
+  generated_at: string;
+  data_freshness?: string | null;
+  source_completeness?: "high" | "medium" | "low" | null;
+  regime_label?: string | null;
+  degraded: boolean;
+  error_message?: string | null;
+  log_path?: string | null;
+  results_dir?: string | null;
+}
+
+export interface HistoricalMarketMonitorRunDetail extends HistoricalMarketMonitorRunSummary {
+  request: MarketMonitorRunRequest;
+  created_at: string;
+  started_at?: string | null;
+  finished_at?: string | null;
+  snapshot?: MarketMonitorSnapshotResponse | null;
+  history?: MarketMonitorHistoryResponse | null;
+  data_status?: MarketMonitorDataStatusResponse | null;
 }
 
 export class ApiError extends Error {

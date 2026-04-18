@@ -6,10 +6,12 @@ import { BacktestCreatePage } from "./pages/BacktestCreatePage";
 import { BacktestDetailPage } from "./pages/BacktestDetailPage";
 import { CreateJobPage } from "./pages/CreateJobPage";
 import { HistoricalBacktestsPage } from "./pages/HistoricalBacktestsPage";
+import { HistoricalMarketMonitorRunsPage } from "./pages/HistoricalMarketMonitorRunsPage";
 import { HistoricalReportDetailPage } from "./pages/HistoricalReportDetailPage";
 import { HistoricalReportsPage } from "./pages/HistoricalReportsPage";
 import { JobDetailPage } from "./pages/JobDetailPage";
 import { MarketMonitorPage } from "./pages/MarketMonitorPage";
+import { MarketMonitorRunDetailPage } from "./pages/MarketMonitorRunDetailPage";
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -29,6 +31,8 @@ export function RootApp() {
             <Route path="/" element={<Navigate to="/monitor" replace />} />
             <Route path="/analysis" element={<CreateJobPage />} />
             <Route path="/monitor" element={<MarketMonitorPage />} />
+            <Route path="/monitor/history" element={<HistoricalMarketMonitorRunsPage />} />
+            <Route path="/monitor/runs/:runId" element={<MarketMonitorRunDetailPage />} />
             <Route path="/jobs/:jobId" element={<JobDetailPage />} />
             <Route path="/backtests" element={<BacktestCreatePage />} />
             <Route path="/backtests/:jobId" element={<BacktestDetailPage />} />

@@ -9,6 +9,8 @@ import {
   BacktestJobResponse,
   HistoricalBacktestDetail,
   HistoricalBacktestSummary,
+  HistoricalMarketMonitorRunDetail,
+  HistoricalMarketMonitorRunSummary,
   HistoricalReportDetail,
   HistoricalReportSummary,
   MarketMonitorDataStatusResponse,
@@ -144,4 +146,16 @@ export async function fetchMarketMonitorDataStatus(
   if (forceRefresh) params.set("force_refresh", "true");
   const suffix = params.toString() ? `?${params.toString()}` : "";
   return requestJson<MarketMonitorDataStatusResponse>(`/api/market-monitor/data-status${suffix}`);
+}
+
+export async function fetchMarketMonitorRuns() {
+  return requestJson<HistoricalMarketMonitorRunSummary[]>("/api/market-monitor/runs");
+}
+
+export async function fetchMarketMonitorRun(runId: string) {
+  return requestJson<HistoricalMarketMonitorRunDetail>(`/api/market-monitor/runs/${runId}`);
+}
+
+export async function fetchMarketMonitorRunLogs(runId: string) {
+  return requestJson<AnalysisJobLogEntry[]>(`/api/market-monitor/runs/${runId}/logs`);
 }

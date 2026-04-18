@@ -1,10 +1,13 @@
 import unittest
 from datetime import date, datetime, timezone
+from pathlib import Path
+from tempfile import TemporaryDirectory
 from unittest.mock import patch
 
 from fastapi.testclient import TestClient
 
-from tradingagents.web.api.app import app
+from tradingagents.web.api.app import app, market_monitor_manager
+from tradingagents.web.market_monitor.manager import MarketMonitorRunManager
 from tradingagents.web.market_monitor.schemas import (
     MarketMonitorActionModifier,
     MarketMonitorDataStatusResponse,
@@ -30,6 +33,16 @@ from tradingagents.web.market_monitor.schemas import (
 class MarketMonitorApiTests(unittest.TestCase):
     def setUp(self) -> None:
         self.client = TestClient(app)
+        self.temp_dir = TemporaryDirectory()
+        self.original_runs_root = market_monitor_manager.runs_root
+        self.original_runs = market_monitor_manager._runs
+        market_monitor_manager.runs_root = Path(self.temp_dir.name)
+        market_monitor_manager._runs = {}
+
+    def tearDown(self) -> None:
+        market_monitor_manager.runs_root = self.original_runs_root
+        market_monitor_manager._runs = self.original_runs
+        self.temp_dir.cleanup()
 
     def _build_snapshot(self) -> MarketMonitorSnapshotResponse:
         now = datetime(2026, 4, 12, 9, 30, 0, tzinfo=timezone.utc)
@@ -154,6 +167,19 @@ class MarketMonitorApiTests(unittest.TestCase):
         with patch(
             "tradingagents.web.api.app.market_monitor_service.get_snapshot",
             return_value=snapshot,
+        ), patch(
+            "tradingagents.web.api.app.market_monitor_service.get_history",
+            return_value=MarketMonitorHistoryResponse(as_of_date=date(2026, 4, 11), points=[]),
+        ), patch(
+            "tradingagents.web.api.app.market_monitor_service.get_data_status",
+            return_value=MarketMonitorDataStatusResponse(
+                timestamp=datetime(2026, 4, 12, 9, 30, 0, tzinfo=timezone.utc),
+                as_of_date=date(2026, 4, 11),
+                source_coverage=snapshot.source_coverage,
+                degraded_factors=snapshot.degraded_factors,
+                notes=snapshot.notes,
+                open_gaps=[],
+            ),
         ):
             response = self.client.get("/api/market-monitor/snapshot")
 
@@ -162,6 +188,26 @@ class MarketMonitorApiTests(unittest.TestCase):
         self.assertEqual(payload["execution_card"]["regime_label"], "黄绿灯-Swing")
         self.assertEqual(payload["long_term_score"]["zone"], "进攻区")
         self.assertEqual(payload["style_effectiveness"]["tactic_layer"]["top_tactic"], "回调低吸")
+        self.assertTrue(payload["run_id"])
+
+        runs_response = self.client.get("/api/market-monitor/runs")
+        self.assertEqual(runs_response.status_code, 200)
+        runs_payload = runs_response.json()
+        self.assertEqual(len(runs_payload), 1)
+        self.assertEqual(runs_payload[0]["run_id"], payload["run_id"])
+        self.assertEqual(runs_payload[0]["trigger_endpoint"], "snapshot")
+
+        detail_response = self.client.get(f"/api/market-monitor/runs/{payload['run_id']}")
+        self.assertEqual(detail_response.status_code, 200)
+        detail_payload = detail_response.json()
+        self.assertEqual(detail_payload["snapshot"]["run_id"], payload["run_id"])
+        self.assertIsNotNone(detail_payload["history"])
+        self.assertIsNotNone(detail_payload["data_status"])
+
+        logs_response = self.client.get(f"/api/market-monitor/runs/{payload['run_id']}/logs")
+        self.assertEqual(logs_response.status_code, 200)
+        logs_payload = logs_response.json()
+        self.assertTrue(any("Market monitor run" in item["content"] for item in logs_payload))
 
     def test_history_api_returns_points(self) -> None:
         history = MarketMonitorHistoryResponse(
@@ -177,9 +223,24 @@ class MarketMonitorApiTests(unittest.TestCase):
                 )
             ],
         )
+        snapshot = self._build_snapshot()
+        data_status = MarketMonitorDataStatusResponse(
+            timestamp=datetime(2026, 4, 12, 9, 30, 0, tzinfo=timezone.utc),
+            as_of_date=date(2026, 4, 11),
+            source_coverage=snapshot.source_coverage,
+            degraded_factors=snapshot.degraded_factors,
+            notes=snapshot.notes,
+            open_gaps=[],
+        )
         with patch(
             "tradingagents.web.api.app.market_monitor_service.get_history",
             return_value=history,
+        ), patch(
+            "tradingagents.web.api.app.market_monitor_service.get_snapshot",
+            return_value=snapshot,
+        ), patch(
+            "tradingagents.web.api.app.market_monitor_service.get_data_status",
+            return_value=data_status,
         ):
             response = self.client.get("/api/market-monitor/history?days=20")
 
@@ -203,6 +264,12 @@ class MarketMonitorApiTests(unittest.TestCase):
         with patch(
             "tradingagents.web.api.app.market_monitor_service.get_data_status",
             return_value=data_status,
+        ), patch(
+            "tradingagents.web.api.app.market_monitor_service.get_snapshot",
+            return_value=self._build_snapshot(),
+        ), patch(
+            "tradingagents.web.api.app.market_monitor_service.get_history",
+            return_value=MarketMonitorHistoryResponse(as_of_date=date(2026, 4, 11), points=[]),
         ):
             response = self.client.get("/api/market-monitor/data-status")
 
@@ -258,6 +325,87 @@ class MarketMonitorApiTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         request = service_mock.call_args.args[0]
         self.assertTrue(request.force_refresh)
+
+    def test_run_manager_restores_persisted_runs(self) -> None:
+        snapshot = self._build_snapshot()
+        history = MarketMonitorHistoryResponse(
+            as_of_date=date(2026, 4, 11),
+            points=[
+                MarketMonitorHistoryPoint(
+                    trade_date=date(2026, 4, 10),
+                    long_term_score=64.0,
+                    short_term_score=58.0,
+                    system_risk_score=36.0,
+                    panic_score=22.0,
+                    regime_label="黄灯",
+                )
+            ],
+        )
+        data_status = MarketMonitorDataStatusResponse(
+            timestamp=datetime(2026, 4, 12, 9, 30, 0, tzinfo=timezone.utc),
+            as_of_date=date(2026, 4, 11),
+            source_coverage=snapshot.source_coverage,
+            degraded_factors=snapshot.degraded_factors,
+            notes=snapshot.notes,
+            open_gaps=["缺少交易所级 breadth 原始数据"],
+        )
+        with patch(
+            "tradingagents.web.api.app.market_monitor_service.get_snapshot",
+            return_value=snapshot,
+        ), patch(
+            "tradingagents.web.api.app.market_monitor_service.get_history",
+            return_value=history,
+        ), patch(
+            "tradingagents.web.api.app.market_monitor_service.get_data_status",
+            return_value=data_status,
+        ):
+            response = self.client.get("/api/market-monitor/snapshot")
+
+        self.assertEqual(response.status_code, 200)
+        run_id = response.json()["run_id"]
+
+        restored_manager = MarketMonitorRunManager(
+            runs_root=Path(self.temp_dir.name),
+            service=market_monitor_manager.service,
+        )
+        restored_runs = restored_manager.list_historical_runs()
+        self.assertEqual(len(restored_runs), 1)
+        self.assertEqual(restored_runs[0].run_id, run_id)
+
+        restored_detail = restored_manager.get_historical_run(run_id)
+        self.assertEqual(restored_detail.snapshot.run_id, run_id)
+        self.assertEqual(restored_detail.history.points[0].regime_label, "黄灯")
+        self.assertIn("缺少交易所级 breadth 原始数据", restored_detail.data_status.open_gaps)
+
+    def test_failed_run_is_persisted_and_listed(self) -> None:
+        failing_client = TestClient(app, raise_server_exceptions=False)
+        with patch(
+            "tradingagents.web.api.app.market_monitor_service.get_snapshot",
+            side_effect=RuntimeError("snapshot boom"),
+        ):
+            response = failing_client.get("/api/market-monitor/snapshot")
+
+        self.assertEqual(response.status_code, 500)
+
+        runs_response = self.client.get("/api/market-monitor/runs")
+        self.assertEqual(runs_response.status_code, 200)
+        runs_payload = runs_response.json()
+        self.assertEqual(len(runs_payload), 1)
+        self.assertEqual(runs_payload[0]["status"], "failed")
+        self.assertEqual(runs_payload[0]["error_message"], "snapshot boom")
+
+        run_id = runs_payload[0]["run_id"]
+        detail_response = self.client.get(f"/api/market-monitor/runs/{run_id}")
+        self.assertEqual(detail_response.status_code, 200)
+        detail_payload = detail_response.json()
+        self.assertIsNone(detail_payload["snapshot"])
+        self.assertEqual(detail_payload["error_message"], "snapshot boom")
+
+        logs_response = self.client.get(f"/api/market-monitor/runs/{run_id}/logs")
+        self.assertEqual(logs_response.status_code, 200)
+        logs_payload = logs_response.json()
+        self.assertTrue(any(item["level"] == "Error" for item in logs_payload))
+        self.assertTrue(any("snapshot boom" in item["content"] for item in logs_payload))
 
 
 if __name__ == "__main__":

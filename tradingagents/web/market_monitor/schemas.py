@@ -5,6 +5,8 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field, field_validator
 
+from tradingagents.web.schemas import JobStatus
+
 
 MarketMonitorSymbolCacheReadState = Literal[
     "cache_missing",
@@ -59,6 +61,20 @@ class MarketMonitorSymbolCacheReadResult(BaseModel):
 
 class MarketMonitorSnapshotRequest(BaseModel):
     as_of_date: date | None = None
+    force_refresh: bool = False
+
+    @field_validator("as_of_date")
+    @classmethod
+    def validate_as_of_date(cls, value: date | None) -> date | None:
+        if value and value > date.today():
+            raise ValueError("as_of_date 不能晚于今天")
+        return value
+
+
+class MarketMonitorRunRequest(BaseModel):
+    trigger_endpoint: Literal["snapshot", "history", "data_status"]
+    as_of_date: date | None = None
+    days: int | None = Field(default=None, ge=1, le=60)
     force_refresh: bool = False
 
     @field_validator("as_of_date")
@@ -218,6 +234,7 @@ class MarketMonitorSnapshotResponse(BaseModel):
     source_coverage: MarketMonitorSourceCoverage
     degraded_factors: list[str] = Field(default_factory=list)
     notes: list[str] = Field(default_factory=list)
+    run_id: str | None = None
 
 
 class MarketMonitorHistoryPoint(BaseModel):
@@ -232,6 +249,7 @@ class MarketMonitorHistoryPoint(BaseModel):
 class MarketMonitorHistoryResponse(BaseModel):
     as_of_date: date
     points: list[MarketMonitorHistoryPoint] = Field(default_factory=list)
+    run_id: str | None = None
 
 
 class MarketMonitorDataStatusResponse(BaseModel):
@@ -241,3 +259,30 @@ class MarketMonitorDataStatusResponse(BaseModel):
     degraded_factors: list[str] = Field(default_factory=list)
     notes: list[str] = Field(default_factory=list)
     open_gaps: list[str] = Field(default_factory=list)
+    run_id: str | None = None
+
+
+class HistoricalMarketMonitorRunSummary(BaseModel):
+    run_id: str
+    trigger_endpoint: Literal["snapshot", "history", "data_status"]
+    as_of_date: date
+    days: int | None = None
+    status: JobStatus
+    generated_at: datetime
+    data_freshness: str | None = None
+    source_completeness: Literal["high", "medium", "low"] | None = None
+    regime_label: str | None = None
+    degraded: bool = False
+    error_message: str | None = None
+    log_path: str | None = None
+    results_dir: str | None = None
+
+
+class HistoricalMarketMonitorRunDetail(HistoricalMarketMonitorRunSummary):
+    request: MarketMonitorRunRequest
+    created_at: datetime
+    started_at: datetime | None = None
+    finished_at: datetime | None = None
+    snapshot: MarketMonitorSnapshotResponse | None = None
+    history: MarketMonitorHistoryResponse | None = None
+    data_status: MarketMonitorDataStatusResponse | None = None

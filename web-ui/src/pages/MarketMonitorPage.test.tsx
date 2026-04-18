@@ -1,5 +1,6 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
+import { MemoryRouter } from "react-router-dom";
 
 import { MarketMonitorPage } from "./MarketMonitorPage";
 
@@ -34,6 +35,7 @@ function buildSnapshot() {
     timestamp: "2026-04-11T08:30:00Z",
     as_of_date: "2026-04-11",
     data_freshness: "delayed_15min",
+    run_id: "run-12345678",
     long_term_score: {
       score: 68.5,
       zone: "进攻区",
@@ -203,12 +205,18 @@ describe("MarketMonitorPage", () => {
       refetch: vi.fn(),
     }));
 
-    render(<MarketMonitorPage />);
+    render(
+      <MemoryRouter>
+        <MarketMonitorPage />
+      </MemoryRouter>,
+    );
 
     expect(screen.getAllByText("黄绿灯-Swing").length).toBeGreaterThan(0);
     expect(screen.getByText("执行动作卡")).toBeInTheDocument();
     expect(screen.getByText("风格有效性卡")).toBeInTheDocument();
     expect(screen.getByText("历史趋势回看")).toBeInTheDocument();
+    expect(screen.getByText("查看本次运行详情")).toBeInTheDocument();
+    expect(screen.getByText("查看历史记录")).toBeInTheDocument();
     expect(screen.getAllByText("广度因子使用 ETF 代理池近似").length).toBeGreaterThan(0);
   });
 
@@ -234,7 +242,11 @@ describe("MarketMonitorPage", () => {
       refetch: vi.fn(),
     }));
 
-    render(<MarketMonitorPage />);
+    render(
+      <MemoryRouter>
+        <MarketMonitorPage />
+      </MemoryRouter>,
+    );
 
     expect(screen.getByText("正在加载市场监控快照")).toBeInTheDocument();
   });
@@ -268,7 +280,11 @@ describe("MarketMonitorPage", () => {
       refetch: vi.fn(),
     }));
 
-    render(<MarketMonitorPage />);
+    render(
+      <MemoryRouter>
+        <MarketMonitorPage />
+      </MemoryRouter>,
+    );
 
     fireEvent.click(screen.getByText("刷新"));
 
@@ -308,7 +324,11 @@ describe("MarketMonitorPage", () => {
       refetch: vi.fn(),
     }));
 
-    render(<MarketMonitorPage />);
+    render(
+      <MemoryRouter>
+        <MarketMonitorPage />
+      </MemoryRouter>,
+    );
     const refreshButton = screen.getByText("刷新");
 
     fireEvent.click(refreshButton);
