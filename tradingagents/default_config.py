@@ -1,21 +1,12 @@
 import os
 
-try:
-    from dotenv import load_dotenv
-except ImportError:  # pragma: no cover - optional helper for local runs
-    load_dotenv = None
-
-if load_dotenv is not None:
-    load_dotenv()
+_TRADINGAGENTS_HOME = os.path.join(os.path.expanduser("~"), ".tradingagents")
 
 DEFAULT_CONFIG = {
     "project_dir": os.path.abspath(os.path.join(os.path.dirname(__file__), ".")),
-    "results_dir": os.getenv("TRADINGAGENTS_RESULTS_DIR", "./results"),
-    "memory_dir": os.getenv("TRADINGAGENTS_MEMORY_DIR", "./results/memory"),
-    "data_cache_dir": os.path.join(
-        os.path.abspath(os.path.join(os.path.dirname(__file__), ".")),
-        "dataflows/data_cache",
-    ),
+    "results_dir": os.getenv("TRADINGAGENTS_RESULTS_DIR", os.path.join(_TRADINGAGENTS_HOME, "logs")),
+    "data_cache_dir": os.getenv("TRADINGAGENTS_CACHE_DIR", os.path.join(_TRADINGAGENTS_HOME, "cache")),
+    "memory_dir": os.getenv("TRADINGAGENTS_MEMORY_DIR", os.path.join(_TRADINGAGENTS_HOME, "memory")),
     # LLM settings
     "llm_provider": "codex",
     "deep_think_llm": "gpt-5.4",
