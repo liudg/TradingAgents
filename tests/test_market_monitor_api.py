@@ -201,8 +201,8 @@ class MarketMonitorApiTests(unittest.TestCase):
         self.assertEqual(detail_response.status_code, 200)
         detail_payload = detail_response.json()
         self.assertEqual(detail_payload["snapshot"]["run_id"], payload["run_id"])
-        self.assertIsNotNone(detail_payload["history"])
-        self.assertIsNotNone(detail_payload["data_status"])
+        self.assertIsNone(detail_payload["history"])
+        self.assertIsNone(detail_payload["data_status"])
 
         logs_response = self.client.get(f"/api/market-monitor/runs/{payload['run_id']}/logs")
         self.assertEqual(logs_response.status_code, 200)
@@ -290,6 +290,29 @@ class MarketMonitorApiTests(unittest.TestCase):
         request = service_mock.call_args.args[0]
         self.assertTrue(request.force_refresh)
 
+    def test_snapshot_api_does_not_require_history_or_data_status(self) -> None:
+        snapshot = self._build_snapshot()
+        with patch(
+            "tradingagents.web.api.app.market_monitor_service.get_snapshot",
+            return_value=snapshot,
+        ) as snapshot_mock, patch(
+            "tradingagents.web.api.app.market_monitor_service.get_history",
+            side_effect=AssertionError("history should not be called"),
+        ) as history_mock, patch(
+            "tradingagents.web.api.app.market_monitor_service.get_data_status",
+            side_effect=AssertionError("data status should not be called"),
+        ) as data_status_mock:
+            response = self.client.get("/api/market-monitor/snapshot")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(snapshot_mock.call_count, 1)
+        self.assertEqual(history_mock.call_count, 0)
+        self.assertEqual(data_status_mock.call_count, 0)
+        detail_payload = self.client.get(f"/api/market-monitor/runs/{response.json()['run_id']}").json()
+        self.assertIsNotNone(detail_payload["snapshot"])
+        self.assertIsNone(detail_payload["history"])
+        self.assertIsNone(detail_payload["data_status"])
+
     def test_history_api_passes_force_refresh_flag(self) -> None:
         history = MarketMonitorHistoryResponse(as_of_date=date(2026, 4, 11), points=[])
         with patch(
@@ -301,6 +324,25 @@ class MarketMonitorApiTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         request = service_mock.call_args.args[0]
         self.assertTrue(request.force_refresh)
+
+    def test_history_api_does_not_require_snapshot_or_data_status(self) -> None:
+        history = MarketMonitorHistoryResponse(as_of_date=date(2026, 4, 11), points=[])
+        with patch(
+            "tradingagents.web.api.app.market_monitor_service.get_history",
+            return_value=history,
+        ) as history_mock, patch(
+            "tradingagents.web.api.app.market_monitor_service.get_snapshot",
+            side_effect=AssertionError("snapshot should not be called"),
+        ) as snapshot_mock, patch(
+            "tradingagents.web.api.app.market_monitor_service.get_data_status",
+            side_effect=AssertionError("data status should not be called"),
+        ) as data_status_mock:
+            response = self.client.get("/api/market-monitor/history?days=20")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(history_mock.call_count, 1)
+        self.assertEqual(snapshot_mock.call_count, 0)
+        self.assertEqual(data_status_mock.call_count, 0)
 
     def test_data_status_api_passes_force_refresh_flag(self) -> None:
         data_status = MarketMonitorDataStatusResponse(
@@ -325,6 +367,37 @@ class MarketMonitorApiTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         request = service_mock.call_args.args[0]
         self.assertTrue(request.force_refresh)
+
+    def test_data_status_api_does_not_require_snapshot_or_history(self) -> None:
+        data_status = MarketMonitorDataStatusResponse(
+            timestamp=datetime(2026, 4, 12, 9, 30, 0, tzinfo=timezone.utc),
+            as_of_date=date(2026, 4, 11),
+            source_coverage=MarketMonitorSourceCoverage(
+                completeness="medium",
+                available_sources=["ETF/指数日线"],
+                missing_sources=["交易所级 breadth"],
+                degraded=True,
+            ),
+            degraded_factors=["广度因子使用 ETF 代理池近似"],
+            notes=["已按代理池与降级规则输出结果。"],
+            open_gaps=["缺少交易所级 breadth 原始数据"],
+        )
+        with patch(
+            "tradingagents.web.api.app.market_monitor_service.get_data_status",
+            return_value=data_status,
+        ) as data_status_mock, patch(
+            "tradingagents.web.api.app.market_monitor_service.get_snapshot",
+            side_effect=AssertionError("snapshot should not be called"),
+        ) as snapshot_mock, patch(
+            "tradingagents.web.api.app.market_monitor_service.get_history",
+            side_effect=AssertionError("history should not be called"),
+        ) as history_mock:
+            response = self.client.get("/api/market-monitor/data-status")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(data_status_mock.call_count, 1)
+        self.assertEqual(snapshot_mock.call_count, 0)
+        self.assertEqual(history_mock.call_count, 0)
 
     def test_run_manager_restores_persisted_runs(self) -> None:
         snapshot = self._build_snapshot()
@@ -374,8 +447,8 @@ class MarketMonitorApiTests(unittest.TestCase):
 
         restored_detail = restored_manager.get_historical_run(run_id)
         self.assertEqual(restored_detail.snapshot.run_id, run_id)
-        self.assertEqual(restored_detail.history.points[0].regime_label, "黄灯")
-        self.assertIn("缺少交易所级 breadth 原始数据", restored_detail.data_status.open_gaps)
+        self.assertIsNone(restored_detail.history)
+        self.assertIsNone(restored_detail.data_status)
 
     def test_failed_run_is_persisted_and_listed(self) -> None:
         failing_client = TestClient(app, raise_server_exceptions=False)

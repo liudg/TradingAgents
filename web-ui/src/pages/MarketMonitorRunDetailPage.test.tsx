@@ -2,6 +2,7 @@ import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 
+import type { HistoricalMarketMonitorRunDetail } from "../api/types";
 import { MarketMonitorRunDetailPage } from "./MarketMonitorRunDetailPage";
 
 const mockUseMarketMonitorRun = vi.fn();
@@ -37,7 +38,7 @@ function installMatchMedia() {
   });
 }
 
-function buildRunDetail() {
+function buildRunDetail(): HistoricalMarketMonitorRunDetail {
   return {
     run_id: "run-12345678",
     trigger_endpoint: "snapshot",
@@ -259,6 +260,43 @@ describe("MarketMonitorRunDetailPage", () => {
     expect(screen.getByText("执行日志")).toBeInTheDocument();
     expect(screen.getByText("Market monitor run run-12345678 started")).toBeInTheDocument();
     expect(screen.getByText("缺少交易所级 breadth 原始数据")).toBeInTheDocument();
+  });
+
+  it("renders detail when history and data status are missing", () => {
+    installMatchMedia();
+    mockUseMarketMonitorRun.mockReset();
+    mockUseMarketMonitorRunLogs.mockReset();
+    mockNavigate.mockReset();
+
+    const run = buildRunDetail();
+    run.history = null;
+    run.data_status = null;
+
+    mockUseMarketMonitorRun.mockReturnValue({
+      isLoading: false,
+      isError: false,
+      error: null,
+      isFetching: false,
+      data: run,
+      refetch: vi.fn(),
+    });
+    mockUseMarketMonitorRunLogs.mockReturnValue({
+      isFetching: false,
+      data: [],
+      refetch: vi.fn(),
+    });
+
+    render(
+      <MemoryRouter initialEntries={["/monitor/runs/run-12345678"]}>
+        <Routes>
+          <Route path="/monitor/runs/:runId" element={<MarketMonitorRunDetailPage />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+
+    expect(screen.getByText("市场监控运行详情")).toBeInTheDocument();
+    expect(screen.getByText("执行动作卡")).toBeInTheDocument();
+    expect(screen.getByText("暂无日志")).toBeInTheDocument();
   });
 
   it("goes back to history list when clicking return", () => {

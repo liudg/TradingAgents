@@ -47,6 +47,8 @@ class MarketMonitorRunManager:
             force_refresh=request.force_refresh,
         )
         snapshot, _, _ = self._execute_run(run_request)
+        if snapshot is None:
+            raise RuntimeError("snapshot payload missing")
         return snapshot
 
     def run_history(
@@ -60,6 +62,8 @@ class MarketMonitorRunManager:
             force_refresh=request.force_refresh,
         )
         _, history, _ = self._execute_run(run_request)
+        if history is None:
+            raise RuntimeError("history payload missing")
         return history
 
     def run_data_status(
@@ -72,6 +76,8 @@ class MarketMonitorRunManager:
             force_refresh=request.force_refresh,
         )
         _, _, data_status = self._execute_run(run_request)
+        if data_status is None:
+            raise RuntimeError("data status payload missing")
         return data_status
 
     def list_historical_runs(self) -> list[HistoricalMarketMonitorRunSummary]:
@@ -110,7 +116,11 @@ class MarketMonitorRunManager:
     def _execute_run(
         self,
         request: MarketMonitorRunRequest,
-    ) -> tuple[MarketMonitorSnapshotResponse, MarketMonitorHistoryResponse, MarketMonitorDataStatusResponse]:
+    ) -> tuple[
+        MarketMonitorSnapshotResponse | None,
+        MarketMonitorHistoryResponse | None,
+        MarketMonitorDataStatusResponse | None,
+    ]:
         run_id = uuid4().hex
         as_of_date = request.as_of_date or date.today()
         results_dir = self._get_results_dir(as_of_date, run_id)
@@ -159,25 +169,30 @@ class MarketMonitorRunManager:
         )
 
         try:
-            AnalysisJobManager._append_job_log(log_path, "System", "Building snapshot payload")
-            snapshot = self.service.get_snapshot(snapshot_request).model_copy(update={"run_id": run_id})
-            AnalysisJobManager._append_job_log(log_path, "System", "Snapshot payload ready")
+            snapshot: MarketMonitorSnapshotResponse | None = None
+            history: MarketMonitorHistoryResponse | None = None
+            data_status: MarketMonitorDataStatusResponse | None = None
 
-            AnalysisJobManager._append_job_log(log_path, "System", "Building history payload")
-            history = self.service.get_history(history_request).model_copy(update={"run_id": run_id})
-            AnalysisJobManager._append_job_log(
-                log_path,
-                "System",
-                f"History payload ready with {len(history.points)} points",
-            )
-
-            AnalysisJobManager._append_job_log(log_path, "System", "Building data status payload")
-            data_status = self.service.get_data_status(snapshot_request).model_copy(update={"run_id": run_id})
-            AnalysisJobManager._append_job_log(
-                log_path,
-                "System",
-                f"Data status payload ready with {len(data_status.open_gaps)} open gaps",
-            )
+            if request.trigger_endpoint == "snapshot":
+                AnalysisJobManager._append_job_log(log_path, "System", "Building snapshot payload")
+                snapshot = self.service.get_snapshot(snapshot_request).model_copy(update={"run_id": run_id})
+                AnalysisJobManager._append_job_log(log_path, "System", "Snapshot payload ready")
+            elif request.trigger_endpoint == "history":
+                AnalysisJobManager._append_job_log(log_path, "System", "Building history payload")
+                history = self.service.get_history(history_request).model_copy(update={"run_id": run_id})
+                AnalysisJobManager._append_job_log(
+                    log_path,
+                    "System",
+                    f"History payload ready with {len(history.points)} points",
+                )
+            else:
+                AnalysisJobManager._append_job_log(log_path, "System", "Building data status payload")
+                data_status = self.service.get_data_status(snapshot_request).model_copy(update={"run_id": run_id})
+                AnalysisJobManager._append_job_log(
+                    log_path,
+                    "System",
+                    f"Data status payload ready with {len(data_status.open_gaps)} open gaps",
+                )
 
             self._update_run(
                 run_id,
