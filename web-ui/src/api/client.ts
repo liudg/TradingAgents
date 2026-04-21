@@ -13,8 +13,10 @@ import {
   HistoricalMarketMonitorRunSummary,
   HistoricalReportDetail,
   HistoricalReportSummary,
+  MarketMonitorArtifactPayload,
   MarketMonitorDataStatusResponse,
   MarketMonitorHistoryResponse,
+  MarketMonitorPromptTrace,
   MarketMonitorSnapshotResponse,
   MetadataOptionsResponse,
 } from "./types";
@@ -158,4 +160,28 @@ export async function fetchMarketMonitorRun(runId: string) {
 
 export async function fetchMarketMonitorRunLogs(runId: string) {
   return requestJson<AnalysisJobLogEntry[]>(`/api/market-monitor/runs/${runId}/logs`);
+}
+
+export async function fetchMarketMonitorPromptTraces(runId: string) {
+  return requestJson<MarketMonitorPromptTrace[]>(
+    `/api/market-monitor/runs/${runId}/prompt-traces`,
+  );
+}
+
+export async function fetchMarketMonitorArtifact(
+  runId: string,
+  artifactName: string,
+) {
+  return requestJson<MarketMonitorArtifactPayload>(
+    `/api/market-monitor/runs/${runId}/artifacts/${artifactName}`,
+  );
+}
+
+export async function recoverMarketMonitorRun(runId: string) {
+  return requestJson<HistoricalMarketMonitorRunDetail>(
+    `/api/market-monitor/runs/${runId}/recover`,
+    {
+      method: "POST",
+    },
+  );
 }

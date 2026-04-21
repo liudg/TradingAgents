@@ -1,4 +1,4 @@
-import { useMutation, useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import {
   createAnalysisJob,
@@ -12,13 +12,16 @@ import {
   fetchHistoricalBacktests,
   fetchHistoricalReport,
   fetchHistoricalReports,
+  fetchMarketMonitorArtifact,
   fetchMarketMonitorDataStatus,
   fetchMarketMonitorHistory,
+  fetchMarketMonitorPromptTraces,
   fetchMarketMonitorRun,
   fetchMarketMonitorRunLogs,
   fetchMarketMonitorRuns,
   fetchMarketMonitorSnapshot,
   fetchMetadataOptions,
+  recoverMarketMonitorRun,
 } from "./client";
 import { AnalysisJobRequest, BacktestJobRequest, JobStatus } from "./types";
 
@@ -179,5 +182,35 @@ export function useMarketMonitorRunLogs(runId: string) {
     queryKey: ["market-monitor-run-logs", runId],
     queryFn: () => fetchMarketMonitorRunLogs(runId),
     enabled: Boolean(runId),
+  });
+}
+
+export function useMarketMonitorPromptTraces(runId: string) {
+  return useQuery({
+    queryKey: ["market-monitor-prompt-traces", runId],
+    queryFn: () => fetchMarketMonitorPromptTraces(runId),
+    enabled: Boolean(runId),
+  });
+}
+
+export function useMarketMonitorArtifact(runId: string, artifactName: string, enabled = true) {
+  return useQuery({
+    queryKey: ["market-monitor-artifact", runId, artifactName],
+    queryFn: () => fetchMarketMonitorArtifact(runId, artifactName),
+    enabled: Boolean(runId) && Boolean(artifactName) && enabled,
+  });
+}
+
+export function useRecoverMarketMonitorRun() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (runId: string) => recoverMarketMonitorRun(runId),
+    onSuccess: (data) => {
+      queryClient.setQueryData(["market-monitor-run", data.run_id], data);
+      queryClient.invalidateQueries({ queryKey: ["market-monitor-runs"] });
+      queryClient.invalidateQueries({ queryKey: ["market-monitor-run", data.run_id] });
+      queryClient.invalidateQueries({ queryKey: ["market-monitor-run-logs", data.run_id] });
+      queryClient.invalidateQueries({ queryKey: ["market-monitor-prompt-traces", data.run_id] });
+    },
   });
 }

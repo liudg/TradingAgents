@@ -88,6 +88,7 @@ export function MarketMonitorPage() {
             {snapshot.run_id ? (
               <Button onClick={() => navigate(`/monitor/runs/${snapshot.run_id}`)}>查看本次运行详情</Button>
             ) : null}
+            {snapshot.prompt_traces.length ? <Tag color="purple">Prompt Trace {snapshot.prompt_traces.length}</Tag> : null}
             <Button onClick={() => navigate("/monitor/history")}>查看历史记录</Button>
           </Space>
           {snapshot.degraded_factors.length ? (
@@ -133,7 +134,7 @@ export function MarketMonitorPage() {
             sourceCoverage={dataStatus?.source_coverage || snapshot.source_coverage}
             degradedFactors={dataStatus?.degraded_factors || snapshot.degraded_factors}
             notes={dataStatus?.notes || snapshot.notes}
-            openGaps={dataStatus?.open_gaps || []}
+            openGaps={dataStatus?.open_gaps || snapshot.fact_sheet?.open_gaps || []}
           />
         </Col>
       </Row>

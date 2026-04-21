@@ -15,14 +15,24 @@ import {
 import { ArrowLeftOutlined, ReloadOutlined } from "@ant-design/icons";
 import { useNavigate, useParams } from "react-router-dom";
 
-import { useMarketMonitorRun, useMarketMonitorRunLogs } from "../api/hooks";
+import {
+  useMarketMonitorArtifact,
+  useMarketMonitorPromptTraces,
+  useMarketMonitorRun,
+  useMarketMonitorRunLogs,
+  useRecoverMarketMonitorRun,
+} from "../api/hooks";
 import {
   DataStatusBlock,
   EventRiskBlock,
   ExecutionCardBlock,
+  FactSheetBlock,
+  HistoryArtifactsBlock,
   HistoryBlock,
   PanicCardBlock,
+  PromptTraceBlock,
   ScoreCardBlock,
+  StageTimelineBlock,
   StyleCardBlock,
 } from "../components/MarketMonitorBlocks";
 import { extractErrorMessage, formatDateTime, getStatusColor, getStatusText } from "../utils/format";
@@ -32,6 +42,9 @@ export function MarketMonitorRunDetailPage() {
   const navigate = useNavigate();
   const runQuery = useMarketMonitorRun(runId);
   const logsQuery = useMarketMonitorRunLogs(runId);
+  const promptTracesQuery = useMarketMonitorPromptTraces(runId);
+  const factSheetArtifactQuery = useMarketMonitorArtifact(runId, "fact_sheet", Boolean(runId));
+  const recoverMutation = useRecoverMarketMonitorRun();
   const run = runQuery.data;
 
   if (runQuery.isLoading) {
@@ -60,6 +73,18 @@ export function MarketMonitorRunDetailPage() {
   const snapshot = run.snapshot;
   const history = run.history;
   const dataStatus = run.data_status;
+  const dataStatusSourceCoverage = dataStatus?.source_coverage || snapshot?.source_coverage;
+  const dataStatusDegradedFactors = dataStatus?.degraded_factors || snapshot?.degraded_factors || [];
+  const dataStatusNotes = dataStatus?.notes || snapshot?.notes || [];
+  const dataStatusOpenGaps = dataStatus?.open_gaps || [];
+  const historyArtifacts = Object.keys(run.manifest?.artifact_paths || {})
+    .filter((name) => name.startsWith("history_snapshot_") || name.startsWith("history_fact_sheet_"))
+    .sort()
+    .map((name) => ({
+      artifactName: name,
+      tradeDate: name.replace(/^history_(?:snapshot|fact_sheet)_/, ""),
+      artifactType: name.startsWith("history_snapshot_") ? "snapshot" as const : "fact_sheet" as const,
+    }));
 
   return (
     <Space direction="vertical" size="large" style={{ width: "100%" }}>
@@ -76,7 +101,12 @@ export function MarketMonitorRunDetailPage() {
             <Button icon={<ArrowLeftOutlined />} onClick={() => navigate("/monitor/history")}>
               返回历史
             </Button>
-            <Button icon={<ReloadOutlined />} loading={runQuery.isFetching || logsQuery.isFetching} onClick={() => { runQuery.refetch(); logsQuery.refetch(); }}>
+            {run.recoverable ? (
+              <Button loading={recoverMutation.isPending} onClick={() => recoverMutation.mutate(runId)}>
+                恢复运行
+              </Button>
+            ) : null}
+            <Button icon={<ReloadOutlined />} loading={runQuery.isFetching || logsQuery.isFetching || promptTracesQuery.isFetching || factSheetArtifactQuery.isFetching || recoverMutation.isPending} onClick={() => { runQuery.refetch(); logsQuery.refetch(); promptTracesQuery.refetch(); factSheetArtifactQuery.refetch(); }}>
               刷新
             </Button>
           </Space>
@@ -97,11 +127,21 @@ export function MarketMonitorRunDetailPage() {
           <Descriptions.Item label="完整度">{run.source_completeness || "-"}</Descriptions.Item>
           <Descriptions.Item label="Regime">{run.regime_label || "-"}</Descriptions.Item>
           <Descriptions.Item label="force_refresh">{run.request.force_refresh ? "true" : "false"}</Descriptions.Item>
+          <Descriptions.Item label="可恢复">{run.recoverable ? "是" : "否"}</Descriptions.Item>
+          <Descriptions.Item label="Prompt traces">{run.prompt_traces.length}</Descriptions.Item>
         </Descriptions>
         {run.error_message ? (
           <Alert type="error" showIcon style={{ marginTop: 16 }} message="运行失败" description={run.error_message} />
         ) : null}
       </Card>
+
+      <StageTimelineBlock stages={run.stage_results} />
+
+      <FactSheetBlock
+        factSheet={run.fact_sheet || snapshot?.fact_sheet || dataStatus?.fact_sheet || (factSheetArtifactQuery.data as never)}
+      />
+
+      <PromptTraceBlock traces={promptTracesQuery.data || run.prompt_traces} />
 
       {snapshot ? <ExecutionCardBlock card={snapshot.execution_card} /> : null}
 
@@ -135,18 +175,31 @@ export function MarketMonitorRunDetailPage() {
           <Col xs={24} lg={12}>
             <EventRiskBlock card={snapshot.event_risk_flag} />
           </Col>
-          <Col xs={24} lg={12}>
-            <DataStatusBlock
-              sourceCoverage={dataStatus?.source_coverage || snapshot.source_coverage}
-              degradedFactors={dataStatus?.degraded_factors || snapshot.degraded_factors}
-              notes={dataStatus?.notes || snapshot.notes}
-              openGaps={dataStatus?.open_gaps || []}
-            />
-          </Col>
+          {dataStatusSourceCoverage ? (
+            <Col xs={24} lg={12}>
+              <DataStatusBlock
+                sourceCoverage={dataStatusSourceCoverage}
+                degradedFactors={dataStatusDegradedFactors}
+                notes={dataStatusNotes}
+                openGaps={dataStatusOpenGaps}
+              />
+            </Col>
+          ) : null}
         </Row>
       ) : null}
 
+      {!snapshot && dataStatusSourceCoverage ? (
+        <DataStatusBlock
+          sourceCoverage={dataStatusSourceCoverage}
+          degradedFactors={dataStatusDegradedFactors}
+          notes={dataStatusNotes}
+          openGaps={dataStatusOpenGaps}
+        />
+      ) : null}
+
       {history ? <HistoryBlock points={history.points} /> : null}
+
+      {historyArtifacts.length ? <HistoryArtifactsBlock items={historyArtifacts} /> : null}
 
       <Card className="page-card" title="执行日志">
         <List

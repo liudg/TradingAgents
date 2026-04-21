@@ -25,6 +25,9 @@ MarketMonitorSymbolCacheState = Literal[
     "stale_fallback",
     "empty",
 ]
+MarketMonitorRunMode = Literal["snapshot", "history", "data_status", "debug_card"]
+MarketMonitorStageStatus = Literal["pending", "running", "completed", "failed", "skipped"]
+MarketMonitorConfidence = Literal["low", "medium", "high"]
 
 
 class MarketMonitorSymbolCacheMetadata(BaseModel):
@@ -71,11 +74,26 @@ class MarketMonitorSnapshotRequest(BaseModel):
         return value
 
 
+class MarketMonitorRunDebugOptions(BaseModel):
+    debug_card: str | None = None
+    reuse_fact_sheet: bool = False
+    replay_from_run_id: str | None = None
+
+
+class MarketMonitorRunLlmConfig(BaseModel):
+    provider: str | None = None
+    model: str | None = None
+    reasoning_effort: str | None = None
+
+
 class MarketMonitorRunRequest(BaseModel):
     trigger_endpoint: Literal["snapshot", "history", "data_status"]
     as_of_date: date | None = None
     days: int | None = Field(default=None, ge=1, le=60)
     force_refresh: bool = False
+    mode: MarketMonitorRunMode | None = None
+    debug_options: MarketMonitorRunDebugOptions | None = None
+    llm_config: MarketMonitorRunLlmConfig | None = None
 
     @field_validator("as_of_date")
     @classmethod
@@ -98,6 +116,23 @@ class MarketMonitorHistoryRequest(BaseModel):
         return value
 
 
+class MarketMonitorEvidenceRef(BaseModel):
+    source_type: str
+    source_label: str
+    snippet: str | None = None
+    timestamp: datetime | None = None
+    confidence: MarketMonitorConfidence | None = None
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class MarketMonitorReasoningFields(BaseModel):
+    reasoning_summary: str | None = None
+    key_drivers: list[str] = Field(default_factory=list)
+    risks: list[str] = Field(default_factory=list)
+    evidence_refs: list[MarketMonitorEvidenceRef] = Field(default_factory=list)
+    confidence: MarketMonitorConfidence | None = None
+
+
 class MarketMonitorLayerMetric(BaseModel):
     score: float = Field(..., ge=0, le=100)
     delta_5d: float
@@ -105,7 +140,7 @@ class MarketMonitorLayerMetric(BaseModel):
     preferred: bool | None = None
 
 
-class MarketMonitorScoreCard(BaseModel):
+class MarketMonitorScoreCard(MarketMonitorReasoningFields):
     score: float = Field(..., ge=0, le=100)
     zone: str
     delta_1d: float
@@ -142,7 +177,7 @@ class MarketMonitorStyleAssetLayer(BaseModel):
     avoid_assets: list[str] = Field(default_factory=list)
 
 
-class MarketMonitorStyleEffectiveness(BaseModel):
+class MarketMonitorStyleEffectiveness(MarketMonitorReasoningFields):
     tactic_layer: MarketMonitorStyleTacticLayer
     asset_layer: MarketMonitorStyleAssetLayer
 
@@ -166,7 +201,7 @@ class MarketMonitorStockEventRisk(BaseModel):
     rule: str | None = None
 
 
-class MarketMonitorEventRiskFlag(BaseModel):
+class MarketMonitorEventRiskFlag(MarketMonitorReasoningFields):
     index_level: MarketMonitorIndexEventRisk = Field(default_factory=MarketMonitorIndexEventRisk)
     stock_level: MarketMonitorStockEventRisk = Field(default_factory=MarketMonitorStockEventRisk)
 
@@ -177,7 +212,7 @@ class MarketMonitorSignalConfirmation(BaseModel):
     note: str
 
 
-class MarketMonitorExecutionCard(BaseModel):
+class MarketMonitorExecutionCard(MarketMonitorReasoningFields):
     regime_label: str
     conflict_mode: str
     total_exposure_range: str
@@ -196,7 +231,7 @@ class MarketMonitorExecutionCard(BaseModel):
     summary: str
 
 
-class MarketMonitorPanicCard(BaseModel):
+class MarketMonitorPanicCard(MarketMonitorReasoningFields):
     score: float = Field(..., ge=0, le=100)
     zone: str
     state: str
@@ -220,6 +255,62 @@ class MarketMonitorSourceCoverage(BaseModel):
     degraded: bool = False
 
 
+class MarketMonitorFactSheet(BaseModel):
+    as_of_date: date
+    generated_at: datetime
+    local_facts: dict[str, Any] = Field(default_factory=dict)
+    derived_metrics: dict[str, Any] = Field(default_factory=dict)
+    search_facts: list[dict[str, Any]] = Field(default_factory=list)
+    open_gaps: list[str] = Field(default_factory=list)
+    source_coverage: MarketMonitorSourceCoverage | None = None
+    evidence_refs: list[MarketMonitorEvidenceRef] = Field(default_factory=list)
+    notes: list[str] = Field(default_factory=list)
+
+
+class MarketMonitorPromptTrace(BaseModel):
+    stage: str
+    card_type: str | None = None
+    model: str | None = None
+    provider: str | None = None
+    input_summary: str | None = None
+    prompt_text: str | None = None
+    raw_response: str | None = None
+    parsed_ok: bool = False
+    latency_ms: int | None = None
+    token_usage: dict[str, int] = Field(default_factory=dict)
+    error: str | None = None
+    created_at: datetime = Field(default_factory=datetime.now)
+
+
+class MarketMonitorStageResult(BaseModel):
+    stage_name: str
+    status: MarketMonitorStageStatus = "pending"
+    started_at: datetime | None = None
+    finished_at: datetime | None = None
+    artifact_path: str | None = None
+    error: str | None = None
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class MarketMonitorRunManifest(BaseModel):
+    run_id: str
+    mode: MarketMonitorRunMode
+    request: MarketMonitorRunRequest
+    status: JobStatus
+    created_at: datetime
+    started_at: datetime | None = None
+    finished_at: datetime | None = None
+    results_dir: str
+    log_path: str
+    error_message: str | None = None
+    recoverable: bool = False
+    llm_config: MarketMonitorRunLlmConfig | None = None
+    debug_options: MarketMonitorRunDebugOptions | None = None
+    stage_results: list[MarketMonitorStageResult] = Field(default_factory=list)
+    artifact_paths: dict[str, str] = Field(default_factory=dict)
+    prompt_trace_count: int = 0
+
+
 class MarketMonitorSnapshotResponse(BaseModel):
     timestamp: datetime
     as_of_date: date
@@ -234,6 +325,8 @@ class MarketMonitorSnapshotResponse(BaseModel):
     source_coverage: MarketMonitorSourceCoverage
     degraded_factors: list[str] = Field(default_factory=list)
     notes: list[str] = Field(default_factory=list)
+    fact_sheet: MarketMonitorFactSheet | None = None
+    prompt_traces: list[MarketMonitorPromptTrace] = Field(default_factory=list)
     run_id: str | None = None
 
 
@@ -259,6 +352,7 @@ class MarketMonitorDataStatusResponse(BaseModel):
     degraded_factors: list[str] = Field(default_factory=list)
     notes: list[str] = Field(default_factory=list)
     open_gaps: list[str] = Field(default_factory=list)
+    fact_sheet: MarketMonitorFactSheet | None = None
     run_id: str | None = None
 
 
@@ -273,6 +367,7 @@ class HistoricalMarketMonitorRunSummary(BaseModel):
     source_completeness: Literal["high", "medium", "low"] | None = None
     regime_label: str | None = None
     degraded: bool = False
+    recoverable: bool = False
     error_message: str | None = None
     log_path: str | None = None
     results_dir: str | None = None
@@ -286,3 +381,7 @@ class HistoricalMarketMonitorRunDetail(HistoricalMarketMonitorRunSummary):
     snapshot: MarketMonitorSnapshotResponse | None = None
     history: MarketMonitorHistoryResponse | None = None
     data_status: MarketMonitorDataStatusResponse | None = None
+    fact_sheet: MarketMonitorFactSheet | None = None
+    manifest: MarketMonitorRunManifest | None = None
+    stage_results: list[MarketMonitorStageResult] = Field(default_factory=list)
+    prompt_traces: list[MarketMonitorPromptTrace] = Field(default_factory=list)

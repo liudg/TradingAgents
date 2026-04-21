@@ -30,6 +30,7 @@ from tradingagents.web.market_monitor.schemas import (
     MarketMonitorDataStatusResponse,
     MarketMonitorHistoryRequest,
     MarketMonitorHistoryResponse,
+    MarketMonitorPromptTrace,
     MarketMonitorSnapshotRequest,
     MarketMonitorSnapshotResponse,
 )
@@ -232,6 +233,42 @@ def get_market_monitor_run_logs(run_id: str) -> list[AnalysisJobLogEntry]:
         return market_monitor_manager.list_run_logs(run_id)
     except KeyError as exc:
         raise HTTPException(status_code=404, detail="Market monitor run not found") from exc
+
+
+@app.get(
+    "/api/market-monitor/runs/{run_id}/prompt-traces",
+    response_model=list[MarketMonitorPromptTrace],
+)
+def get_market_monitor_prompt_traces(run_id: str) -> list[MarketMonitorPromptTrace]:
+    try:
+        return market_monitor_manager.list_prompt_traces(run_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="Market monitor run not found") from exc
+
+
+@app.get("/api/market-monitor/runs/{run_id}/artifacts/{artifact_name}")
+def get_market_monitor_artifact(run_id: str, artifact_name: str) -> dict:
+    try:
+        return market_monitor_manager.read_artifact_payload(run_id, artifact_name)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="Market monitor run not found") from exc
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail="Market monitor artifact not found") from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.post(
+    "/api/market-monitor/runs/{run_id}/recover",
+    response_model=HistoricalMarketMonitorRunDetail,
+)
+def recover_market_monitor_run(run_id: str) -> HistoricalMarketMonitorRunDetail:
+    try:
+        return market_monitor_manager.recover_run(run_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="Market monitor run not found") from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
 
 
 def run_api() -> None:

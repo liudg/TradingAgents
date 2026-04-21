@@ -2,6 +2,8 @@ import {
   Alert,
   Button,
   Card,
+  Collapse,
+  Descriptions,
   List,
   Popover,
   Progress,
@@ -15,10 +17,14 @@ import { type ReactNode } from "react";
 import {
   MarketMonitorExecutionCard,
   MarketMonitorEventRiskFlag,
+  MarketMonitorFactSheet,
+  MarketMonitorHistoryDailyArtifactItem,
   MarketMonitorHistoryPoint,
   MarketMonitorPanicCard,
+  MarketMonitorPromptTrace,
   MarketMonitorScoreCard,
   MarketMonitorSourceCoverage,
+  MarketMonitorStageResult,
   MarketMonitorStyleEffectiveness,
   MarketMonitorSystemRiskCard,
 } from "../api/types";
@@ -70,6 +76,29 @@ function boolTag(label: string, value: boolean) {
   return <Tag color={value ? "success" : "error"}>{label} {value ? "允许" : "禁止"}</Tag>;
 }
 
+function renderReasoningBlock(card: {
+  reasoning_summary?: string | null;
+  key_drivers?: string[];
+  risks?: string[];
+  confidence?: string | null;
+}) {
+  if (!card.reasoning_summary && !card.key_drivers?.length && !card.risks?.length && !card.confidence) {
+    return null;
+  }
+  return (
+    <Space direction="vertical" size={8} style={{ width: "100%" }}>
+      {card.reasoning_summary ? <Typography.Text>{card.reasoning_summary}</Typography.Text> : null}
+      {card.confidence ? <Tag color="purple">置信度 {card.confidence}</Tag> : null}
+      {card.key_drivers?.length ? (
+        <List size="small" header="关键驱动" dataSource={card.key_drivers} renderItem={(item) => <List.Item>{item}</List.Item>} />
+      ) : null}
+      {card.risks?.length ? (
+        <List size="small" header="风险与缺口" dataSource={card.risks} renderItem={(item) => <List.Item>{item}</List.Item>} />
+      ) : null}
+    </Space>
+  );
+}
+
 export function ScoreCardBlock(props: {
   title: string;
   helpKey: MarketMonitorCardHelpKey;
@@ -97,6 +126,7 @@ export function ScoreCardBlock(props: {
             <Tag>风险偏好 {props.card.risk_appetite_score.toFixed(1)}</Tag>
           </Space>
         ) : null}
+        {renderReasoningBlock(props.card)}
       </Space>
     </Card>
   );
@@ -130,6 +160,7 @@ export function ExecutionCardBlock(props: { card: MarketMonitorExecutionCard }) 
           <Typography.Text type="secondary">回避方向：{props.card.avoid_assets.join("、")}</Typography.Text>
         ) : null}
         <Typography.Text type="secondary">确认状态：{props.card.signal_confirmation.note}</Typography.Text>
+        {renderReasoningBlock(props.card)}
       </Space>
     </Card>
   );
@@ -179,6 +210,7 @@ export function StyleCardBlock(props: { card: MarketMonitorStyleEffectiveness })
             <List.Item>{name}：{item.score.toFixed(1)}（5日 {item.delta_5d >= 0 ? "+" : ""}{item.delta_5d.toFixed(1)}）</List.Item>
           )}
         />
+        {renderReasoningBlock(props.card)}
       </Space>
     </Card>
   );
@@ -209,6 +241,7 @@ export function PanicCardBlock(props: { card: MarketMonitorPanicCard }) {
         {props.card.system_risk_override ? (
           <Alert type="warning" showIcon message={props.card.system_risk_override} />
         ) : null}
+        {renderReasoningBlock(props.card)}
       </Space>
     </Card>
   );
@@ -242,6 +275,7 @@ export function EventRiskBlock(props: { card: MarketMonitorEventRiskFlag }) {
         {props.card.stock_level.rule ? (
           <Typography.Text type="secondary">{props.card.stock_level.rule}</Typography.Text>
         ) : null}
+        {renderReasoningBlock(props.card)}
       </Space>
     </Card>
   );
@@ -295,6 +329,114 @@ export function HistoryBlock(props: { points: MarketMonitorHistoryPoint[] }) {
             </Space>
           </List.Item>
         )}
+      />
+    </Card>
+  );
+}
+
+export function HistoryArtifactsBlock(props: { items: MarketMonitorHistoryDailyArtifactItem[] }) {
+  return (
+    <Card className="page-card" title="History 日级产物">
+      <List
+        size="small"
+        dataSource={props.items}
+        locale={{ emptyText: "暂无日级产物" }}
+        renderItem={(item) => (
+          <List.Item>
+            <Space wrap style={{ width: "100%", justifyContent: "space-between" }}>
+              <Typography.Text strong>{item.tradeDate}</Typography.Text>
+              <Space wrap>
+                <Tag color={item.artifactType === "snapshot" ? "blue" : "purple"}>
+                  {item.artifactType === "snapshot" ? "snapshot" : "fact_sheet"}
+                </Tag>
+                <Typography.Text copyable>{item.artifactName}</Typography.Text>
+              </Space>
+            </Space>
+          </List.Item>
+        )}
+      />
+    </Card>
+  );
+}
+
+export function StageTimelineBlock(props: { stages: MarketMonitorStageResult[] }) {
+  return (
+    <Card className="page-card" title="阶段时间线">
+      <List
+        size="small"
+        dataSource={props.stages}
+        locale={{ emptyText: "暂无阶段信息" }}
+        renderItem={(stage) => (
+          <List.Item>
+            <Space direction="vertical" size={4} style={{ width: "100%" }}>
+              <Space wrap>
+                <Typography.Text strong>{stage.stage_name}</Typography.Text>
+                <Tag>{stage.status}</Tag>
+                {stage.started_at ? <Tag>开始 {stage.started_at}</Tag> : null}
+                {stage.finished_at ? <Tag>结束 {stage.finished_at}</Tag> : null}
+              </Space>
+              {stage.error ? <Alert type="error" showIcon message={stage.error} /> : null}
+            </Space>
+          </List.Item>
+        )}
+      />
+    </Card>
+  );
+}
+
+export function FactSheetBlock(props: { factSheet?: MarketMonitorFactSheet | null }) {
+  if (!props.factSheet) {
+    return null;
+  }
+  return (
+    <Card className="page-card" title="Fact Sheet">
+      <Descriptions bordered size="small" column={1}>
+        <Descriptions.Item label="交易日">{props.factSheet.as_of_date}</Descriptions.Item>
+        <Descriptions.Item label="生成时间">{props.factSheet.generated_at}</Descriptions.Item>
+        <Descriptions.Item label="Open gaps">{props.factSheet.open_gaps.join("、") || "无"}</Descriptions.Item>
+        <Descriptions.Item label="Notes">{props.factSheet.notes.join("、") || "无"}</Descriptions.Item>
+      </Descriptions>
+      <Collapse
+        style={{ marginTop: 16 }}
+        items={[
+          {
+            key: "derived_metrics",
+            label: "Derived metrics",
+            children: <pre style={{ whiteSpace: "pre-wrap", margin: 0 }}>{JSON.stringify(props.factSheet.derived_metrics, null, 2)}</pre>,
+          },
+          {
+            key: "local_facts",
+            label: "Local facts",
+            children: <pre style={{ whiteSpace: "pre-wrap", margin: 0 }}>{JSON.stringify(props.factSheet.local_facts, null, 2)}</pre>,
+          },
+        ]}
+      />
+    </Card>
+  );
+}
+
+export function PromptTraceBlock(props: { traces: MarketMonitorPromptTrace[] }) {
+  return (
+    <Card className="page-card" title="Prompt Traces">
+      <Collapse
+        items={props.traces.map((trace, index) => ({
+          key: `${trace.stage}-${trace.card_type || index}`,
+          label: `${trace.stage}${trace.card_type ? ` / ${trace.card_type}` : ""}`,
+          children: (
+            <Space direction="vertical" size={8} style={{ width: "100%" }}>
+              <Space wrap>
+                <Tag>{trace.model || "unknown model"}</Tag>
+                <Tag color={trace.parsed_ok ? "success" : "error"}>{trace.parsed_ok ? "parsed" : "fallback"}</Tag>
+                {trace.provider ? <Tag>{trace.provider}</Tag> : null}
+                {trace.latency_ms ? <Tag>{trace.latency_ms} ms</Tag> : null}
+              </Space>
+              {trace.input_summary ? <Typography.Text>{trace.input_summary}</Typography.Text> : null}
+              {trace.error ? <Alert type="error" showIcon message={trace.error} /> : null}
+              {trace.prompt_text ? <pre style={{ whiteSpace: "pre-wrap", margin: 0 }}>{trace.prompt_text}</pre> : null}
+              {trace.raw_response ? <pre style={{ whiteSpace: "pre-wrap", margin: 0 }}>{trace.raw_response}</pre> : null}
+            </Space>
+          ),
+        }))}
       />
     </Card>
   );

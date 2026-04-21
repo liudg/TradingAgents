@@ -6,6 +6,9 @@ from typing import Any
 import pandas as pd
 
 from .data import _expected_market_close_date, build_market_dataset
+from .fact_sheet import build_market_fact_sheet
+from .inference.cards import MarketMonitorCardInferenceService
+from .inference.execution import MarketMonitorExecutionInferenceService
 from .indicators import bounded_score, percent_change, rolling_percentile, slope_state, sma, zone_from_score
 from .metrics import build_market_snapshot
 from .schemas import (
@@ -19,6 +22,7 @@ from .schemas import (
     MarketMonitorIndexEventRisk,
     MarketMonitorLayerMetric,
     MarketMonitorPanicCard,
+    MarketMonitorRunLlmConfig,
     MarketMonitorScoreCard,
     MarketMonitorSignalConfirmation,
     MarketMonitorSnapshotRequest,
@@ -45,8 +49,10 @@ def _series(frame: pd.DataFrame, column: str = "Close") -> pd.Series:
 
 
 class MarketMonitorSnapshotService:
-    def __init__(self) -> None:
+    def __init__(self, llm_config: MarketMonitorRunLlmConfig | None = None) -> None:
         self._universe = get_market_monitor_universe()
+        self._inference = MarketMonitorCardInferenceService(llm_config)
+        self._execution_inference = MarketMonitorExecutionInferenceService(llm_config)
 
     def get_snapshot(self, request: MarketMonitorSnapshotRequest) -> MarketMonitorSnapshotResponse:
         as_of_date = request.as_of_date or date.today()
@@ -55,17 +61,45 @@ class MarketMonitorSnapshotService:
 
     def get_history(self, request: MarketMonitorHistoryRequest) -> MarketMonitorHistoryResponse:
         as_of_date = request.as_of_date or date.today()
-        points: list[MarketMonitorHistoryPoint] = []
+        snapshots = self.get_history_snapshots(request)
+        return self.build_history_response(as_of_date, snapshots)
+
+    def resolve_history_trade_dates(self, request: MarketMonitorHistoryRequest) -> list[date]:
+        as_of_date = request.as_of_date or date.today()
+        trade_dates: list[date] = []
         cursor = as_of_date
         attempts = 0
-        while len(points) < request.days and attempts < request.days * 3:
+        while len(trade_dates) < request.days and attempts < request.days * 3:
             attempts += 1
             if _expected_market_close_date(cursor).date() != cursor:
                 cursor -= timedelta(days=1)
                 continue
-            dataset = build_market_dataset(self._universe, cursor, force_refresh=request.force_refresh)
-            snapshot = self._build_snapshot(cursor, dataset)
-            points.append(
+            trade_dates.append(cursor)
+            cursor -= timedelta(days=1)
+        trade_dates.sort()
+        return trade_dates
+
+    def get_history_snapshots(
+        self,
+        request: MarketMonitorHistoryRequest,
+        trade_dates: list[date] | None = None,
+    ) -> list[MarketMonitorSnapshotResponse]:
+        dates_to_build = trade_dates or self.resolve_history_trade_dates(request)
+        snapshots: list[MarketMonitorSnapshotResponse] = []
+        for trade_date in dates_to_build:
+            dataset = build_market_dataset(self._universe, trade_date, force_refresh=request.force_refresh)
+            snapshots.append(self._build_snapshot(trade_date, dataset))
+        snapshots.sort(key=lambda item: item.as_of_date)
+        return snapshots
+
+    def build_history_response(
+        self,
+        as_of_date: date,
+        snapshots: list[MarketMonitorSnapshotResponse],
+    ) -> MarketMonitorHistoryResponse:
+        return MarketMonitorHistoryResponse(
+            as_of_date=as_of_date,
+            points=[
                 MarketMonitorHistoryPoint(
                     trade_date=snapshot.as_of_date,
                     long_term_score=snapshot.long_term_score.score,
@@ -74,10 +108,9 @@ class MarketMonitorSnapshotService:
                     panic_score=snapshot.panic_reversal_score.score,
                     regime_label=snapshot.execution_card.regime_label,
                 )
-            )
-            cursor -= timedelta(days=1)
-        points.sort(key=lambda item: item.trade_date)
-        return MarketMonitorHistoryResponse(as_of_date=as_of_date, points=points)
+                for snapshot in snapshots
+            ],
+        )
 
     def get_data_status(self, request: MarketMonitorSnapshotRequest) -> MarketMonitorDataStatusResponse:
         as_of_date = request.as_of_date or date.today()
@@ -91,24 +124,68 @@ class MarketMonitorSnapshotService:
             degraded_factors=snapshot.degraded_factors,
             notes=snapshot.notes,
             open_gaps=gaps,
+            fact_sheet=snapshot.fact_sheet,
         )
 
     def _build_snapshot(self, as_of_date: date, dataset: dict[str, Any]) -> MarketMonitorSnapshotResponse:
         core_data = dataset["core"]
         cache_summary = dataset.get("cache_summary", {})
         local_market_data, derived_metrics = build_market_snapshot(core_data, self._universe["market_proxies"])
-        long_term = self._build_long_term_card(core_data, derived_metrics)
-        short_term = self._build_short_term_card(core_data)
-        system_risk = self._build_system_risk_card(core_data, derived_metrics)
-        style = self._build_style_effectiveness(core_data)
-        event_risk = self._build_event_risk(as_of_date)
-        execution = self._build_execution_card(long_term, short_term, system_risk, style, event_risk)
-        panic = self._build_panic_card(core_data, system_risk.score)
         source_coverage, degraded_factors, notes = self._build_data_quality(cache_summary, core_data)
+        open_gaps = self._build_open_gaps(core_data)
         expected_close = _expected_market_close_date(as_of_date)
+        timestamp = datetime.now(timezone.utc)
         data_freshness = "delayed_15min" if expected_close.date() == as_of_date else "previous_trading_day"
+        fact_sheet = build_market_fact_sheet(
+            as_of_date=as_of_date,
+            generated_at=timestamp,
+            core_data=core_data,
+            local_market_data=local_market_data,
+            derived_metrics=derived_metrics,
+            source_coverage=source_coverage,
+            open_gaps=open_gaps,
+            notes=notes,
+        )
+        long_term_fallback = lambda: self._build_long_term_card(core_data, derived_metrics)
+        short_term_fallback = lambda: self._build_short_term_card(core_data)
+        system_risk_fallback = lambda: self._build_system_risk_card(core_data, derived_metrics)
+        style_fallback = lambda: self._build_style_effectiveness(core_data)
+        event_risk_fallback = lambda: self._build_event_risk(as_of_date)
+        long_term_result = self._inference.infer_long_term(fact_sheet, long_term_fallback)
+        short_term_result = self._inference.infer_short_term(fact_sheet, short_term_fallback)
+        system_risk_result = self._inference.infer_system_risk(fact_sheet, system_risk_fallback)
+        style_result = self._inference.infer_style(fact_sheet, style_fallback)
+        event_risk_result = self._inference.infer_event_risk(fact_sheet, event_risk_fallback)
+        long_term = long_term_result.payload
+        short_term = short_term_result.payload
+        system_risk = system_risk_result.payload
+        style = style_result.payload
+        event_risk = event_risk_result.payload
+        execution_fallback = lambda: self._build_execution_card(long_term, short_term, system_risk, style, event_risk)
+        execution_result = self._execution_inference.infer_execution(
+            fact_sheet=fact_sheet,
+            long_term=long_term,
+            short_term=short_term,
+            system_risk=system_risk,
+            style=style,
+            event_risk=event_risk,
+            fallback=execution_fallback,
+        )
+        execution = execution_result.payload
+        panic_fallback = lambda: self._build_panic_card(core_data, system_risk.score)
+        panic_result = self._inference.infer_panic(fact_sheet, panic_fallback)
+        panic = panic_result.payload
+        prompt_traces = [
+            long_term_result.trace,
+            short_term_result.trace,
+            system_risk_result.trace,
+            style_result.trace,
+            event_risk_result.trace,
+            panic_result.trace,
+            execution_result.trace,
+        ]
         return MarketMonitorSnapshotResponse(
-            timestamp=datetime.now(timezone.utc),
+            timestamp=timestamp,
             as_of_date=as_of_date,
             data_freshness=data_freshness,
             long_term_score=long_term,
@@ -121,6 +198,8 @@ class MarketMonitorSnapshotService:
             source_coverage=source_coverage,
             degraded_factors=degraded_factors,
             notes=notes,
+            fact_sheet=fact_sheet,
+            prompt_traces=prompt_traces,
         )
 
     def _build_long_term_card(self, core_data: dict[str, pd.DataFrame], derived_metrics: dict[str, Any]) -> MarketMonitorScoreCard:
