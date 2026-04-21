@@ -8,14 +8,35 @@ Use Python 3.10+ and install locally. When running Python commands for this repo
 ```bash
 .venv\Scripts\python.exe -m pip install .
 ```
+On Windows, prefer the repository PowerShell helpers for first-time setup:
+```powershell
+.\scripts\create_venv.ps1
+.\scripts\install_deps.ps1
+```
 Run the interactive CLI:
 ```bash
 tradingagents
 .venv\Scripts\python.exe -m cli.main
 ```
+Start the FastAPI backend with the maintained script or the packaged entry point:
+```powershell
+.\scripts\start_api.ps1
+.\.venv\Scripts\tradingagents-api.exe
+```
+To bring up the local web stack during development, use:
+```powershell
+.\scripts\start_web_stack.ps1
+```
 Run tests with standard library discovery:
 ```bash
 .venv\Scripts\python.exe -m unittest discover -s tests
+```
+Frontend work happens under `web-ui/` with Vite:
+```bash
+cd web-ui
+npm run dev
+npm run build
+npm run test
 ```
 For quick package smoke checks, run:
 ```bash
@@ -29,6 +50,7 @@ Read and write project text files explicitly as UTF-8 whenever the tool allows s
 
 ## Testing Guidelines
 Tests are written with `unittest` and named `tests/test_*.py`. Always run them with `.venv\Scripts\python.exe` so dependencies and interpreter behavior match the project environment. Keep test classes descriptive (`ModelValidationTests`) and test methods behavior-focused (`test_unknown_model_emits_warning_for_strict_provider`). Add regression tests for bug fixes in the package area you modify, especially model validation, ticker normalization, and API-key handling.
+For the React/Vite frontend in `web-ui/`, run `npm run test` for component and config regressions when touching that surface.
 
 ## Commit & Pull Request Guidelines
 Recent history follows Conventional Commit prefixes such as `feat:`, `fix:`, `refactor:`, and `chore:`, sometimes with scopes like `fix(llm_clients): ...`. Use concise, imperative commit subjects and reference issue/PR numbers when relevant. Pull requests should describe the behavior change, list test commands run, call out config or API-key implications, and include CLI screenshots when UI output changes.

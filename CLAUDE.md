@@ -19,9 +19,15 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
   - `.venv\Scripts\python.exe -m cli.main`
 - FastAPI backend:
   - `powershell -File .\scripts\start_api.ps1`
+  - `.venv\Scripts\tradingagents-api.exe`
   - With custom host/port and reload: `powershell -File .\scripts\start_api.ps1 -BindHost 127.0.0.1 -Port 8000 -Reload`
 - Combined backend + frontend launcher:
   - `powershell -File .\scripts\start_web_stack.ps1`
+  - With custom host/API port/web port and reload: `powershell -File .\scripts\start_web_stack.ps1 -BindHost 127.0.0.1 -ApiPort 8000 -WebPort 5173 -Reload`
+  - If `web-ui/node_modules` is missing, this script installs frontend dependencies before launching.
+  - If `scripts\sync_codex_to_cliproxy.ps1` exists, it also tries to refresh local Codex auth and restart CLIProxyAPI before starting the backend and frontend; startup continues if that step fails.
+- Local Codex/CLIProxy sync helper:
+  - `powershell -File .\scripts\sync_codex_to_cliproxy.ps1`
 - Package smoke test/example run:
   - `.venv\Scripts\python.exe main.py`
 

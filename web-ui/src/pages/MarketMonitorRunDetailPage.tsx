@@ -174,29 +174,24 @@ export function MarketMonitorRunDetailPage() {
       {snapshot ? (
         <Row gutter={[16, 16]}>
           <Col xs={24} lg={12}>
-            <StyleCardBlock card={snapshot.style_effectiveness} />
+            <Space direction="vertical" size={16} style={{ width: "100%" }}>
+              <StyleCardBlock card={snapshot.style_effectiveness} />
+              <EventRiskBlock card={snapshot.event_risk_flag} />
+            </Space>
           </Col>
           <Col xs={24} lg={12}>
-            <PanicCardBlock card={snapshot.panic_reversal_score} />
+            <Space direction="vertical" size={16} style={{ width: "100%" }}>
+              <PanicCardBlock card={snapshot.panic_reversal_score} />
+              {dataStatusSourceCoverage ? (
+                <DataStatusBlock
+                  sourceCoverage={dataStatusSourceCoverage}
+                  degradedFactors={dataStatusDegradedFactors}
+                  notes={dataStatusNotes}
+                  openGaps={dataStatusOpenGaps}
+                />
+              ) : null}
+            </Space>
           </Col>
-        </Row>
-      ) : null}
-
-      {snapshot ? (
-        <Row gutter={[16, 16]}>
-          <Col xs={24} lg={12}>
-            <EventRiskBlock card={snapshot.event_risk_flag} />
-          </Col>
-          {dataStatusSourceCoverage ? (
-            <Col xs={24} lg={12}>
-              <DataStatusBlock
-                sourceCoverage={dataStatusSourceCoverage}
-                degradedFactors={dataStatusDegradedFactors}
-                notes={dataStatusNotes}
-                openGaps={dataStatusOpenGaps}
-              />
-            </Col>
-          ) : null}
         </Row>
       ) : null}
 

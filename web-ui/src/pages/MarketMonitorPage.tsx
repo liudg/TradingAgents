@@ -119,24 +119,21 @@ export function MarketMonitorPage() {
 
       <Row gutter={[16, 16]}>
         <Col xs={24} lg={12}>
-          <StyleCardBlock card={snapshot.style_effectiveness} />
+          <Space direction="vertical" size={16} style={{ width: "100%" }}>
+            <StyleCardBlock card={snapshot.style_effectiveness} />
+            <EventRiskBlock card={snapshot.event_risk_flag} />
+          </Space>
         </Col>
         <Col xs={24} lg={12}>
-          <PanicCardBlock card={snapshot.panic_reversal_score} />
-        </Col>
-      </Row>
-
-      <Row gutter={[16, 16]}>
-        <Col xs={24} lg={12}>
-          <EventRiskBlock card={snapshot.event_risk_flag} />
-        </Col>
-        <Col xs={24} lg={12}>
-          <DataStatusBlock
-            sourceCoverage={dataStatus?.source_coverage || snapshot.source_coverage}
-            degradedFactors={dataStatus?.degraded_factors || snapshot.degraded_factors}
-            notes={dataStatus?.notes || snapshot.notes}
-            openGaps={dataStatus?.open_gaps || snapshot.fact_sheet?.open_gaps || []}
-          />
+          <Space direction="vertical" size={16} style={{ width: "100%" }}>
+            <PanicCardBlock card={snapshot.panic_reversal_score} />
+            <DataStatusBlock
+              sourceCoverage={dataStatus?.source_coverage || snapshot.source_coverage}
+              degradedFactors={dataStatus?.degraded_factors || snapshot.degraded_factors}
+              notes={dataStatus?.notes || snapshot.notes}
+              openGaps={dataStatus?.open_gaps || snapshot.fact_sheet?.open_gaps || []}
+            />
+          </Space>
         </Col>
       </Row>
 
