@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   createAnalysisJob,
   createBacktestJob,
+  createMarketMonitorRun,
   fetchAnalysisJob,
   fetchAnalysisJobLogs,
   fetchAnalysisReport,
@@ -23,7 +24,7 @@ import {
   fetchMetadataOptions,
   recoverMarketMonitorRun,
 } from "./client";
-import { AnalysisJobRequest, BacktestJobRequest, JobStatus } from "./types";
+import { AnalysisJobRequest, BacktestJobRequest, JobStatus, MarketMonitorRunRequest } from "./types";
 
 const activeStatuses: JobStatus[] = ["pending", "running"];
 
@@ -159,6 +160,17 @@ export function useMarketMonitorDataStatus(
   return useQuery({
     queryKey: ["market-monitor-data-status", asOfDate ?? null, forceRefresh, refreshKey],
     queryFn: () => fetchMarketMonitorDataStatus(asOfDate, forceRefresh),
+  });
+}
+
+export function useCreateMarketMonitorRun() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (payload: MarketMonitorRunRequest) => createMarketMonitorRun(payload),
+    onSuccess: (data) => {
+      queryClient.setQueryData(["market-monitor-run", data.run_id], data);
+      queryClient.invalidateQueries({ queryKey: ["market-monitor-runs"] });
+    },
   });
 }
 

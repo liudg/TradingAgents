@@ -31,6 +31,7 @@ from tradingagents.web.market_monitor.schemas import (
     MarketMonitorHistoryRequest,
     MarketMonitorHistoryResponse,
     MarketMonitorPromptTrace,
+    MarketMonitorRunRequest,
     MarketMonitorSnapshotRequest,
     MarketMonitorSnapshotResponse,
 )
@@ -211,6 +212,16 @@ def get_market_monitor_data_status(
 @app.get("/api/market-monitor/runs", response_model=list[HistoricalMarketMonitorRunSummary])
 def list_market_monitor_runs() -> list[HistoricalMarketMonitorRunSummary]:
     return market_monitor_manager.list_historical_runs()
+
+
+@app.post("/api/market-monitor/runs", response_model=HistoricalMarketMonitorRunDetail)
+def create_market_monitor_run(request: MarketMonitorRunRequest) -> HistoricalMarketMonitorRunDetail:
+    try:
+        return market_monitor_manager.create_run(request)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="Market monitor run not found") from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @app.get(

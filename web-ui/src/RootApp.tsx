@@ -10,6 +10,7 @@ import { HistoricalMarketMonitorRunsPage } from "./pages/HistoricalMarketMonitor
 import { HistoricalReportDetailPage } from "./pages/HistoricalReportDetailPage";
 import { HistoricalReportsPage } from "./pages/HistoricalReportsPage";
 import { JobDetailPage } from "./pages/JobDetailPage";
+import { MarketMonitorCreatePage } from "./pages/MarketMonitorCreatePage";
 import { MarketMonitorPage } from "./pages/MarketMonitorPage";
 import { MarketMonitorRunDetailPage } from "./pages/MarketMonitorRunDetailPage";
 
@@ -31,6 +32,7 @@ export function RootApp() {
             <Route path="/" element={<Navigate to="/monitor" replace />} />
             <Route path="/analysis" element={<CreateJobPage />} />
             <Route path="/monitor" element={<MarketMonitorPage />} />
+            <Route path="/monitor/create" element={<MarketMonitorCreatePage />} />
             <Route path="/monitor/history" element={<HistoricalMarketMonitorRunsPage />} />
             <Route path="/monitor/runs/:runId" element={<MarketMonitorRunDetailPage />} />
             <Route path="/jobs/:jobId" element={<JobDetailPage />} />

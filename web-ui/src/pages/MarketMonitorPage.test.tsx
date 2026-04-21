@@ -160,6 +160,8 @@ function buildSnapshot() {
     },
     degraded_factors: ["广度因子使用 ETF 代理池近似"],
     notes: ["已按代理池与降级规则输出结果。"],
+    fact_sheet: null,
+    prompt_traces: [],
   };
 }
 
@@ -215,6 +217,7 @@ describe("MarketMonitorPage", () => {
     expect(screen.getByText("执行动作卡")).toBeInTheDocument();
     expect(screen.getByText("风格有效性卡")).toBeInTheDocument();
     expect(screen.getByText("历史趋势回看")).toBeInTheDocument();
+    expect(screen.getByText("新建运行")).toBeInTheDocument();
     expect(screen.getByText("查看本次运行详情")).toBeInTheDocument();
     expect(screen.getByText("查看历史记录")).toBeInTheDocument();
     expect(screen.getAllByText("广度因子使用 ETF 代理池近似").length).toBeGreaterThan(0);

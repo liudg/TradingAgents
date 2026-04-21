@@ -5,7 +5,7 @@ from typing import Any
 
 import pandas as pd
 
-from .indicators import latest_close, percent_change
+from .indicators import _column_series, latest_close, percent_change
 from .schemas import (
     MarketMonitorEvidenceRef,
     MarketMonitorFactSheet,
@@ -20,13 +20,14 @@ def _frame_to_market_fact(symbol: str, frame: pd.DataFrame) -> dict[str, Any]:
             "available": False,
             "rows": 0,
         }
+    close = _column_series(frame, "Close")
     return {
         "symbol": symbol,
         "available": True,
         "rows": int(len(frame.index)),
         "latest_close": latest_close(frame),
-        "change_5d_pct": round(percent_change(frame["Close"], 5), 2) if "Close" in frame else 0.0,
-        "change_20d_pct": round(percent_change(frame["Close"], 20), 2) if "Close" in frame else 0.0,
+        "change_5d_pct": round(percent_change(close, 5), 2),
+        "change_20d_pct": round(percent_change(close, 20), 2),
         "last_trade_date": frame.index.max().date().isoformat() if isinstance(frame.index, pd.Index) and len(frame.index) else None,
     }
 

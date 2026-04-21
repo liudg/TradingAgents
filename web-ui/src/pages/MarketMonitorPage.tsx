@@ -85,10 +85,11 @@ export function MarketMonitorPage() {
           </Space>
           <Typography.Text>{snapshot.execution_card.summary}</Typography.Text>
           <Space wrap>
+            <Button type="primary" onClick={() => navigate("/monitor/create")}>新建运行</Button>
             {snapshot.run_id ? (
               <Button onClick={() => navigate(`/monitor/runs/${snapshot.run_id}`)}>查看本次运行详情</Button>
             ) : null}
-            {snapshot.prompt_traces.length ? <Tag color="purple">Prompt Trace {snapshot.prompt_traces.length}</Tag> : null}
+            {snapshot.prompt_traces?.length ? <Tag color="purple">Prompt Trace {snapshot.prompt_traces.length}</Tag> : null}
             <Button onClick={() => navigate("/monitor/history")}>查看历史记录</Button>
           </Space>
           {snapshot.degraded_factors.length ? (

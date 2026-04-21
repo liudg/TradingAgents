@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import date, datetime
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 from tradingagents.web.schemas import JobStatus
 
@@ -28,6 +28,15 @@ MarketMonitorSymbolCacheState = Literal[
 MarketMonitorRunMode = Literal["snapshot", "history", "data_status", "debug_card"]
 MarketMonitorStageStatus = Literal["pending", "running", "completed", "failed", "skipped"]
 MarketMonitorConfidence = Literal["low", "medium", "high"]
+MarketMonitorDebugCardType = Literal[
+    "long_term",
+    "short_term",
+    "system_risk",
+    "style",
+    "event_risk",
+    "panic",
+    "execution",
+]
 
 
 class MarketMonitorSymbolCacheMetadata(BaseModel):
@@ -75,9 +84,15 @@ class MarketMonitorSnapshotRequest(BaseModel):
 
 
 class MarketMonitorRunDebugOptions(BaseModel):
-    debug_card: str | None = None
+    debug_card: MarketMonitorDebugCardType | None = None
     reuse_fact_sheet: bool = False
     replay_from_run_id: str | None = None
+
+    @model_validator(mode="after")
+    def validate_replay_requirements(self) -> "MarketMonitorRunDebugOptions":
+        if self.reuse_fact_sheet and not self.replay_from_run_id:
+            raise ValueError("reuse_fact_sheet=true 时必须提供 replay_from_run_id")
+        return self
 
 
 class MarketMonitorRunLlmConfig(BaseModel):
@@ -87,7 +102,7 @@ class MarketMonitorRunLlmConfig(BaseModel):
 
 
 class MarketMonitorRunRequest(BaseModel):
-    trigger_endpoint: Literal["snapshot", "history", "data_status"]
+    trigger_endpoint: Literal["snapshot", "history", "data_status", "debug_card"]
     as_of_date: date | None = None
     days: int | None = Field(default=None, ge=1, le=60)
     force_refresh: bool = False
@@ -101,6 +116,13 @@ class MarketMonitorRunRequest(BaseModel):
         if value and value > date.today():
             raise ValueError("as_of_date 不能晚于今天")
         return value
+
+    @model_validator(mode="after")
+    def validate_debug_options(self) -> "MarketMonitorRunRequest":
+        if self.trigger_endpoint == "debug_card":
+            if self.debug_options is None or self.debug_options.debug_card is None:
+                raise ValueError("debug_card 运行缺少 debug_options.debug_card")
+        return self
 
 
 class MarketMonitorHistoryRequest(BaseModel):
@@ -282,6 +304,15 @@ class MarketMonitorPromptTrace(BaseModel):
     created_at: datetime = Field(default_factory=datetime.now)
 
 
+class MarketMonitorDebugCardResponse(BaseModel):
+    card_type: MarketMonitorDebugCardType
+    as_of_date: date
+    fact_sheet_reused: bool = False
+    fact_sheet_source_run_id: str | None = None
+    result: dict[str, Any] = Field(default_factory=dict)
+    prompt_traces: list[MarketMonitorPromptTrace] = Field(default_factory=list)
+
+
 class MarketMonitorStageResult(BaseModel):
     stage_name: str
     status: MarketMonitorStageStatus = "pending"
@@ -358,7 +389,7 @@ class MarketMonitorDataStatusResponse(BaseModel):
 
 class HistoricalMarketMonitorRunSummary(BaseModel):
     run_id: str
-    trigger_endpoint: Literal["snapshot", "history", "data_status"]
+    trigger_endpoint: Literal["snapshot", "history", "data_status", "debug_card"]
     as_of_date: date
     days: int | None = None
     status: JobStatus
@@ -381,6 +412,7 @@ class HistoricalMarketMonitorRunDetail(HistoricalMarketMonitorRunSummary):
     snapshot: MarketMonitorSnapshotResponse | None = None
     history: MarketMonitorHistoryResponse | None = None
     data_status: MarketMonitorDataStatusResponse | None = None
+    debug_card: MarketMonitorDebugCardResponse | None = None
     fact_sheet: MarketMonitorFactSheet | None = None
     manifest: MarketMonitorRunManifest | None = None
     stage_results: list[MarketMonitorStageResult] = Field(default_factory=list)

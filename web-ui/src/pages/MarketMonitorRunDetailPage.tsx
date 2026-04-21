@@ -143,6 +143,18 @@ export function MarketMonitorRunDetailPage() {
 
       <PromptTraceBlock traces={promptTracesQuery.data || run.prompt_traces} />
 
+      {run.debug_card ? (
+        <Card className="page-card" title={`调试卡结果 · ${run.debug_card.card_type}`}>
+          <Space direction="vertical" size="middle" style={{ width: "100%" }}>
+            <Typography.Text>
+              复用 fact sheet：{run.debug_card.fact_sheet_reused ? "是" : "否"}
+              {run.debug_card.fact_sheet_source_run_id ? ` · 来源 ${run.debug_card.fact_sheet_source_run_id}` : ""}
+            </Typography.Text>
+            <pre style={{ whiteSpace: "pre-wrap", margin: 0 }}>{JSON.stringify(run.debug_card.result, null, 2)}</pre>
+          </Space>
+        </Card>
+      ) : null}
+
       {snapshot ? <ExecutionCardBlock card={snapshot.execution_card} /> : null}
 
       {snapshot ? (

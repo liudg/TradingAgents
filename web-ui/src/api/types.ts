@@ -404,6 +404,18 @@ export interface MarketMonitorStageResult {
   metadata: Record<string, unknown>;
 }
 
+export interface MarketMonitorRunDebugOptions {
+  debug_card?: "long_term" | "short_term" | "system_risk" | "style" | "event_risk" | "panic" | "execution" | null;
+  reuse_fact_sheet: boolean;
+  replay_from_run_id?: string | null;
+}
+
+export interface MarketMonitorRunLlmConfig {
+  provider?: string | null;
+  model?: string | null;
+  reasoning_effort?: string | null;
+}
+
 export interface MarketMonitorRunManifest {
   run_id: string;
   mode: "snapshot" | "history" | "data_status" | "debug_card";
@@ -416,8 +428,8 @@ export interface MarketMonitorRunManifest {
   log_path: string;
   error_message?: string | null;
   recoverable: boolean;
-  llm_config?: Record<string, unknown> | null;
-  debug_options?: Record<string, unknown> | null;
+  llm_config?: MarketMonitorRunLlmConfig | null;
+  debug_options?: MarketMonitorRunDebugOptions | null;
   stage_results: MarketMonitorStageResult[];
   artifact_paths: Record<string, string>;
   prompt_trace_count: number;
@@ -469,15 +481,27 @@ export interface MarketMonitorDataStatusResponse {
 }
 
 export interface MarketMonitorRunRequest {
-  trigger_endpoint: "snapshot" | "history" | "data_status";
+  trigger_endpoint: "snapshot" | "history" | "data_status" | "debug_card";
   as_of_date?: string | null;
   days?: number | null;
   force_refresh: boolean;
+  mode?: "snapshot" | "history" | "data_status" | "debug_card" | null;
+  debug_options?: MarketMonitorRunDebugOptions | null;
+  llm_config?: MarketMonitorRunLlmConfig | null;
+}
+
+export interface MarketMonitorDebugCardResponse {
+  card_type: "long_term" | "short_term" | "system_risk" | "style" | "event_risk" | "panic" | "execution";
+  as_of_date: string;
+  fact_sheet_reused: boolean;
+  fact_sheet_source_run_id?: string | null;
+  result: Record<string, unknown>;
+  prompt_traces: MarketMonitorPromptTrace[];
 }
 
 export interface HistoricalMarketMonitorRunSummary {
   run_id: string;
-  trigger_endpoint: "snapshot" | "history" | "data_status";
+  trigger_endpoint: "snapshot" | "history" | "data_status" | "debug_card";
   as_of_date: string;
   days?: number | null;
   status: JobStatus;
@@ -500,6 +524,7 @@ export interface HistoricalMarketMonitorRunDetail extends HistoricalMarketMonito
   snapshot?: MarketMonitorSnapshotResponse | null;
   history?: MarketMonitorHistoryResponse | null;
   data_status?: MarketMonitorDataStatusResponse | null;
+  debug_card?: MarketMonitorDebugCardResponse | null;
   fact_sheet?: MarketMonitorFactSheet | null;
   manifest?: MarketMonitorRunManifest | null;
   stage_results: MarketMonitorStageResult[];

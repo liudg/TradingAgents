@@ -9,11 +9,14 @@ from uuid import uuid4
 
 from tradingagents.default_config import DEFAULT_CONFIG
 from tradingagents.web.analysis.manager import AnalysisJobManager
+from tradingagents.web.market_monitor.debug import MarketMonitorDebugSupport
 from tradingagents.web.market_monitor.persistence import MarketMonitorPersistence
+from tradingagents.web.market_monitor.pipeline import MarketMonitorPipeline
 from tradingagents.web.market_monitor.schemas import (
     HistoricalMarketMonitorRunDetail,
     HistoricalMarketMonitorRunSummary,
     MarketMonitorDataStatusResponse,
+    MarketMonitorDebugCardResponse,
     MarketMonitorFactSheet,
     MarketMonitorHistoryRequest,
     MarketMonitorHistoryResponse,
@@ -24,6 +27,7 @@ from tradingagents.web.market_monitor.schemas import (
     MarketMonitorSnapshotResponse,
     MarketMonitorStageResult,
 )
+from tradingagents.web.market_monitor.service import MarketMonitorRunService
 from tradingagents.web.market_monitor.snapshot_service import MarketMonitorSnapshotService
 from tradingagents.web.schemas import AnalysisJobLogEntry, JobStatus
 
@@ -53,7 +57,7 @@ class MarketMonitorRunManager:
             force_refresh=request.force_refresh,
             mode="snapshot",
         )
-        snapshot, _, _ = self._execute_run(run_request)
+        _, snapshot, _, _, _ = self._execute_run(run_request)
         if snapshot is None:
             raise RuntimeError("snapshot payload missing")
         return snapshot
@@ -69,7 +73,7 @@ class MarketMonitorRunManager:
             force_refresh=request.force_refresh,
             mode="history",
         )
-        _, history, _ = self._execute_run(run_request)
+        _, _, history, _, _ = self._execute_run(run_request)
         if history is None:
             raise RuntimeError("history payload missing")
         return history
@@ -84,10 +88,14 @@ class MarketMonitorRunManager:
             force_refresh=request.force_refresh,
             mode="data_status",
         )
-        _, _, data_status = self._execute_run(run_request)
+        _, _, _, data_status, _ = self._execute_run(run_request)
         if data_status is None:
             raise RuntimeError("data status payload missing")
         return data_status
+
+    def create_run(self, request: MarketMonitorRunRequest) -> HistoricalMarketMonitorRunDetail:
+        run_id = self._execute_run(request)[0]
+        return self.get_historical_run(run_id)
 
     def _resolve_service(self, request: MarketMonitorRunRequest) -> MarketMonitorSnapshotService:
         if request.llm_config is not None:
@@ -115,6 +123,7 @@ class MarketMonitorRunManager:
             snapshot=snapshot.get("snapshot"),
             history=snapshot.get("history"),
             data_status=snapshot.get("data_status"),
+            debug_card=snapshot.get("debug_card"),
             fact_sheet=snapshot.get("fact_sheet"),
             manifest=snapshot.get("manifest"),
             stage_results=list(snapshot.get("stage_results") or []),
@@ -142,7 +151,7 @@ class MarketMonitorRunManager:
     def read_artifact_payload(self, run_id: str, artifact_name: str) -> dict[str, Any]:
         snapshot = self._get_run_snapshot(run_id)
         persistence = MarketMonitorPersistence(Path(snapshot["results_dir"]))
-        if artifact_name in {"snapshot", "history", "data_status", "fact_sheet"}:
+        if artifact_name in {"snapshot", "history", "data_status", "fact_sheet", "debug_card"}:
             artifact_path = persistence.artifact_path(artifact_name)
         elif artifact_name.startswith("history_snapshot_") or artifact_name.startswith("history_fact_sheet_"):
             artifact_path = persistence.artifact_path(artifact_name)
@@ -158,15 +167,13 @@ class MarketMonitorRunManager:
         if manifest is None or not manifest.recoverable:
             raise ValueError("Market monitor run is not recoverable")
         request: MarketMonitorRunRequest = snapshot["request"]
-        service = self._resolve_service(request)
         persistence = MarketMonitorPersistence(Path(snapshot["results_dir"]))
         log_path = Path(snapshot["log_path"])
-        started_at = datetime.now()
         self._update_run(
             run_id,
             status=JobStatus.RUNNING,
             error_message=None,
-            started_at=started_at,
+            started_at=datetime.now(),
             finished_at=None,
         )
         reset_stages = [MarketMonitorStageResult(stage_name=stage.stage_name) for stage in manifest.stage_results]
@@ -175,105 +182,7 @@ class MarketMonitorRunManager:
         self._sync_manifest(run_id, persistence)
         AnalysisJobManager._append_job_log(log_path, "System", f"Recovering market monitor run {run_id}")
         try:
-            if request.trigger_endpoint == "snapshot":
-                snapshot_request = MarketMonitorSnapshotRequest(
-                    as_of_date=request.as_of_date,
-                    force_refresh=request.force_refresh,
-                )
-                self._set_stage_status(run_id, persistence, "artifact_generation", "running")
-                recovered_snapshot = service.get_snapshot(snapshot_request).model_copy(update={"run_id": run_id})
-                if recovered_snapshot.fact_sheet is not None:
-                    persistence.write_fact_sheet_artifact(recovered_snapshot.fact_sheet)
-                for trace in recovered_snapshot.prompt_traces:
-                    persistence.write_prompt_trace(f"{trace.stage}_{trace.card_type or 'general'}", trace)
-                persistence.write_snapshot_artifact(recovered_snapshot)
-                self._set_stage_status(run_id, persistence, "artifact_generation", "completed")
-                self._update_run(
-                    run_id,
-                    status=JobStatus.COMPLETED,
-                    snapshot=recovered_snapshot,
-                    history=None,
-                    data_status=None,
-                    fact_sheet=recovered_snapshot.fact_sheet,
-                    prompt_traces=recovered_snapshot.prompt_traces,
-                    finished_at=datetime.now(),
-                )
-            elif request.trigger_endpoint == "data_status":
-                snapshot_request = MarketMonitorSnapshotRequest(
-                    as_of_date=request.as_of_date,
-                    force_refresh=request.force_refresh,
-                )
-                self._set_stage_status(run_id, persistence, "artifact_generation", "running")
-                recovered_data_status = service.get_data_status(snapshot_request).model_copy(update={"run_id": run_id})
-                if recovered_data_status.fact_sheet is not None:
-                    persistence.write_fact_sheet_artifact(recovered_data_status.fact_sheet)
-                persistence.write_data_status_artifact(recovered_data_status)
-                self._set_stage_status(run_id, persistence, "artifact_generation", "completed")
-                self._update_run(
-                    run_id,
-                    status=JobStatus.COMPLETED,
-                    snapshot=None,
-                    history=None,
-                    data_status=recovered_data_status,
-                    fact_sheet=recovered_data_status.fact_sheet,
-                    prompt_traces=[],
-                    finished_at=datetime.now(),
-                )
-            else:
-                history_request = MarketMonitorHistoryRequest(
-                    as_of_date=request.as_of_date,
-                    days=request.days or 20,
-                    force_refresh=request.force_refresh,
-                )
-                self._set_stage_status(run_id, persistence, "artifact_generation", "running")
-                self._set_stage_status(run_id, persistence, "history_materialization", "running")
-                trade_dates = service.resolve_history_trade_dates(history_request)
-                history_snapshots: list[MarketMonitorSnapshotResponse] = []
-                prompt_traces: list[MarketMonitorPromptTrace] = []
-                latest_fact_sheet: MarketMonitorFactSheet | None = None
-                for trade_date in trade_dates:
-                    suffix = trade_date.isoformat()
-                    artifact_name = f"history_snapshot_{suffix}"
-                    artifact_path = persistence.artifact_path(artifact_name)
-                    if artifact_path.exists():
-                        payload = persistence.read_artifact_payload(artifact_name)
-                        history_snapshot = MarketMonitorSnapshotResponse.model_validate(payload)
-                    else:
-                        snapshot_request = MarketMonitorSnapshotRequest(
-                            as_of_date=trade_date,
-                            force_refresh=request.force_refresh,
-                        )
-                        history_snapshot = service.get_snapshot(snapshot_request).model_copy(update={"run_id": run_id})
-                        persistence.write_artifact_payload(artifact_name, history_snapshot.model_dump(mode="json"))
-                        if history_snapshot.fact_sheet is not None:
-                            persistence.write_artifact_payload(
-                                f"history_fact_sheet_{suffix}",
-                                history_snapshot.fact_sheet.model_dump(mode="json"),
-                            )
-                        for trace in history_snapshot.prompt_traces:
-                            persistence.write_prompt_trace(f"history_{suffix}_{trace.card_type or trace.stage}", trace)
-                    history_snapshots.append(history_snapshot)
-                    prompt_traces.extend(history_snapshot.prompt_traces)
-                    if history_snapshot.fact_sheet is not None:
-                        latest_fact_sheet = history_snapshot.fact_sheet
-                recovered_history = service.build_history_response(
-                    history_request.as_of_date or date.today(),
-                    history_snapshots,
-                ).model_copy(update={"run_id": run_id})
-                persistence.write_history_artifact(recovered_history)
-                self._set_stage_status(run_id, persistence, "history_materialization", "completed")
-                self._set_stage_status(run_id, persistence, "artifact_generation", "completed")
-                self._update_run(
-                    run_id,
-                    status=JobStatus.COMPLETED,
-                    snapshot=None,
-                    history=recovered_history,
-                    data_status=None,
-                    fact_sheet=latest_fact_sheet,
-                    prompt_traces=prompt_traces,
-                    finished_at=datetime.now(),
-                )
-            self._sync_manifest(run_id, persistence)
+            self._execute_run(request, existing_run_id=run_id, results_dir=Path(snapshot["results_dir"]))
             return self.get_historical_run(run_id)
         except Exception as exc:
             if request.trigger_endpoint == "history":
@@ -291,27 +200,22 @@ class MarketMonitorRunManager:
     def _execute_run(
         self,
         request: MarketMonitorRunRequest,
+        existing_run_id: str | None = None,
+        results_dir: Path | None = None,
     ) -> tuple[
+        str,
         MarketMonitorSnapshotResponse | None,
         MarketMonitorHistoryResponse | None,
         MarketMonitorDataStatusResponse | None,
+        MarketMonitorDebugCardResponse | None,
     ]:
         service = self._resolve_service(request)
-        run_id = uuid4().hex
+        run_id = existing_run_id or uuid4().hex
         as_of_date = request.as_of_date or date.today()
-        results_dir = self._get_results_dir(as_of_date, run_id)
-        persistence = MarketMonitorPersistence(results_dir)
+        actual_results_dir = results_dir or self._get_results_dir(as_of_date, run_id)
+        persistence = MarketMonitorPersistence(actual_results_dir)
         persistence.ensure_layout()
-        log_path = results_dir / "market_monitor.log"
-        snapshot_request = MarketMonitorSnapshotRequest(
-            as_of_date=request.as_of_date,
-            force_refresh=request.force_refresh,
-        )
-        history_request = MarketMonitorHistoryRequest(
-            as_of_date=request.as_of_date,
-            days=request.days or 20,
-            force_refresh=request.force_refresh,
-        )
+        log_path = actual_results_dir / "market_monitor.log"
         created_at = datetime.now()
         stage_names = ["request_received", "artifact_generation"]
         if request.trigger_endpoint == "history":
@@ -323,39 +227,36 @@ class MarketMonitorRunManager:
             request=request,
             status=JobStatus.PENDING,
             created_at=created_at,
-            results_dir=str(results_dir),
+            results_dir=str(actual_results_dir),
             log_path=str(log_path),
             llm_config=request.llm_config,
             debug_options=request.debug_options,
             stage_results=stage_results,
         )
-        persistence.write_manifest(manifest)
-        run_data = {
-            "run_id": run_id,
-            "request": request,
-            "status": JobStatus.PENDING,
-            "snapshot": None,
-            "history": None,
-            "data_status": None,
-            "fact_sheet": None,
-            "manifest": manifest,
-            "stage_results": stage_results,
-            "prompt_traces": [],
-            "error_message": None,
-            "log_path": str(log_path),
-            "results_dir": str(results_dir),
-            "created_at": created_at,
-            "started_at": None,
-            "finished_at": None,
-        }
-        with self._lock:
-            self._runs[run_id] = run_data
-
-        self._update_run(
-            run_id,
-            status=JobStatus.RUNNING,
-            started_at=datetime.now(),
-        )
+        if existing_run_id is None:
+            persistence.write_manifest(manifest)
+            run_data = {
+                "run_id": run_id,
+                "request": request,
+                "status": JobStatus.PENDING,
+                "snapshot": None,
+                "history": None,
+                "data_status": None,
+                "debug_card": None,
+                "fact_sheet": None,
+                "manifest": manifest,
+                "stage_results": stage_results,
+                "prompt_traces": [],
+                "error_message": None,
+                "log_path": str(log_path),
+                "results_dir": str(actual_results_dir),
+                "created_at": created_at,
+                "started_at": None,
+                "finished_at": None,
+            }
+            with self._lock:
+                self._runs[run_id] = run_data
+            self._update_run(run_id, status=JobStatus.RUNNING, started_at=datetime.now())
         self._set_stage_status(run_id, persistence, "request_received", "completed")
         self._sync_manifest(run_id, persistence)
         AnalysisJobManager._append_job_log(
@@ -367,34 +268,26 @@ class MarketMonitorRunManager:
                 f"force_refresh={request.force_refresh}"
             ),
         )
-
         try:
-            snapshot: MarketMonitorSnapshotResponse | None = None
-            history: MarketMonitorHistoryResponse | None = None
-            data_status: MarketMonitorDataStatusResponse | None = None
-            prompt_traces: list[MarketMonitorPromptTrace] = []
-            latest_fact_sheet: MarketMonitorFactSheet | None = None
-
+            run_service = MarketMonitorRunService(
+                service,
+                MarketMonitorPipeline(MarketMonitorDebugSupport(self.runs_root)),
+            )
             self._set_stage_status(run_id, persistence, "artifact_generation", "running")
-            if request.trigger_endpoint == "snapshot":
-                AnalysisJobManager._append_job_log(log_path, "System", "Building snapshot payload")
-                snapshot = service.get_snapshot(snapshot_request).model_copy(update={"run_id": run_id})
-                if snapshot.fact_sheet is not None:
-                    persistence.write_fact_sheet_artifact(snapshot.fact_sheet)
-                for trace in snapshot.prompt_traces:
-                    trace_name = f"{trace.stage}_{trace.card_type or 'general'}"
-                    persistence.write_prompt_trace(trace_name, trace)
-                persistence.write_snapshot_artifact(snapshot)
-                AnalysisJobManager._append_job_log(log_path, "System", "Snapshot payload ready")
-            elif request.trigger_endpoint == "history":
-                AnalysisJobManager._append_job_log(log_path, "System", "Building history payload")
+            if request.trigger_endpoint == "history":
                 self._set_stage_status(run_id, persistence, "history_materialization", "running")
-                trade_dates = service.resolve_history_trade_dates(history_request)
-                history_snapshots = service.get_history_snapshots(history_request, trade_dates)
-                prompt_traces: list[MarketMonitorPromptTrace] = []
-                latest_fact_sheet: MarketMonitorFactSheet | None = None
-                for history_snapshot in history_snapshots:
-                    history_snapshot = history_snapshot.model_copy(update={"run_id": run_id})
+            execution = run_service.execute(request, run_id)
+            if execution.snapshot is not None:
+                AnalysisJobManager._append_job_log(log_path, "System", "Building snapshot payload")
+                if execution.fact_sheet is not None:
+                    persistence.write_fact_sheet_artifact(execution.fact_sheet)
+                for trace in execution.prompt_traces:
+                    persistence.write_prompt_trace(f"{trace.stage}_{trace.card_type or 'general'}", trace)
+                persistence.write_snapshot_artifact(execution.snapshot)
+                AnalysisJobManager._append_job_log(log_path, "System", "Snapshot payload ready")
+            elif execution.history is not None:
+                AnalysisJobManager._append_job_log(log_path, "System", "Building history payload")
+                for history_snapshot in execution.history_snapshots:
                     suffix = history_snapshot.as_of_date.isoformat()
                     persistence.write_artifact_payload(
                         f"history_snapshot_{suffix}",
@@ -405,74 +298,48 @@ class MarketMonitorRunManager:
                             f"history_fact_sheet_{suffix}",
                             history_snapshot.fact_sheet.model_dump(mode="json"),
                         )
-                        latest_fact_sheet = history_snapshot.fact_sheet
                     for trace in history_snapshot.prompt_traces:
-                        trace_name = f"history_{suffix}_{trace.card_type or trace.stage}"
-                        persistence.write_prompt_trace(trace_name, trace)
-                    prompt_traces.extend(history_snapshot.prompt_traces)
-                    AnalysisJobManager._append_job_log(
-                        log_path,
-                        "System",
-                        f"History replay materialized for {suffix}",
-                    )
-                history = service.build_history_response(
-                    history_request.as_of_date or date.today(),
-                    history_snapshots,
-                ).model_copy(update={"run_id": run_id})
-                persistence.write_history_artifact(history)
-                self._set_stage_status(
-                    run_id,
-                    persistence,
-                    "history_materialization",
-                    "completed",
-                )
-                self._set_stage_status(run_id, persistence, "artifact_generation", "completed")
+                        persistence.write_prompt_trace(f"history_{suffix}_{trace.card_type or trace.stage}", trace)
+                    AnalysisJobManager._append_job_log(log_path, "System", f"History replay materialized for {suffix}")
+                persistence.write_history_artifact(execution.history)
+                self._set_stage_status(run_id, persistence, "history_materialization", "completed")
                 AnalysisJobManager._append_job_log(
                     log_path,
                     "System",
-                    f"History payload ready with {len(history.points)} points",
+                    f"History payload ready with {len(execution.history.points)} points",
                 )
-            else:
+            elif execution.data_status is not None:
                 AnalysisJobManager._append_job_log(log_path, "System", "Building data status payload")
-                data_status = service.get_data_status(snapshot_request).model_copy(update={"run_id": run_id})
-                if data_status.fact_sheet is not None:
-                    persistence.write_fact_sheet_artifact(data_status.fact_sheet)
-                persistence.write_data_status_artifact(data_status)
+                if execution.fact_sheet is not None:
+                    persistence.write_fact_sheet_artifact(execution.fact_sheet)
+                persistence.write_data_status_artifact(execution.data_status)
                 AnalysisJobManager._append_job_log(
                     log_path,
                     "System",
-                    f"Data status payload ready with {len(data_status.open_gaps)} open gaps",
+                    f"Data status payload ready with {len(execution.data_status.open_gaps)} open gaps",
                 )
-                self._set_stage_status(run_id, persistence, "artifact_generation", "completed")
-
-            fact_sheet = (
-                snapshot.fact_sheet
-                if snapshot is not None and snapshot.fact_sheet is not None
-                else data_status.fact_sheet
-                if data_status is not None and data_status.fact_sheet is not None
-                else latest_fact_sheet
-                if request.trigger_endpoint == "history"
-                else None
-            )
-            prompt_traces = (
-                snapshot.prompt_traces
-                if snapshot is not None
-                else prompt_traces
-                if request.trigger_endpoint == "history"
-                else []
-            )
+            elif execution.debug_card is not None:
+                AnalysisJobManager._append_job_log(log_path, "System", f"Building debug card payload: {execution.debug_card.card_type}")
+                if execution.fact_sheet is not None:
+                    persistence.write_fact_sheet_artifact(execution.fact_sheet)
+                for trace in execution.prompt_traces:
+                    persistence.write_prompt_trace(f"{trace.stage}_{trace.card_type or 'general'}", trace)
+                persistence.write_debug_card_artifact(execution.debug_card)
+                AnalysisJobManager._append_job_log(log_path, "System", "Debug card payload ready")
+            self._set_stage_status(run_id, persistence, "artifact_generation", "completed")
             self._update_run(
                 run_id,
                 status=JobStatus.COMPLETED,
-                snapshot=snapshot,
-                history=history,
-                data_status=data_status,
-                fact_sheet=fact_sheet,
-                prompt_traces=prompt_traces,
+                snapshot=execution.snapshot,
+                history=execution.history,
+                data_status=execution.data_status,
+                debug_card=execution.debug_card,
+                fact_sheet=execution.fact_sheet,
+                prompt_traces=execution.prompt_traces,
                 finished_at=datetime.now(),
             )
             self._sync_manifest(run_id, persistence)
-            return snapshot, history, data_status
+            return run_id, execution.snapshot, execution.history, execution.data_status, execution.debug_card
         except Exception as exc:
             if request.trigger_endpoint == "history":
                 self._set_stage_status(run_id, persistence, "history_materialization", "failed", error=str(exc))
@@ -523,6 +390,7 @@ class MarketMonitorRunManager:
                 snapshot = persistence.read_snapshot_artifact() if persistence.artifact_path("snapshot").exists() else None
                 history = persistence.read_history_artifact() if persistence.artifact_path("history").exists() else None
                 data_status = persistence.read_data_status_artifact() if persistence.artifact_path("data_status").exists() else None
+                debug_card = persistence.read_debug_card_artifact() if persistence.artifact_path("debug_card").exists() else None
                 fact_sheet = persistence.read_fact_sheet_artifact() if persistence.artifact_path("fact_sheet").exists() else None
                 run_data = {
                     "run_id": manifest.run_id,
@@ -531,6 +399,7 @@ class MarketMonitorRunManager:
                     "snapshot": snapshot,
                     "history": history,
                     "data_status": data_status,
+                    "debug_card": debug_card,
                     "fact_sheet": fact_sheet,
                     "manifest": manifest,
                     "stage_results": list(manifest.stage_results),
@@ -624,10 +493,15 @@ class MarketMonitorRunManager:
     def _build_summary(self, snapshot: dict[str, Any]) -> HistoricalMarketMonitorRunSummary:
         response: MarketMonitorSnapshotResponse | None = snapshot.get("snapshot")
         data_status: MarketMonitorDataStatusResponse | None = snapshot.get("data_status")
+        debug_card: MarketMonitorDebugCardResponse | None = snapshot.get("debug_card")
         manifest: MarketMonitorRunManifest | None = snapshot.get("manifest")
         as_of_date = (
             response.as_of_date
             if response is not None
+            else data_status.as_of_date
+            if data_status is not None
+            else debug_card.as_of_date
+            if debug_card is not None
             else snapshot["request"].as_of_date or snapshot["created_at"].date()
         )
         return HistoricalMarketMonitorRunSummary(
@@ -639,7 +513,7 @@ class MarketMonitorRunManager:
             generated_at=snapshot.get("finished_at") or snapshot.get("started_at") or snapshot["created_at"],
             data_freshness=response.data_freshness if response is not None else None,
             source_completeness=(data_status.source_coverage.completeness if data_status is not None else response.source_coverage.completeness if response is not None else None),
-            regime_label=response.execution_card.regime_label if response is not None else None,
+            regime_label=response.execution_card.regime_label if response is not None else (debug_card.card_type if debug_card is not None else None),
             degraded=(data_status.source_coverage.degraded if data_status is not None else response.source_coverage.degraded if response is not None else False),
             recoverable=manifest.recoverable if manifest is not None else False,
             error_message=snapshot.get("error_message"),

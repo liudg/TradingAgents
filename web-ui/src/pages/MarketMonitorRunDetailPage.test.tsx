@@ -447,6 +447,55 @@ describe("MarketMonitorRunDetailPage", () => {
     expect(screen.queryByText("执行动作卡")).not.toBeInTheDocument();
   });
 
+  it("renders debug card result block", () => {
+    installMatchMedia();
+    mockUseMarketMonitorRun.mockReset();
+    mockUseMarketMonitorRunLogs.mockReset();
+    mockUseMarketMonitorPromptTraces.mockReset();
+    mockUseMarketMonitorArtifact.mockReset();
+    mockUseRecoverMarketMonitorRun.mockReset();
+    mockNavigate.mockReset();
+
+    const run = buildRunDetail();
+    run.trigger_endpoint = "debug_card";
+    run.snapshot = null;
+    run.history = null;
+    run.data_status = null;
+    run.debug_card = {
+      card_type: "execution",
+      as_of_date: "2026-04-11",
+      fact_sheet_reused: true,
+      fact_sheet_source_run_id: "run-source-1",
+      result: { regime_label: "黄绿灯-Swing" },
+      prompt_traces: [],
+    };
+
+    mockUseMarketMonitorRun.mockReturnValue({
+      isLoading: false,
+      isError: false,
+      error: null,
+      isFetching: false,
+      data: run,
+      refetch: vi.fn(),
+    });
+    mockUseMarketMonitorRunLogs.mockReturnValue({ isFetching: false, data: [], refetch: vi.fn() });
+    mockUseMarketMonitorPromptTraces.mockReturnValue({ isFetching: false, data: [], refetch: vi.fn() });
+    mockUseMarketMonitorArtifact.mockReturnValue({ isFetching: false, data: null, refetch: vi.fn() });
+    mockUseRecoverMarketMonitorRun.mockReturnValue({ isPending: false, mutate: vi.fn() });
+
+    render(
+      <MemoryRouter initialEntries={["/monitor/runs/run-12345678"]}>
+        <Routes>
+          <Route path="/monitor/runs/:runId" element={<MarketMonitorRunDetailPage />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+
+    expect(screen.getByText("调试卡结果 · execution")).toBeInTheDocument();
+    expect(screen.getByText(/复用 fact sheet：是/)).toBeInTheDocument();
+    expect(screen.getByText(/run-source-1/)).toBeInTheDocument();
+  });
+
   it("shows recover button and triggers recovery", () => {
     installMatchMedia();
     mockUseMarketMonitorRun.mockReset();

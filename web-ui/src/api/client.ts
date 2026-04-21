@@ -14,6 +14,7 @@ import {
   HistoricalReportDetail,
   HistoricalReportSummary,
   MarketMonitorArtifactPayload,
+  MarketMonitorRunRequest,
   MarketMonitorDataStatusResponse,
   MarketMonitorHistoryResponse,
   MarketMonitorPromptTrace,
@@ -152,6 +153,13 @@ export async function fetchMarketMonitorDataStatus(
 
 export async function fetchMarketMonitorRuns() {
   return requestJson<HistoricalMarketMonitorRunSummary[]>("/api/market-monitor/runs");
+}
+
+export async function createMarketMonitorRun(payload: MarketMonitorRunRequest) {
+  return requestJson<HistoricalMarketMonitorRunDetail>("/api/market-monitor/runs", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
 }
 
 export async function fetchMarketMonitorRun(runId: string) {

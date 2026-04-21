@@ -624,13 +624,156 @@ class MarketMonitorApiTests(unittest.TestCase):
         ) as service_cls:
             service = service_cls.return_value
             service.get_snapshot.return_value = snapshot
-            result, history, data_status = manager._execute_run(request)
+            run_id, result, history, data_status, debug_card = manager._execute_run(request)
 
         service_cls.assert_called_once_with(llm_config=request.llm_config)
         service.get_snapshot.assert_called_once()
+        self.assertTrue(run_id)
         self.assertIsNotNone(result)
         self.assertIsNone(history)
         self.assertIsNone(data_status)
+        self.assertIsNone(debug_card)
+
+    def test_create_run_api_supports_debug_card_with_reused_fact_sheet(self) -> None:
+        source_snapshot = self._build_snapshot()
+        source_response = self.client.get("/api/market-monitor/snapshot")
+        self.assertEqual(source_response.status_code, 200)
+        source_run_id = source_response.json()["run_id"]
+        with patch(
+            "tradingagents.web.market_monitor.inference.cards.MarketMonitorCardInferenceService.infer_long_term",
+        ) as infer_long_term:
+            infer_long_term.return_value = type(
+                "FakeInferenceResult",
+                (),
+                {
+                    "payload": source_snapshot.long_term_score,
+                    "trace": MarketMonitorPromptTrace(
+                        stage="card_inference",
+                        card_type="long_term",
+                        model="gpt-5.4",
+                        parsed_ok=True,
+                        input_summary="debug long_term",
+                    ),
+                },
+            )()
+            response = self.client.post(
+                "/api/market-monitor/runs",
+                json={
+                    "trigger_endpoint": "debug_card",
+                    "mode": "debug_card",
+                    "debug_options": {
+                        "debug_card": "long_term",
+                        "reuse_fact_sheet": True,
+                        "replay_from_run_id": source_run_id,
+                    },
+                    "force_refresh": False,
+                },
+            )
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["trigger_endpoint"], "debug_card")
+        self.assertIsNotNone(payload["debug_card"])
+        self.assertEqual(payload["debug_card"]["card_type"], "long_term")
+        self.assertTrue(payload["debug_card"]["fact_sheet_reused"])
+        self.assertEqual(payload["debug_card"]["fact_sheet_source_run_id"], source_run_id)
+        artifact_response = self.client.get(f"/api/market-monitor/runs/{payload['run_id']}/artifacts/debug_card")
+        self.assertEqual(artifact_response.status_code, 200)
+        self.assertEqual(artifact_response.json()["card_type"], "long_term")
+
+    def test_create_run_returns_the_newly_created_run_instead_of_latest_existing_run(self) -> None:
+        manager = MarketMonitorRunManager(runs_root=Path(self.temp_dir.name))
+        existing_snapshot = self._build_snapshot()
+        new_snapshot = self._build_snapshot().model_copy(
+            update={
+                "as_of_date": date(2026, 4, 10),
+                "prompt_traces": [],
+            }
+        )
+        manager._runs["existing-run"] = {
+            "run_id": "existing-run",
+            "request": MarketMonitorRunRequest(
+                trigger_endpoint="snapshot",
+                as_of_date=date(2026, 4, 11),
+                force_refresh=False,
+                mode="snapshot",
+            ),
+            "status": "completed",
+            "snapshot": existing_snapshot,
+            "history": None,
+            "data_status": None,
+            "debug_card": None,
+            "fact_sheet": existing_snapshot.fact_sheet,
+            "manifest": None,
+            "stage_results": [],
+            "prompt_traces": list(existing_snapshot.prompt_traces),
+            "error_message": None,
+            "log_path": str(Path(self.temp_dir.name) / "existing-run.log"),
+            "results_dir": str(Path(self.temp_dir.name) / "2026-04-11" / "existing-run"),
+            "created_at": datetime(2026, 4, 12, 10, 0, 0),
+            "started_at": datetime(2026, 4, 12, 10, 0, 1),
+            "finished_at": datetime(2026, 4, 12, 10, 0, 2),
+        }
+        request = MarketMonitorRunRequest(
+            trigger_endpoint="snapshot",
+            as_of_date=date(2026, 4, 10),
+            force_refresh=False,
+            mode="snapshot",
+        )
+
+        with patch.object(manager, "_execute_run", return_value=("new-run", new_snapshot, None, None, None)):
+            with patch.object(manager, "get_historical_run") as get_historical_run:
+                manager.create_run(request)
+
+        get_historical_run.assert_called_once_with("new-run")
+
+    def test_create_run_api_rejects_unknown_debug_card(self) -> None:
+        response = self.client.post(
+            "/api/market-monitor/runs",
+            json={
+                "trigger_endpoint": "debug_card",
+                "mode": "debug_card",
+                "debug_options": {
+                    "debug_card": "not_a_card",
+                    "reuse_fact_sheet": False,
+                },
+                "force_refresh": False,
+            },
+        )
+
+        self.assertEqual(response.status_code, 422)
+
+    def test_create_run_api_requires_source_run_id_when_reusing_fact_sheet(self) -> None:
+        response = self.client.post(
+            "/api/market-monitor/runs",
+            json={
+                "trigger_endpoint": "debug_card",
+                "mode": "debug_card",
+                "debug_options": {
+                    "debug_card": "long_term",
+                    "reuse_fact_sheet": True,
+                },
+                "force_refresh": False,
+            },
+        )
+
+        self.assertEqual(response.status_code, 422)
+
+    def test_create_run_api_returns_not_found_for_missing_replay_run(self) -> None:
+        response = self.client.post(
+            "/api/market-monitor/runs",
+            json={
+                "trigger_endpoint": "debug_card",
+                "mode": "debug_card",
+                "debug_options": {
+                    "debug_card": "long_term",
+                    "reuse_fact_sheet": True,
+                    "replay_from_run_id": "missing-run",
+                },
+                "force_refresh": False,
+            },
+        )
+
+        self.assertEqual(response.status_code, 404)
 
     def test_run_manager_uses_llm_config_when_recovering_snapshot_runs(self) -> None:
         manager = MarketMonitorRunManager(runs_root=Path(self.temp_dir.name))

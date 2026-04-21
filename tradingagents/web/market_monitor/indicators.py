@@ -5,10 +5,19 @@ from math import isnan
 import pandas as pd
 
 
+def _column_series(frame: pd.DataFrame, column: str) -> pd.Series:
+    if frame.empty or column not in frame:
+        return pd.Series(dtype=float)
+    value = frame[column]
+    if isinstance(value, pd.DataFrame):
+        if value.empty:
+            return pd.Series(dtype=float)
+        value = value.iloc[:, 0]
+    return value.dropna()
+
+
 def latest_close(frame: pd.DataFrame) -> float | None:
-    if frame.empty or "Close" not in frame:
-        return None
-    value = frame["Close"].dropna()
+    value = _column_series(frame, "Close")
     return None if value.empty else float(value.iloc[-1])
 
 
@@ -35,9 +44,10 @@ def percent_change(series: pd.Series, periods: int) -> float:
 
 
 def atr_percent(frame: pd.DataFrame, window: int = 14) -> float:
-    if frame.empty or not {"High", "Low", "Close"}.issubset(frame.columns):
-        return 0.0
-    data = frame[["High", "Low", "Close"]].dropna()
+    high = _column_series(frame, "High")
+    low = _column_series(frame, "Low")
+    close = _column_series(frame, "Close")
+    data = pd.concat([high.rename("High"), low.rename("Low"), close.rename("Close")], axis=1).dropna()
     if len(data) < window + 1:
         return 0.0
     prev_close = data["Close"].shift(1)
@@ -50,10 +60,10 @@ def atr_percent(frame: pd.DataFrame, window: int = 14) -> float:
         axis=1,
     ).max(axis=1)
     atr = true_range.rolling(window=window, min_periods=window).mean().iloc[-1]
-    close = data["Close"].iloc[-1]
-    if close == 0 or isnan(atr):
+    latest = data["Close"].iloc[-1]
+    if latest == 0 or isnan(atr):
         return 0.0
-    return float(atr / close * 100.0)
+    return float(atr / latest * 100.0)
 
 
 def zone_from_score(score: float, zones: list[tuple[float, str]]) -> str:

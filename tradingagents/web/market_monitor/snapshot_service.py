@@ -14,15 +14,19 @@ from .metrics import build_market_snapshot
 from .schemas import (
     MarketMonitorActionModifier,
     MarketMonitorDataStatusResponse,
+    MarketMonitorDebugCardResponse,
     MarketMonitorEventRiskFlag,
     MarketMonitorExecutionCard,
+    MarketMonitorFactSheet,
     MarketMonitorHistoryPoint,
     MarketMonitorHistoryRequest,
     MarketMonitorHistoryResponse,
     MarketMonitorIndexEventRisk,
     MarketMonitorLayerMetric,
     MarketMonitorPanicCard,
+    MarketMonitorPromptTrace,
     MarketMonitorRunLlmConfig,
+    MarketMonitorRunRequest,
     MarketMonitorScoreCard,
     MarketMonitorSignalConfirmation,
     MarketMonitorSnapshotRequest,
@@ -125,6 +129,78 @@ class MarketMonitorSnapshotService:
             notes=snapshot.notes,
             open_gaps=gaps,
             fact_sheet=snapshot.fact_sheet,
+        )
+
+    def get_debug_card(
+        self,
+        request: MarketMonitorRunRequest,
+        fact_sheet: MarketMonitorFactSheet | None,
+        fact_sheet_source_run_id: str | None,
+    ) -> MarketMonitorDebugCardResponse:
+        debug_options = request.debug_options
+        if debug_options is None or debug_options.debug_card is None:
+            raise ValueError("debug_card 运行缺少 debug_options.debug_card")
+        as_of_date = request.as_of_date or date.today()
+        dataset = build_market_dataset(self._universe, as_of_date, force_refresh=request.force_refresh)
+        core_data = dataset["core"]
+        cache_summary = dataset.get("cache_summary", {})
+        local_market_data, derived_metrics = build_market_snapshot(core_data, self._universe["market_proxies"])
+        source_coverage, _, notes = self._build_data_quality(cache_summary, core_data)
+        open_gaps = self._build_open_gaps(core_data)
+        current_fact_sheet = fact_sheet or build_market_fact_sheet(
+            as_of_date=as_of_date,
+            generated_at=datetime.now(timezone.utc),
+            core_data=core_data,
+            local_market_data=local_market_data,
+            derived_metrics=derived_metrics,
+            source_coverage=source_coverage,
+            open_gaps=open_gaps,
+            notes=notes,
+        )
+        long_term_fallback = lambda: self._build_long_term_card(core_data, derived_metrics)
+        short_term_fallback = lambda: self._build_short_term_card(core_data)
+        system_risk_fallback = lambda: self._build_system_risk_card(core_data, derived_metrics)
+        style_fallback = lambda: self._build_style_effectiveness(core_data)
+        event_risk_fallback = lambda: self._build_event_risk(as_of_date)
+        card_type = debug_options.debug_card
+        if card_type == "long_term":
+            result = self._inference.infer_long_term(current_fact_sheet, long_term_fallback)
+        elif card_type == "short_term":
+            result = self._inference.infer_short_term(current_fact_sheet, short_term_fallback)
+        elif card_type == "system_risk":
+            result = self._inference.infer_system_risk(current_fact_sheet, system_risk_fallback)
+        elif card_type == "style":
+            result = self._inference.infer_style(current_fact_sheet, style_fallback)
+        elif card_type == "event_risk":
+            result = self._inference.infer_event_risk(current_fact_sheet, event_risk_fallback)
+        elif card_type == "panic":
+            system_risk = system_risk_fallback()
+            result = self._inference.infer_panic(
+                current_fact_sheet,
+                lambda: self._build_panic_card(core_data, system_risk.score),
+            )
+        else:
+            long_term = long_term_fallback()
+            short_term = short_term_fallback()
+            system_risk = system_risk_fallback()
+            style = style_fallback()
+            event_risk = event_risk_fallback()
+            result = self._execution_inference.infer_execution(
+                fact_sheet=current_fact_sheet,
+                long_term=long_term,
+                short_term=short_term,
+                system_risk=system_risk,
+                style=style,
+                event_risk=event_risk,
+                fallback=lambda: self._build_execution_card(long_term, short_term, system_risk, style, event_risk),
+            )
+        return MarketMonitorDebugCardResponse(
+            card_type=card_type,
+            as_of_date=as_of_date,
+            fact_sheet_reused=fact_sheet is not None,
+            fact_sheet_source_run_id=fact_sheet_source_run_id,
+            result=result.payload.model_dump(mode="json"),
+            prompt_traces=[result.trace],
         )
 
     def _build_snapshot(self, as_of_date: date, dataset: dict[str, Any]) -> MarketMonitorSnapshotResponse:
