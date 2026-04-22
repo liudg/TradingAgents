@@ -65,9 +65,6 @@ function buildSnapshot() {
       action: "维持常规风控。",
       liquidity_stress_score: 31.2,
       risk_appetite_score: 38.0,
-      pcr_percentile: null,
-      pcr_absolute: null,
-      pcr_panic_flag: null,
     },
     style_effectiveness: {
       tactic_layer: {
@@ -102,8 +99,8 @@ function buildSnapshot() {
       preferred_assets: ["防御板块", "能源/周期"],
       avoid_assets: ["小盘高弹性"],
       signal_confirmation: {
-        current_regime_days: 1,
-        downgrade_unlock_in_days: 2,
+        current_regime_observations: 1,
+        risk_loosening_unlock_in_observations: 2,
         note: "当前 regime 为新近状态，继续观察 2 个交易日。",
       },
       event_risk_flag: {
@@ -128,13 +125,13 @@ function buildSnapshot() {
       state: "panic_watch",
       panic_extreme_score: 38.0,
       selling_exhaustion_score: 45.0,
-      reversal_confirmation_score: 39.0,
+      intraday_reversal_score: 39.0,
       action: "加入观察列表，等待确认。",
       system_risk_override: null,
       stop_loss: "ATR×1.0",
       profit_rule: "达 1R 兑现 50%，余仓移止损到成本线。",
       timeout_warning: false,
-      days_held: 0,
+      refreshes_held: 0,
       early_entry_allowed: false,
       max_position_hint: "20%-35%",
     },

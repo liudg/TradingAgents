@@ -159,7 +159,11 @@ export function ExecutionCardBlock(props: { card: MarketMonitorExecutionCard }) 
         {props.card.avoid_assets.length ? (
           <Typography.Text type="secondary">回避方向：{props.card.avoid_assets.join("、")}</Typography.Text>
         ) : null}
-        <Typography.Text type="secondary">确认状态：{props.card.signal_confirmation.note}</Typography.Text>
+        <Space wrap>
+          <Typography.Text type="secondary">确认状态：{props.card.signal_confirmation.note}</Typography.Text>
+          <Tag>已观察 {props.card.signal_confirmation.current_regime_observations} 次</Tag>
+          <Tag>放宽解锁还需 {props.card.signal_confirmation.risk_loosening_unlock_in_observations} 次</Tag>
+        </Space>
         {renderReasoningBlock(props.card)}
       </Space>
     </Card>
@@ -229,13 +233,14 @@ export function PanicCardBlock(props: { card: MarketMonitorPanicCard }) {
           <Tag>总分 {props.card.score.toFixed(1)}</Tag>
           <Tag>极端恐慌 {props.card.panic_extreme_score.toFixed(1)}</Tag>
           <Tag>衰竭 {props.card.selling_exhaustion_score.toFixed(1)}</Tag>
-          <Tag>确认 {props.card.reversal_confirmation_score.toFixed(1)}</Tag>
+          <Tag>盘中反转 {props.card.intraday_reversal_score.toFixed(1)}</Tag>
         </Space>
         <Typography.Text>{props.card.action}</Typography.Text>
         <Space wrap>
           {boolTag("Early entry", props.card.early_entry_allowed)}
           <Tag>仓位上限 {props.card.max_position_hint}</Tag>
           <Tag>止损 {props.card.stop_loss}</Tag>
+          <Tag>已保持 {props.card.refreshes_held} 次刷新</Tag>
         </Space>
         <Typography.Text type="secondary">盈利规则：{props.card.profit_rule}</Typography.Text>
         {props.card.system_risk_override ? (

@@ -68,9 +68,9 @@ class MarketMonitorExecutionInferenceService:
             preferred_assets=list(payload.get("preferred_assets") or []),
             avoid_assets=list(payload.get("avoid_assets") or []),
             signal_confirmation=MarketMonitorSignalConfirmation(
-                current_regime_days=int(signal_confirmation.get("current_regime_days", 1)),
-                downgrade_unlock_in_days=int(signal_confirmation.get("downgrade_unlock_in_days", 2)),
-                note=signal_confirmation.get("note") or "当前 regime 为新近状态，继续观察 2 个交易日。",
+                current_regime_observations=int(signal_confirmation.get("current_regime_observations", 1)),
+                risk_loosening_unlock_in_observations=int(signal_confirmation.get("risk_loosening_unlock_in_observations", 2)),
+                note=signal_confirmation.get("note") or "当前 regime 为新近状态；若要放宽风险边界，需再连续观察 2 次刷新保持。",
             ),
             event_risk_flag=MarketMonitorEventRiskFlag.model_validate(payload.get("event_risk_flag") or {}),
             summary=payload["summary"],

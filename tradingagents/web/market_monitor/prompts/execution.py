@@ -87,9 +87,9 @@ EVENT_RISK_RULES: dict[str, Any] = {
 }
 
 SIGNAL_CONFIRMATION_RULES: dict[str, Any] = {
-    "upgrade_rule": "升级信号立即生效",
-    "downgrade_rule": "降级到更宽松 regime 需连续 3 个交易日保持后才解锁",
-    "default_assumption": "若没有历史持续天数，默认 current_regime_days=1，并据此推算 downgrade_unlock_in_days",
+    "risk_tightening_rule": "风险收紧信号立即生效",
+    "risk_loosening_rule": "风险放宽需连续 3 次刷新保持后才解锁",
+    "default_assumption": "若没有历史持续观测，默认 current_regime_observations=1，并据此推算 risk_loosening_unlock_in_observations",
 }
 
 
@@ -105,12 +105,14 @@ def build_execution_prompt(
         "你是美股市场监控执行动作卡聚合器。"
         "你只能基于给定结构化卡片和 fact sheet 输出严格 JSON。"
         "不要重写上游事实，只根据长线、短线、系统风险、风格、事件风险给出执行结论。"
-        "你必须严格遵守输入中的冲突矩阵、事件分离规则、确认延迟规则；若模型判断与规则冲突，以规则为准。"
+        "本地结构化市场数据优先，搜索结果只能补充事件、背景和叙事，不能覆盖本地量化指标。"
+        "若引用搜索信息，必须保持可溯源，并优先采用官方日历、公司公告与主流财经媒体。"
+        "你必须严格遵守输入中的冲突矩阵、事件分离规则、风险收紧/风险放宽规则；若模型判断与规则冲突，以规则为准。"
         "个股级事件只影响个股执行限制，不能污染 regime_label。"
         "指数级事件只允许收紧执行权限，不能放宽风险边界。"
         "若数据不足，只能在 risks 说明，不能编造缺失事实。"
         "输出字段必须包含: regime_label, conflict_mode, total_exposure_range, new_position_allowed, chase_breakout_allowed, dip_buy_allowed, overnight_allowed, leverage_allowed, single_position_cap, daily_risk_budget, tactic_preference, preferred_assets, avoid_assets, signal_confirmation, event_risk_flag, summary, reasoning_summary, key_drivers, risks, confidence。"
-        "signal_confirmation 必须包含 current_regime_days, downgrade_unlock_in_days, note。"
+        "signal_confirmation 必须包含 current_regime_observations, risk_loosening_unlock_in_observations, note。"
     )
     payload: dict[str, Any] = {
         "decision_framework": {

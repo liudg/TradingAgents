@@ -176,9 +176,6 @@ class MarketMonitorScoreCard(MarketMonitorReasoningFields):
 class MarketMonitorSystemRiskCard(MarketMonitorScoreCard):
     liquidity_stress_score: float = Field(..., ge=0, le=100)
     risk_appetite_score: float = Field(..., ge=0, le=100)
-    pcr_percentile: float | None = None
-    pcr_absolute: float | None = None
-    pcr_panic_flag: bool | None = None
 
 
 class MarketMonitorStyleTacticLayer(BaseModel):
@@ -229,8 +226,8 @@ class MarketMonitorEventRiskFlag(MarketMonitorReasoningFields):
 
 
 class MarketMonitorSignalConfirmation(BaseModel):
-    current_regime_days: int
-    downgrade_unlock_in_days: int
+    current_regime_observations: int
+    risk_loosening_unlock_in_observations: int
     note: str
 
 
@@ -259,13 +256,13 @@ class MarketMonitorPanicCard(MarketMonitorReasoningFields):
     state: str
     panic_extreme_score: float = Field(..., ge=0, le=100)
     selling_exhaustion_score: float = Field(..., ge=0, le=100)
-    reversal_confirmation_score: float = Field(..., ge=0, le=100)
+    intraday_reversal_score: float = Field(..., ge=0, le=100)
     action: str
     system_risk_override: str | None = None
     stop_loss: str
     profit_rule: str
     timeout_warning: bool
-    days_held: int
+    refreshes_held: int
     early_entry_allowed: bool
     max_position_hint: str
 

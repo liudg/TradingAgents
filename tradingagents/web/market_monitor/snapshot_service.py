@@ -144,7 +144,7 @@ class MarketMonitorSnapshotService:
         dataset = build_market_dataset(self._universe, as_of_date, force_refresh=request.force_refresh)
         core_data = dataset["core"]
         cache_summary = dataset.get("cache_summary", {})
-        local_market_data, derived_metrics = build_market_snapshot(core_data, self._universe["market_proxies"])
+        local_market_data, derived_metrics = build_market_snapshot(core_data, self._universe["breadth_proxy_symbols"])
         source_coverage, _, notes = self._build_data_quality(cache_summary, core_data)
         open_gaps = self._build_open_gaps(core_data)
         current_fact_sheet = fact_sheet or build_market_fact_sheet(
@@ -206,7 +206,7 @@ class MarketMonitorSnapshotService:
     def _build_snapshot(self, as_of_date: date, dataset: dict[str, Any]) -> MarketMonitorSnapshotResponse:
         core_data = dataset["core"]
         cache_summary = dataset.get("cache_summary", {})
-        local_market_data, derived_metrics = build_market_snapshot(core_data, self._universe["market_proxies"])
+        local_market_data, derived_metrics = build_market_snapshot(core_data, self._universe["breadth_proxy_symbols"])
         source_coverage, degraded_factors, notes = self._build_data_quality(cache_summary, core_data)
         open_gaps = self._build_open_gaps(core_data)
         expected_close = _expected_market_close_date(as_of_date)
@@ -282,17 +282,34 @@ class MarketMonitorSnapshotService:
         spy = _series(core_data.get("SPY", pd.DataFrame()))
         qqq = _series(core_data.get("QQQ", pd.DataFrame()))
         iwm = _series(core_data.get("IWM", pd.DataFrame()))
+        dia = _series(core_data.get("DIA", pd.DataFrame()))
+        xlu = _series(core_data.get("XLU", pd.DataFrame()))
+        xlp = _series(core_data.get("XLP", pd.DataFrame()))
+        xlv = _series(core_data.get("XLV", pd.DataFrame()))
         breadth = float(derived_metrics.get("breadth_above_200dma_pct", 0.0))
         distance = float(derived_metrics.get("spy_distance_to_ma200_pct", 0.0))
         range_pos = float(derived_metrics.get("spy_range_position_3m_pct", 50.0))
         qqq_momentum = percent_change(qqq, 20)
         iwm_momentum = percent_change(iwm, 20)
-        score = bounded_score(45 + distance * 3 + breadth * 0.25 + range_pos * 0.2 + qqq_momentum * 1.2 + iwm_momentum * 0.6)
+        dia_momentum = percent_change(dia, 20)
+        offense = (percent_change(qqq, 10) + percent_change(iwm, 10)) / 2
+        defense = (percent_change(xlu, 10) + percent_change(xlp, 10) + percent_change(xlv, 10)) / 3
+        offense_spread = offense - defense
+        score = bounded_score(
+            42
+            + distance * 3.2
+            + breadth * 0.22
+            + range_pos * 0.18
+            + qqq_momentum * 1.0
+            + iwm_momentum * 0.8
+            + dia_momentum * 0.5
+            + offense_spread * 2.5
+        )
         delta_1d = self._rolling_score_delta(spy, 1)
         delta_5d = self._rolling_score_delta(spy, 5)
         zone = zone_from_score(score, [(35, "防守区"), (50, "谨慎区"), (65, "试仓区"), (80, "进攻区"), (101, "强趋势区")])
         recommended_exposure = self._exposure_for_long_term(score)
-        summary = f"SPY 距 200 日线 {distance:.1f}%，市场广度 {breadth:.0f}%，长线环境处于{zone}。"
+        summary = f"SPY 距 200 日线 {distance:.1f}%，ETF proxy 广度 {breadth:.0f}%，进攻/防御价差 {offense_spread:.1f}，长线环境处于{zone}。"
         action = f"建议总仓位以 {recommended_exposure} 为主，优先持有顺趋势方向。"
         return MarketMonitorScoreCard(
             score=round(score, 1),
@@ -332,20 +349,34 @@ class MarketMonitorSnapshotService:
     def _build_system_risk_card(self, core_data: dict[str, pd.DataFrame], derived_metrics: dict[str, Any]) -> MarketMonitorSystemRiskCard:
         spy = _series(core_data.get("SPY", pd.DataFrame()))
         iwm = _series(core_data.get("IWM", pd.DataFrame()))
+        arkk = _series(core_data.get("ARKK", pd.DataFrame()))
         xlu = _series(core_data.get("XLU", pd.DataFrame()))
+        lqd = _series(core_data.get("LQD", pd.DataFrame()))
+        jnk = _series(core_data.get("JNK", pd.DataFrame()))
         vix = _series(core_data.get("^VIX", pd.DataFrame()))
         breadth = float(derived_metrics.get("breadth_above_200dma_pct", 0.0))
         iwm_rel = percent_change(iwm, 5) - percent_change(spy, 5)
-        xlu_rel = percent_change(xlu, 5) - percent_change(spy, 5)
+        arkk_rel = percent_change(arkk, 5) - percent_change(spy, 5)
+        defensive_rel = percent_change(xlu, 5) - percent_change(spy, 5)
+        lqd_rel = percent_change(lqd, 5) - percent_change(spy, 5)
+        jnk_rel = percent_change(jnk, 5) - percent_change(spy, 5)
+        credit_spread_proxy = lqd_rel - jnk_rel
         vix_close = float(vix.iloc[-1]) if not vix.empty else 20.0
         vix_percentile = rolling_percentile(vix, vix_close) if not vix.empty else 50.0
-        liquidity = bounded_score(vix_percentile * 0.7 + max(0.0, 60 - breadth) * 0.5)
-        appetite = bounded_score(50 - iwm_rel * 10 + max(0.0, xlu_rel) * 12 + max(0.0, 55 - breadth) * 0.4)
-        score = bounded_score(liquidity * 0.5 + appetite * 0.5)
+        liquidity = bounded_score(vix_percentile * 0.6 + max(0.0, credit_spread_proxy) * 18 + max(0.0, 58 - breadth) * 0.45)
+        appetite = bounded_score(
+            52
+            - iwm_rel * 8
+            - arkk_rel * 6
+            + max(0.0, defensive_rel) * 10
+            + max(0.0, -jnk_rel) * 12
+            + max(0.0, 55 - breadth) * 0.35
+        )
+        score = bounded_score(liquidity * 0.55 + appetite * 0.45)
         delta_1d = self._rolling_score_delta(vix, 1, multiplier=2.2)
         delta_5d = self._rolling_score_delta(vix, 5, multiplier=3.1)
         zone = zone_from_score(score, [(20, "低压区"), (45, "正常区"), (60, "压力区"), (80, "高压区"), (101, "危机区")])
-        summary = f"VIX 水位 {vix_close:.1f}，小盘相对强弱 {iwm_rel:.1f}，系统风险处于{zone}。"
+        summary = f"VIX 水位 {vix_close:.1f}，信用代理价差 {credit_spread_proxy:.1f}，高 beta 偏好 {((iwm_rel + arkk_rel) / 2):.1f}，系统风险处于{zone}。"
         action = self._system_risk_action(score)
         return MarketMonitorSystemRiskCard(
             score=round(score, 1),
@@ -357,9 +388,6 @@ class MarketMonitorSnapshotService:
             action=action,
             liquidity_stress_score=round(liquidity, 1),
             risk_appetite_score=round(appetite, 1),
-            pcr_percentile=None,
-            pcr_absolute=None,
-            pcr_panic_flag=None,
         )
 
     def _build_style_effectiveness(self, core_data: dict[str, pd.DataFrame]) -> MarketMonitorStyleEffectiveness:
@@ -427,25 +455,34 @@ class MarketMonitorSnapshotService:
         )
 
     def _build_event_risk(self, as_of_date: date) -> MarketMonitorEventRiskFlag:
-        weekday = as_of_date.weekday()
         index_level = MarketMonitorIndexEventRisk(active=False)
-        if weekday in {1, 2, 3}:
+        if as_of_date.weekday() in {1, 2, 3}:
             index_level = MarketMonitorIndexEventRisk(
                 active=True,
-                type="宏观窗口",
-                days_to_event=1,
+                type="搜索增强缺失-默认收紧",
+                days_to_event=None,
                 action_modifier=MarketMonitorActionModifier(
-                    new_position_allowed=True,
-                    overnight_allowed=True,
+                    new_position_allowed=None,
+                    overnight_allowed=False,
                     single_position_cap_multiplier=0.8,
-                    note="未来一日可能出现宏观数据扰动，减少追高。",
+                    note="当前未注入搜索事件事实，指数级事件风险仅按默认收紧规则处理，不放宽风险边界。",
                 ),
             )
         stock_level = MarketMonitorStockEventRisk(
-            earnings_stocks=["NVDA", "META"] if weekday in {0, 1, 2, 3} else [],
-            rule="财报股单票上限减半，禁追高，不影响指数 regime。" if weekday in {0, 1, 2, 3} else None,
+            earnings_stocks=[],
+            rule="未接入搜索财报日历时，不预填个股名单；若后续搜索命中财报股，仅对该股减半仓位并禁追高。",
         )
-        return MarketMonitorEventRiskFlag(index_level=index_level, stock_level=stock_level)
+        return MarketMonitorEventRiskFlag(
+            index_level=index_level,
+            stock_level=stock_level,
+            reasoning_summary="当前运行未注入搜索增强事件事实，事件风险卡采用保守降级输出。",
+            key_drivers=[
+                "指数级事件只允许收紧执行权限",
+                "个股级事件不应污染指数 regime",
+            ],
+            risks=["缺少宏观日历与财报搜索结果时，事件风险只能保守降级，无法给出精确事件窗口。"],
+            confidence="low",
+        )
 
     def _build_execution_card(
         self,
@@ -457,7 +494,7 @@ class MarketMonitorSnapshotService:
     ) -> MarketMonitorExecutionCard:
         if system_risk.score > 70:
             regime_label = "红灯"
-            conflict_mode = "系统风险高压-净值保护"
+            conflict_mode = "系统风险高压-危机模式"
             total_exposure_range = "0%-20%"
             new_position_allowed = False
             chase_breakout_allowed = False
@@ -488,9 +525,42 @@ class MarketMonitorSnapshotService:
             leverage_allowed = False
             single_position_cap = "12%"
             daily_risk_budget = "1.0R"
+        elif long_term.score >= 65 and short_term.score < 25:
+            regime_label = "橙灯"
+            conflict_mode = "长强极弱-等待恐慌修复"
+            total_exposure_range = "20%-35%"
+            new_position_allowed = False
+            chase_breakout_allowed = False
+            dip_buy_allowed = False
+            overnight_allowed = False
+            leverage_allowed = False
+            single_position_cap = "8%"
+            daily_risk_budget = "0.5R"
+        elif long_term.score >= 65 and short_term.score < 45:
+            regime_label = "黄灯-等待"
+            conflict_mode = "长强短弱-等待修复"
+            total_exposure_range = "35%-50%"
+            new_position_allowed = True
+            chase_breakout_allowed = False
+            dip_buy_allowed = True
+            overnight_allowed = False
+            leverage_allowed = False
+            single_position_cap = "10%"
+            daily_risk_budget = "0.6R"
+        elif long_term.score < 45 and short_term.score >= 55 and system_risk.score <= 35:
+            regime_label = "黄灯-短线"
+            conflict_mode = "长弱短强-仅短线博弈"
+            total_exposure_range = "20%-35%"
+            new_position_allowed = True
+            chase_breakout_allowed = True
+            dip_buy_allowed = True
+            overnight_allowed = False
+            leverage_allowed = False
+            single_position_cap = "6%"
+            daily_risk_budget = "0.5R"
         elif short_term.score < 45 or long_term.score < 45:
             regime_label = "橙灯"
-            conflict_mode = "环境转弱-控仓等待"
+            conflict_mode = "中性转弱-控仓防守"
             total_exposure_range = "20%-40%"
             new_position_allowed = False
             chase_breakout_allowed = False
@@ -501,7 +571,7 @@ class MarketMonitorSnapshotService:
             daily_risk_budget = "0.5R"
         else:
             regime_label = "黄灯"
-            conflict_mode = "中性环境-精选参与"
+            conflict_mode = "中性环境-低频参与"
             total_exposure_range = "40%-60%"
             new_position_allowed = True
             chase_breakout_allowed = False
@@ -512,8 +582,19 @@ class MarketMonitorSnapshotService:
             daily_risk_budget = "0.75R"
 
         if event_risk.index_level.active and event_risk.index_level.action_modifier:
-            if event_risk.index_level.action_modifier.single_position_cap_multiplier == 0.8 and single_position_cap == "12%":
-                single_position_cap = "10%"
+            modifier = event_risk.index_level.action_modifier
+            if modifier.new_position_allowed is False:
+                new_position_allowed = False
+            if modifier.overnight_allowed is False:
+                overnight_allowed = False
+            if modifier.single_position_cap_multiplier == 0.8:
+                cap_mapping = {
+                    "12%": "10%",
+                    "10%": "8%",
+                    "8%": "6%",
+                    "6%": "5%",
+                }
+                single_position_cap = cap_mapping.get(single_position_cap, single_position_cap)
 
         preferred_assets = style.asset_layer.preferred_assets or ["防御板块"]
         avoid_assets = style.asset_layer.avoid_assets
@@ -533,9 +614,9 @@ class MarketMonitorSnapshotService:
             preferred_assets=preferred_assets,
             avoid_assets=avoid_assets,
             signal_confirmation=MarketMonitorSignalConfirmation(
-                current_regime_days=1,
-                downgrade_unlock_in_days=2,
-                note="当前 regime 为新近状态，继续观察 2 个交易日。",
+                current_regime_observations=1,
+                risk_loosening_unlock_in_observations=2,
+                note="当前 regime 为新近状态；若要放宽风险边界，需再连续观察 2 次刷新保持。",
             ),
             event_risk_flag=event_risk,
             summary=summary,
@@ -543,13 +624,34 @@ class MarketMonitorSnapshotService:
 
     def _build_panic_card(self, core_data: dict[str, pd.DataFrame], system_risk_score: float) -> MarketMonitorPanicCard:
         spy = _series(core_data.get("SPY", pd.DataFrame()))
+        qqq = _series(core_data.get("QQQ", pd.DataFrame()))
+        iwm = _series(core_data.get("IWM", pd.DataFrame()))
+        dia = _series(core_data.get("DIA", pd.DataFrame()))
+        arkk = _series(core_data.get("ARKK", pd.DataFrame()))
+        xle = _series(core_data.get("XLE", pd.DataFrame()))
+        xlf = _series(core_data.get("XLF", pd.DataFrame()))
         vix = _series(core_data.get("^VIX", pd.DataFrame()))
-        spy_drop = abs(min(0.0, percent_change(spy, 1)))
+
+        proxy_drops = [
+            abs(min(0.0, percent_change(series, 1)))
+            for series in [spy, qqq, iwm, dia]
+        ]
+        panic_drop = max(proxy_drops) if proxy_drops else 0.0
         vix_jump = max(0.0, percent_change(vix, 1)) if not vix.empty else 0.0
-        panic_extreme = bounded_score(spy_drop * 18 + vix_jump * 1.5)
-        selling_exhaustion = bounded_score(40 + max(0.0, percent_change(spy, 5)) * 4)
-        reversal_confirmation = bounded_score(35 + max(0.0, percent_change(spy, 1)) * 10)
-        score = bounded_score(panic_extreme * 0.4 + selling_exhaustion * 0.3 + reversal_confirmation * 0.3)
+        high_beta_slump = abs(min(0.0, (percent_change(arkk, 1) + percent_change(iwm, 1)) / 2))
+        panic_extreme = bounded_score(panic_drop * 22 + vix_jump * 1.4 + high_beta_slump * 8)
+
+        leaders = [iwm, arkk, xle, xlf]
+        leader_relief_count = sum(1 for series in leaders if percent_change(series, 1) > -1.0)
+        selling_exhaustion = bounded_score(30 + leader_relief_count * 16 + max(0.0, percent_change(spy, 1) + 2.0) * 10)
+
+        intraday_reversal = bounded_score(
+            25
+            + max(0.0, percent_change(spy, 1)) * 12
+            + max(0.0, percent_change(qqq, 1)) * 8
+            + max(0.0, percent_change(arkk, 1)) * 6
+        )
+        score = bounded_score(panic_extreme * 0.45 + selling_exhaustion * 0.3 + intraday_reversal * 0.25)
         if panic_extreme >= 80:
             state = "panic_confirmed"
             zone = "强反转窗口"
@@ -562,7 +664,7 @@ class MarketMonitorSnapshotService:
         else:
             state = "无信号"
             zone = "无信号"
-        early_entry_allowed = state == "panic_confirmed" and reversal_confirmation >= 60
+        early_entry_allowed = state == "panic_confirmed" and intraday_reversal >= 60
         max_position_hint = "15%" if system_risk_score > 80 else "20%-35%"
         action = {
             "无信号": "不启动恐慌策略。",
@@ -575,13 +677,13 @@ class MarketMonitorSnapshotService:
             state=state,
             panic_extreme_score=round(panic_extreme, 1),
             selling_exhaustion_score=round(selling_exhaustion, 1),
-            reversal_confirmation_score=round(reversal_confirmation, 1),
+            intraday_reversal_score=round(intraday_reversal, 1),
             action=action,
             system_risk_override="系统风险>80 时，反弹仓上限强制≤15%" if system_risk_score > 80 else None,
             stop_loss="ATR×1.0",
             profit_rule="达 1R 兑现 50%，余仓移止损到成本线。",
             timeout_warning=False,
-            days_held=0,
+            refreshes_held=0,
             early_entry_allowed=early_entry_allowed,
             max_position_hint=max_position_hint,
         )

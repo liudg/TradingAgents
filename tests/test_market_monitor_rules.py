@@ -182,8 +182,8 @@ def _build_minimal_snapshot(as_of_date: date) -> MarketMonitorSnapshotResponse:
             preferred_assets=["防御板块", "能源/周期"],
             avoid_assets=["小盘高弹性"],
             signal_confirmation=MarketMonitorSignalConfirmation(
-                current_regime_days=1,
-                downgrade_unlock_in_days=2,
+                current_regime_observations=1,
+                risk_loosening_unlock_in_observations=2,
                 note="当前 regime 为新近状态，继续观察 2 个交易日。",
             ),
             event_risk_flag=event_risk,
@@ -195,12 +195,12 @@ def _build_minimal_snapshot(as_of_date: date) -> MarketMonitorSnapshotResponse:
             state="panic_watch",
             panic_extreme_score=38.0,
             selling_exhaustion_score=45.0,
-            reversal_confirmation_score=39.0,
+            intraday_reversal_score=39.0,
             action="加入观察列表，等待确认。",
             stop_loss="ATR×1.0",
             profit_rule="达 1R 兑现 50%，余仓移止损到成本线。",
             timeout_warning=False,
-            days_held=0,
+            refreshes_held=0,
             early_entry_allowed=False,
             max_position_hint="20%-35%",
         ),
@@ -243,7 +243,8 @@ class MarketMonitorRulesTests(unittest.TestCase):
         self.assertEqual(snapshot.as_of_date, date(2026, 4, 10))
         self.assertTrue(snapshot.execution_card.regime_label)
         self.assertTrue(snapshot.execution_card.summary)
-        self.assertEqual(snapshot.execution_card.signal_confirmation.current_regime_days, 1)
+        self.assertEqual(snapshot.execution_card.signal_confirmation.current_regime_observations, 1)
+        self.assertEqual(snapshot.execution_card.signal_confirmation.risk_loosening_unlock_in_observations, 2)
         self.assertIn("ETF/指数日线", snapshot.source_coverage.available_sources)
         self.assertIn("交易所级 breadth", snapshot.source_coverage.missing_sources)
         self.assertIn("广度因子使用 ETF 代理池近似", snapshot.degraded_factors)
@@ -300,14 +301,16 @@ class MarketMonitorRulesTests(unittest.TestCase):
 
         self.assertEqual(trade_dates, [date(2026, 4, 1), date(2026, 4, 2)])
 
-    def test_snapshot_service_event_risk_weekday_rules(self) -> None:
+    def test_snapshot_service_event_risk_returns_conservative_fallback(self) -> None:
         service = MarketMonitorSnapshotService()
 
-        monday = service._build_event_risk(date(2026, 4, 13))
+        wednesday = service._build_event_risk(date(2026, 4, 15))
         friday = service._build_event_risk(date(2026, 4, 17))
 
-        self.assertEqual(monday.stock_level.earnings_stocks, ["NVDA", "META"])
-        self.assertIsNotNone(monday.stock_level.rule)
+        self.assertTrue(wednesday.index_level.active)
+        self.assertEqual(wednesday.index_level.type, "搜索增强缺失-默认收紧")
+        self.assertEqual(wednesday.stock_level.earnings_stocks, [])
+        self.assertIsNotNone(wednesday.stock_level.rule)
         self.assertFalse(friday.index_level.active)
         self.assertEqual(friday.stock_level.earnings_stocks, [])
 

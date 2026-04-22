@@ -276,9 +276,6 @@ export interface MarketMonitorScoreCard extends MarketMonitorReasoningFields {
 export interface MarketMonitorSystemRiskCard extends MarketMonitorScoreCard {
   liquidity_stress_score: number;
   risk_appetite_score: number;
-  pcr_percentile?: number | null;
-  pcr_absolute?: number | null;
-  pcr_panic_flag?: boolean | null;
 }
 
 export interface MarketMonitorStyleEffectiveness extends MarketMonitorReasoningFields {
@@ -335,8 +332,8 @@ export interface MarketMonitorExecutionCard extends MarketMonitorReasoningFields
   preferred_assets: string[];
   avoid_assets: string[];
   signal_confirmation: {
-    current_regime_days: number;
-    downgrade_unlock_in_days: number;
+    current_regime_observations: number;
+    risk_loosening_unlock_in_observations: number;
     note: string;
   };
   event_risk_flag: MarketMonitorEventRiskFlag;
@@ -349,13 +346,13 @@ export interface MarketMonitorPanicCard extends MarketMonitorReasoningFields {
   state: string;
   panic_extreme_score: number;
   selling_exhaustion_score: number;
-  reversal_confirmation_score: number;
+  intraday_reversal_score: number;
   action: string;
   system_risk_override?: string | null;
   stop_loss: string;
   profit_rule: string;
   timeout_warning: boolean;
-  days_held: number;
+  refreshes_held: number;
   early_entry_allowed: boolean;
   max_position_hint: string;
 }

@@ -130,8 +130,8 @@ class MarketMonitorExecutionInferenceTests(unittest.TestCase):
           "preferred_assets": ["防御板块", "能源/周期"],
           "avoid_assets": ["小盘高弹性"],
           "signal_confirmation": {
-            "current_regime_days": 1,
-            "downgrade_unlock_in_days": 2,
+            "current_regime_observations": 1,
+            "risk_loosening_unlock_in_observations": 2,
             "note": "当前 regime 为新近状态，继续观察 2 个交易日。"
           },
           "event_risk_flag": {
@@ -181,8 +181,8 @@ class MarketMonitorExecutionInferenceTests(unittest.TestCase):
                     preferred_assets=["防御板块"],
                     avoid_assets=[],
                     signal_confirmation=MarketMonitorSignalConfirmation(
-                        current_regime_days=1,
-                        downgrade_unlock_in_days=2,
+                        current_regime_observations=1,
+                        risk_loosening_unlock_in_observations=2,
                         note="fallback",
                     ),
                     event_risk_flag=event_risk,
@@ -209,7 +209,8 @@ class MarketMonitorExecutionInferenceTests(unittest.TestCase):
         self.assertIn("conflict_matrix", user_prompt)
         self.assertIn("event_risk_rules", user_prompt)
         self.assertIn("signal_confirmation_rules", user_prompt)
-        self.assertIn("current_regime_days", user_prompt)
+        self.assertIn("current_regime_observations", user_prompt)
+        self.assertIn("risk_loosening_unlock_in_observations", user_prompt)
         self.assertIn("以规则为准", system_prompt)
         self.assertEqual(input_summary, "execution aggregation facts")
 
@@ -242,8 +243,8 @@ class MarketMonitorExecutionInferenceTests(unittest.TestCase):
                     preferred_assets=["防御板块", "能源/周期"],
                     avoid_assets=["小盘高弹性"],
                     signal_confirmation=MarketMonitorSignalConfirmation(
-                        current_regime_days=1,
-                        downgrade_unlock_in_days=2,
+                        current_regime_observations=1,
+                        risk_loosening_unlock_in_observations=2,
                         note="fallback",
                     ),
                     event_risk_flag=event_risk,
