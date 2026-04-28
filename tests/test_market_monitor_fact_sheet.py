@@ -1,10 +1,12 @@
 import unittest
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 
 import pandas as pd
 
+from tests.market_monitor_v231_fixtures import fixture_event_fact
 from tradingagents.web.market_monitor.fact_sheet import build_market_fact_sheet
-from tradingagents.web.market_monitor.schemas import MarketMonitorSourceCoverage
+from tradingagents.web.market_monitor.factors import build_event_fact_sheet, build_input_bundle
+from tradingagents.web.market_monitor.universe import get_market_monitor_universe
 
 
 class MarketMonitorFactSheetTests(unittest.TestCase):
@@ -30,12 +32,7 @@ class MarketMonitorFactSheetTests(unittest.TestCase):
             },
             index=index,
         )
-        coverage = MarketMonitorSourceCoverage(
-            completeness="medium",
-            available_sources=["ETF/指数日线", "VIX 日线", "本地缓存"],
-            missing_sources=["交易所级 breadth"],
-            degraded=True,
-        )
+        event_fact = fixture_event_fact()
 
         fact_sheet = build_market_fact_sheet(
             as_of_date=date(2026, 4, 11),
@@ -43,7 +40,7 @@ class MarketMonitorFactSheetTests(unittest.TestCase):
             core_data={"SPY": spy, "QQQ": qqq, "^VIX": pd.DataFrame()},
             local_market_data={"SPY": {"close": 129.0, "above_ma200": True}},
             derived_metrics={"breadth_above_200dma_pct": 63.0, "spy_distance_to_ma200_pct": 4.5},
-            source_coverage=coverage,
+            event_fact_sheet=[event_fact],
             open_gaps=["缺少交易所级 breadth 原始数据"],
             notes=["已按代理池与降级规则输出结果。"],
         )
@@ -53,9 +50,105 @@ class MarketMonitorFactSheetTests(unittest.TestCase):
         self.assertEqual(fact_sheet.local_facts["symbols"]["SPY"]["latest_close"], 129.0)
         self.assertEqual(fact_sheet.local_facts["market_proxies"]["SPY"]["close"], 129.0)
         self.assertEqual(fact_sheet.open_gaps, ["缺少交易所级 breadth 原始数据"])
-        self.assertEqual(fact_sheet.source_coverage.completeness, "medium")
-        self.assertGreaterEqual(len(fact_sheet.evidence_refs), 2)
-        self.assertEqual(fact_sheet.evidence_refs[0].source_type, "local_market_data")
+        self.assertEqual(fact_sheet.event_fact_sheet[0].event_id, "event-1")
+        self.assertGreaterEqual(len(fact_sheet.evidence), 2)
+        self.assertEqual(fact_sheet.evidence[0].source_type, "local_market_data")
+        self.assertIsInstance(fact_sheet.evidence[0].confidence, float)
+        self.assertTrue(any(item.source_type == "event_fact_sheet" for item in fact_sheet.evidence))
+
+    def test_build_event_fact_sheet_normalizes_structured_candidates(self) -> None:
+        now = datetime(2026, 4, 12, 9, 30, 0, tzinfo=timezone.utc)
+        bundle = build_input_bundle(
+            as_of_date=date(2026, 4, 12),
+            dataset={
+                "core": {},
+                "event_fact_candidates": [
+                    {
+                        "event": " CPI release ",
+                        "scope": "index_level",
+                        "time_window": "tomorrow_before_open",
+                        "severity": "high",
+                        "source_type": "official_calendar",
+                        "source_name": "U.S. Bureau of Labor Statistics",
+                        "source_url": "https://www.bls.gov/schedule/news_release/cpi.htm",
+                        "source_summary": "CPI 将于次日盘前公布。",
+                        "confidence": 1.2,
+                        "expires_at": (now + timedelta(days=1)).isoformat(),
+                    }
+                ],
+            },
+            universe=get_market_monitor_universe(),
+            timestamp=now,
+        )
+
+        facts = build_event_fact_sheet(bundle)
+
+        self.assertEqual(len(facts), 1)
+        self.assertTrue(facts[0].event_id.startswith("event-"))
+        self.assertEqual(facts[0].event, "CPI release")
+        self.assertEqual(facts[0].scope, "index_level")
+        self.assertEqual(facts[0].severity, "high")
+        self.assertEqual(facts[0].confidence, 0.95)
+
+    def test_build_event_fact_sheet_dedupes_and_filters_expired_or_invalid_sources(self) -> None:
+        now = datetime(2026, 4, 12, 9, 30, 0, tzinfo=timezone.utc)
+        bundle = build_input_bundle(
+            as_of_date=date(2026, 4, 12),
+            dataset={
+                "core": {},
+                "event_fact_candidates": [
+                    {
+                        "event": "FOMC decision",
+                        "scope": "index_level",
+                        "time_window": "today_after_close",
+                        "severity": "high",
+                        "source_type": "news",
+                        "source_name": "major news",
+                        "source_url": "https://example.com/fomc",
+                        "source_summary": "FOMC 决议临近。",
+                        "confidence": 0.65,
+                        "observed_at": now.isoformat(),
+                        "expires_at": (now + timedelta(hours=6)).isoformat(),
+                    },
+                    {
+                        "event": "FOMC decision",
+                        "scope": "index_level",
+                        "time_window": "today_after_close",
+                        "severity": "high",
+                        "source_type": "official_calendar",
+                        "source_name": "Federal Reserve",
+                        "source_url": "https://www.federalreserve.gov/monetarypolicy/fomccalendars.htm",
+                        "source_summary": "FOMC 决议临近，可能影响隔夜风险。",
+                        "confidence": 0.9,
+                        "observed_at": now.isoformat(),
+                        "expires_at": (now + timedelta(hours=8)).isoformat(),
+                    },
+                    {
+                        "event": "expired event",
+                        "source_type": "news",
+                        "source_name": "expired source",
+                        "source_summary": "已过期。",
+                        "expires_at": (now - timedelta(hours=1)).isoformat(),
+                    },
+                    {
+                        "event": "bad url event",
+                        "source_type": "news",
+                        "source_name": "bad source",
+                        "source_url": "javascript:alert(1)",
+                        "source_summary": "URL 不可信。",
+                        "expires_at": (now + timedelta(hours=1)).isoformat(),
+                    },
+                ],
+            },
+            universe=get_market_monitor_universe(),
+            timestamp=now,
+        )
+
+        facts = build_event_fact_sheet(bundle)
+
+        self.assertEqual(len(facts), 1)
+        self.assertEqual(facts[0].source_name, "Federal Reserve")
+        self.assertEqual(facts[0].confidence, 0.9)
 
     def test_build_market_fact_sheet_handles_duplicate_close_columns(self) -> None:
         index = pd.date_range("2026-04-01", periods=30, freq="B")
@@ -70,12 +163,6 @@ class MarketMonitorFactSheetTests(unittest.TestCase):
             index=index,
         )
         spy = pd.concat([base, base[["Close"]]], axis=1)
-        coverage = MarketMonitorSourceCoverage(
-            completeness="medium",
-            available_sources=["ETF/指数日线", "VIX 日线", "本地缓存"],
-            missing_sources=["交易所级 breadth"],
-            degraded=True,
-        )
 
         fact_sheet = build_market_fact_sheet(
             as_of_date=date(2026, 4, 11),
@@ -83,7 +170,6 @@ class MarketMonitorFactSheetTests(unittest.TestCase):
             core_data={"SPY": spy},
             local_market_data={"SPY": {"close": 129.0, "above_ma200": True}},
             derived_metrics={},
-            source_coverage=coverage,
             open_gaps=[],
             notes=[],
         )

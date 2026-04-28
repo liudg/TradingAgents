@@ -124,8 +124,7 @@ export function HistoricalMarketMonitorRunsPage() {
                 <Space direction="vertical" size={8}>
                   <Space wrap>
                     {run.data_freshness ? <Tag>新鲜度 {run.data_freshness}</Tag> : null}
-                    {run.source_completeness ? <Tag>完整度 {run.source_completeness}</Tag> : null}
-                    <Tag color={run.degraded ? "warning" : "success"}>{run.degraded ? "已降级" : "无降级"}</Tag>
+                    <Tag color={run.degraded ? "warning" : "success"}>{run.degraded ? "存在缺失数据" : "数据状态正常"}</Tag>
                     {run.days ? <Tag>历史 {run.days} 天</Tag> : null}
                   </Space>
                   <Typography.Text type="secondary">

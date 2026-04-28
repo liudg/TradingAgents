@@ -238,44 +238,110 @@ export interface HistoricalBacktestDetail extends HistoricalBacktestSummary {
   memory_entries: BacktestMemoryEntry[];
 }
 
-export interface MarketMonitorLayerMetric {
-  score: number;
-  delta_5d: number;
-  valid?: boolean | null;
-  preferred?: boolean | null;
-}
-
 export interface MarketMonitorEvidenceRef {
   source_type: string;
   source_label: string;
   snippet?: string | null;
   timestamp?: string | null;
-  confidence?: "low" | "medium" | "high" | null;
+  confidence?: number | null;
   metadata?: Record<string, unknown>;
+}
+
+export interface MarketMonitorMissingDataItem {
+  field: string;
+  reason: string;
+  impact?: string | null;
+  severity: "low" | "medium" | "high" | "critical";
+}
+
+export interface MarketMonitorInputDataStatus {
+  core_symbols_available: string[];
+  core_symbols_missing: string[];
+  interval: string;
+  includes_prepost: boolean;
+  source: string;
+  stale_symbols: string[];
+  partial_symbols: string[];
+}
+
+export interface MarketMonitorFactorBreakdown {
+  factor: string;
+  raw_value?: number | string | boolean | null;
+  raw_value_unit?: string | null;
+  percentile?: number | null;
+  polarity: "higher_is_better" | "higher_is_riskier" | "middle_is_better" | "lower_is_better";
+  score: number;
+  weight: number;
+  reason: string;
+  data_status: "available" | "missing" | "proxy_used" | "search_only";
+}
+
+export interface MarketMonitorScoreAdjustment {
+  value: number;
+  direction: string;
+  reason: string;
+  source_event_ids: string[];
+  confidence: number;
+  expires_at?: string | null;
+}
+
+export interface MarketMonitorEventFact {
+  event_id: string;
+  event: string;
+  scope: "index_level" | "stock_level" | "sector_level" | "cross_asset" | "unknown";
+  time_window: string;
+  severity: "low" | "medium" | "high" | "critical";
+  source_type: string;
+  source_name: string;
+  source_url?: string | null;
+  source_summary: string;
+  observed_at: string;
+  confidence: number;
+  expires_at: string;
+}
+
+export interface MarketMonitorEventTrigger {
+  trigger_type: string;
+  event: string;
+  severity: "low" | "medium" | "high" | "critical";
+  score_impact: string;
+  confidence: number;
+  expires_at?: string | null;
+  source_event_ids: string[];
 }
 
 export interface MarketMonitorReasoningFields {
   reasoning_summary?: string | null;
   key_drivers: string[];
   risks: string[];
-  evidence_refs: MarketMonitorEvidenceRef[];
-  confidence?: "low" | "medium" | "high" | null;
+  evidence: MarketMonitorEvidenceRef[];
+  confidence: number;
 }
 
 export interface MarketMonitorScoreCard extends MarketMonitorReasoningFields {
+  deterministic_score: number;
   score: number;
   zone: string;
   delta_1d: number;
   delta_5d: number;
   slope_state: string;
-  summary: string;
-  action: string;
   recommended_exposure?: string | null;
+  factor_breakdown: MarketMonitorFactorBreakdown[];
+  score_adjustment?: MarketMonitorScoreAdjustment | null;
 }
 
 export interface MarketMonitorSystemRiskCard extends MarketMonitorScoreCard {
   liquidity_stress_score: number;
   risk_appetite_score: number;
+  event_triggers: MarketMonitorEventTrigger[];
+}
+
+export interface MarketMonitorLayerMetric {
+  score: number;
+  delta_5d: number;
+  valid?: boolean | null;
+  preferred?: boolean | null;
+  factor_breakdown: MarketMonitorFactorBreakdown[];
 }
 
 export interface MarketMonitorStyleEffectiveness extends MarketMonitorReasoningFields {
@@ -294,6 +360,7 @@ export interface MarketMonitorStyleEffectiveness extends MarketMonitorReasoningF
     financials: MarketMonitorLayerMetric;
     preferred_assets: string[];
     avoid_assets: string[];
+    factor_breakdown: MarketMonitorFactorBreakdown[];
   };
 }
 
@@ -304,11 +371,11 @@ export interface MarketMonitorActionModifier {
   note?: string | null;
 }
 
-export interface MarketMonitorEventRiskFlag extends MarketMonitorReasoningFields {
+export interface MarketMonitorEventRiskFlag {
   index_level: {
     active: boolean;
-    type?: string | null;
-    days_to_event?: number | null;
+    events: string[];
+    source_event_ids: string[];
     action_modifier?: MarketMonitorActionModifier | null;
   };
   stock_level: {
@@ -337,7 +404,6 @@ export interface MarketMonitorExecutionCard extends MarketMonitorReasoningFields
     note: string;
   };
   event_risk_flag: MarketMonitorEventRiskFlag;
-  summary: string;
 }
 
 export interface MarketMonitorPanicCard extends MarketMonitorReasoningFields {
@@ -347,6 +413,7 @@ export interface MarketMonitorPanicCard extends MarketMonitorReasoningFields {
   panic_extreme_score: number;
   selling_exhaustion_score: number;
   intraday_reversal_score: number;
+  factor_breakdown: MarketMonitorFactorBreakdown[];
   action: string;
   system_risk_override?: string | null;
   stop_loss: string;
@@ -357,22 +424,14 @@ export interface MarketMonitorPanicCard extends MarketMonitorReasoningFields {
   max_position_hint: string;
 }
 
-export interface MarketMonitorSourceCoverage {
-  completeness: "high" | "medium" | "low";
-  available_sources: string[];
-  missing_sources: string[];
-  degraded: boolean;
-}
-
 export interface MarketMonitorFactSheet {
   as_of_date: string;
   generated_at: string;
   local_facts: Record<string, unknown>;
   derived_metrics: Record<string, unknown>;
-  search_facts: Array<Record<string, unknown>>;
+  event_fact_sheet: MarketMonitorEventFact[];
   open_gaps: string[];
-  source_coverage?: MarketMonitorSourceCoverage | null;
-  evidence_refs: MarketMonitorEvidenceRef[];
+  evidence: MarketMonitorEvidenceRef[];
   notes: string[];
 }
 
@@ -401,12 +460,6 @@ export interface MarketMonitorStageResult {
   metadata: Record<string, unknown>;
 }
 
-export interface MarketMonitorRunDebugOptions {
-  debug_card?: "long_term" | "short_term" | "system_risk" | "style" | "event_risk" | "panic" | "execution" | null;
-  reuse_fact_sheet: boolean;
-  replay_from_run_id?: string | null;
-}
-
 export interface MarketMonitorRunLlmConfig {
   provider?: string | null;
   model?: string | null;
@@ -415,7 +468,7 @@ export interface MarketMonitorRunLlmConfig {
 
 export interface MarketMonitorRunManifest {
   run_id: string;
-  mode: "snapshot" | "history" | "data_status" | "debug_card";
+  mode: "snapshot" | "history" | "data_status";
   request: MarketMonitorRunRequest;
   status: JobStatus;
   created_at: string;
@@ -426,26 +479,29 @@ export interface MarketMonitorRunManifest {
   error_message?: string | null;
   recoverable: boolean;
   llm_config?: MarketMonitorRunLlmConfig | null;
-  debug_options?: MarketMonitorRunDebugOptions | null;
   stage_results: MarketMonitorStageResult[];
   artifact_paths: Record<string, string>;
   prompt_trace_count: number;
 }
 
 export interface MarketMonitorSnapshotResponse {
+  scorecard_version: string;
+  prompt_version: string;
+  model_name?: string | null;
   timestamp: string;
   as_of_date: string;
+  data_mode: "daily" | "intraday_delayed" | "intraday_realtime";
   data_freshness: string;
+  input_data_status: MarketMonitorInputDataStatus;
+  missing_data: MarketMonitorMissingDataItem[];
+  risks: string[];
+  event_fact_sheet: MarketMonitorEventFact[];
   long_term_score: MarketMonitorScoreCard;
   short_term_score: MarketMonitorScoreCard;
   system_risk_score: MarketMonitorSystemRiskCard;
   style_effectiveness: MarketMonitorStyleEffectiveness;
   execution_card: MarketMonitorExecutionCard;
   panic_reversal_score: MarketMonitorPanicCard;
-  event_risk_flag: MarketMonitorEventRiskFlag;
-  source_coverage: MarketMonitorSourceCoverage;
-  degraded_factors: string[];
-  notes: string[];
   fact_sheet?: MarketMonitorFactSheet | null;
   prompt_traces: MarketMonitorPromptTrace[];
   run_id?: string | null;
@@ -453,10 +509,12 @@ export interface MarketMonitorSnapshotResponse {
 
 export interface MarketMonitorHistoryPoint {
   trade_date: string;
+  scorecard_version: string;
   long_term_score: number;
   short_term_score: number;
   system_risk_score: number;
-  panic_score: number;
+  panic_reversal_score: number;
+  panic_state: string;
   regime_label: string;
 }
 
@@ -469,42 +527,34 @@ export interface MarketMonitorHistoryResponse {
 export interface MarketMonitorDataStatusResponse {
   timestamp: string;
   as_of_date: string;
-  source_coverage: MarketMonitorSourceCoverage;
-  degraded_factors: string[];
-  notes: string[];
+  data_mode: "daily" | "intraday_delayed" | "intraday_realtime";
+  data_freshness: string;
+  input_data_status: MarketMonitorInputDataStatus;
+  missing_data: MarketMonitorMissingDataItem[];
   open_gaps: string[];
+  risks: string[];
+  event_fact_sheet: MarketMonitorEventFact[];
   fact_sheet?: MarketMonitorFactSheet | null;
   run_id?: string | null;
 }
 
 export interface MarketMonitorRunRequest {
-  trigger_endpoint: "snapshot" | "history" | "data_status" | "debug_card";
+  trigger_endpoint: "snapshot" | "history" | "data_status";
   as_of_date?: string | null;
   days?: number | null;
   force_refresh: boolean;
-  mode?: "snapshot" | "history" | "data_status" | "debug_card" | null;
-  debug_options?: MarketMonitorRunDebugOptions | null;
+  mode?: "snapshot" | "history" | "data_status" | null;
   llm_config?: MarketMonitorRunLlmConfig | null;
-}
-
-export interface MarketMonitorDebugCardResponse {
-  card_type: "long_term" | "short_term" | "system_risk" | "style" | "event_risk" | "panic" | "execution";
-  as_of_date: string;
-  fact_sheet_reused: boolean;
-  fact_sheet_source_run_id?: string | null;
-  result: Record<string, unknown>;
-  prompt_traces: MarketMonitorPromptTrace[];
 }
 
 export interface HistoricalMarketMonitorRunSummary {
   run_id: string;
-  trigger_endpoint: "snapshot" | "history" | "data_status" | "debug_card";
+  trigger_endpoint: "snapshot" | "history" | "data_status";
   as_of_date: string;
   days?: number | null;
   status: JobStatus;
   generated_at: string;
   data_freshness?: string | null;
-  source_completeness?: "high" | "medium" | "low" | null;
   regime_label?: string | null;
   degraded: boolean;
   recoverable?: boolean;
@@ -521,7 +571,6 @@ export interface HistoricalMarketMonitorRunDetail extends HistoricalMarketMonito
   snapshot?: MarketMonitorSnapshotResponse | null;
   history?: MarketMonitorHistoryResponse | null;
   data_status?: MarketMonitorDataStatusResponse | null;
-  debug_card?: MarketMonitorDebugCardResponse | null;
   fact_sheet?: MarketMonitorFactSheet | null;
   manifest?: MarketMonitorRunManifest | null;
   stage_results: MarketMonitorStageResult[];

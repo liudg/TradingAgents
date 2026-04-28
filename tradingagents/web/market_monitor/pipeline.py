@@ -3,10 +3,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import date
 
-from tradingagents.web.market_monitor.debug import MarketMonitorDebugSupport
 from tradingagents.web.market_monitor.schemas import (
     MarketMonitorDataStatusResponse,
-    MarketMonitorDebugCardResponse,
     MarketMonitorFactSheet,
     MarketMonitorHistoryRequest,
     MarketMonitorHistoryResponse,
@@ -23,29 +21,27 @@ class MarketMonitorExecutionResult:
     snapshot: MarketMonitorSnapshotResponse | None = None
     history: MarketMonitorHistoryResponse | None = None
     data_status: MarketMonitorDataStatusResponse | None = None
-    debug_card: MarketMonitorDebugCardResponse | None = None
     fact_sheet: MarketMonitorFactSheet | None = None
     prompt_traces: list[MarketMonitorPromptTrace] = field(default_factory=list)
     history_snapshots: list[MarketMonitorSnapshotResponse] = field(default_factory=list)
 
 
 class MarketMonitorPipeline:
-    def __init__(self, debug_support: MarketMonitorDebugSupport) -> None:
-        self.debug_support = debug_support
-
     def execute(
         self,
         *,
         request: MarketMonitorRunRequest,
         run_id: str,
         service: MarketMonitorSnapshotService,
+        previous_snapshots: list[MarketMonitorSnapshotResponse] | None = None,
     ) -> MarketMonitorExecutionResult:
         if request.trigger_endpoint == "snapshot":
             snapshot = service.get_snapshot(
                 MarketMonitorSnapshotRequest(
                     as_of_date=request.as_of_date,
                     force_refresh=request.force_refresh,
-                )
+                ),
+                previous_snapshots=previous_snapshots,
             ).model_copy(update={"run_id": run_id})
             return MarketMonitorExecutionResult(
                 snapshot=snapshot,
@@ -61,7 +57,7 @@ class MarketMonitorPipeline:
             trade_dates = service.resolve_history_trade_dates(history_request)
             history_snapshots = [
                 snapshot.model_copy(update={"run_id": run_id})
-                for snapshot in service.get_history_snapshots(history_request, trade_dates)
+                for snapshot in service.get_history_snapshots(history_request, trade_dates, previous_snapshots=previous_snapshots)
             ]
             history = service.build_history_response(
                 history_request.as_of_date or date.today(),
@@ -79,21 +75,13 @@ class MarketMonitorPipeline:
                 prompt_traces=prompt_traces,
                 history_snapshots=history_snapshots,
             )
-        if request.trigger_endpoint == "data_status":
-            data_status = service.get_data_status(
-                MarketMonitorSnapshotRequest(
-                    as_of_date=request.as_of_date,
-                    force_refresh=request.force_refresh,
-                )
-            ).model_copy(update={"run_id": run_id})
-            return MarketMonitorExecutionResult(
-                data_status=data_status,
-                fact_sheet=data_status.fact_sheet,
+        data_status = service.get_data_status(
+            MarketMonitorSnapshotRequest(
+                as_of_date=request.as_of_date,
+                force_refresh=request.force_refresh,
             )
-        fact_sheet, fact_sheet_source_run_id = self.debug_support.resolve_fact_sheet(request)
-        debug_card = service.get_debug_card(request, fact_sheet, fact_sheet_source_run_id)
+        ).model_copy(update={"run_id": run_id})
         return MarketMonitorExecutionResult(
-            debug_card=debug_card,
-            fact_sheet=fact_sheet,
-            prompt_traces=list(debug_card.prompt_traces),
+            data_status=data_status,
+            fact_sheet=data_status.fact_sheet,
         )

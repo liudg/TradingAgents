@@ -24,7 +24,7 @@ import {
 } from "../api/hooks";
 import {
   DataStatusBlock,
-  EventRiskBlock,
+  EventFactSheetBlock,
   ExecutionCardBlock,
   FactSheetBlock,
   HistoryArtifactsBlock,
@@ -73,10 +73,10 @@ export function MarketMonitorRunDetailPage() {
   const snapshot = run.snapshot;
   const history = run.history;
   const dataStatus = run.data_status;
-  const dataStatusSourceCoverage = dataStatus?.source_coverage || snapshot?.source_coverage;
-  const dataStatusDegradedFactors = dataStatus?.degraded_factors || snapshot?.degraded_factors || [];
-  const dataStatusNotes = dataStatus?.notes || snapshot?.notes || [];
-  const dataStatusOpenGaps = dataStatus?.open_gaps || [];
+  const inputDataStatus = dataStatus?.input_data_status || snapshot?.input_data_status;
+  const missingData = dataStatus?.missing_data || snapshot?.missing_data || [];
+  const dataRisks = dataStatus?.risks || snapshot?.risks || [];
+  const dataStatusOpenGaps = dataStatus?.open_gaps || snapshot?.fact_sheet?.open_gaps || [];
   const historyArtifacts = Object.keys(run.manifest?.artifact_paths || {})
     .filter((name) => name.startsWith("history_snapshot_") || name.startsWith("history_fact_sheet_"))
     .sort()
@@ -124,8 +124,10 @@ export function MarketMonitorRunDetailPage() {
           <Descriptions.Item label="开始时间">{formatDateTime(run.started_at)}</Descriptions.Item>
           <Descriptions.Item label="完成时间">{formatDateTime(run.finished_at)}</Descriptions.Item>
           <Descriptions.Item label="数据新鲜度">{run.data_freshness || "-"}</Descriptions.Item>
-          <Descriptions.Item label="完整度">{run.source_completeness || "-"}</Descriptions.Item>
+          <Descriptions.Item label="Prompt version">{snapshot?.prompt_version || "-"}</Descriptions.Item>
+          <Descriptions.Item label="Model">{snapshot?.model_name || run.manifest?.llm_config?.model || "-"}</Descriptions.Item>
           <Descriptions.Item label="Regime">{run.regime_label || "-"}</Descriptions.Item>
+          <Descriptions.Item label="V2.3.1 缺失数据">{missingData.length}</Descriptions.Item>
           <Descriptions.Item label="force_refresh">{run.request.force_refresh ? "true" : "false"}</Descriptions.Item>
           <Descriptions.Item label="可恢复">{run.recoverable ? "是" : "否"}</Descriptions.Item>
           <Descriptions.Item label="Prompt traces">{run.prompt_traces.length}</Descriptions.Item>
@@ -143,17 +145,6 @@ export function MarketMonitorRunDetailPage() {
 
       <PromptTraceBlock traces={promptTracesQuery.data || run.prompt_traces} />
 
-      {run.debug_card ? (
-        <Card className="page-card" title={`调试卡结果 · ${run.debug_card.card_type}`}>
-          <Space direction="vertical" size="middle" style={{ width: "100%" }}>
-            <Typography.Text>
-              复用 fact sheet：{run.debug_card.fact_sheet_reused ? "是" : "否"}
-              {run.debug_card.fact_sheet_source_run_id ? ` · 来源 ${run.debug_card.fact_sheet_source_run_id}` : ""}
-            </Typography.Text>
-            <pre style={{ whiteSpace: "pre-wrap", margin: 0 }}>{JSON.stringify(run.debug_card.result, null, 2)}</pre>
-          </Space>
-        </Card>
-      ) : null}
 
       {snapshot ? <ExecutionCardBlock card={snapshot.execution_card} /> : null}
 
@@ -176,17 +167,17 @@ export function MarketMonitorRunDetailPage() {
           <Col xs={24} lg={12}>
             <Space direction="vertical" size={16} style={{ width: "100%" }}>
               <StyleCardBlock card={snapshot.style_effectiveness} />
-              <EventRiskBlock card={snapshot.event_risk_flag} />
+              <EventFactSheetBlock events={snapshot.event_fact_sheet} />
             </Space>
           </Col>
           <Col xs={24} lg={12}>
             <Space direction="vertical" size={16} style={{ width: "100%" }}>
               <PanicCardBlock card={snapshot.panic_reversal_score} />
-              {dataStatusSourceCoverage ? (
+              {inputDataStatus ? (
                 <DataStatusBlock
-                  sourceCoverage={dataStatusSourceCoverage}
-                  degradedFactors={dataStatusDegradedFactors}
-                  notes={dataStatusNotes}
+                  inputDataStatus={inputDataStatus}
+                  missingData={missingData}
+                  risks={dataRisks}
                   openGaps={dataStatusOpenGaps}
                 />
               ) : null}
@@ -195,11 +186,11 @@ export function MarketMonitorRunDetailPage() {
         </Row>
       ) : null}
 
-      {!snapshot && dataStatusSourceCoverage ? (
+      {!snapshot && inputDataStatus ? (
         <DataStatusBlock
-          sourceCoverage={dataStatusSourceCoverage}
-          degradedFactors={dataStatusDegradedFactors}
-          notes={dataStatusNotes}
+          inputDataStatus={inputDataStatus}
+          missingData={missingData}
+          risks={dataRisks}
           openGaps={dataStatusOpenGaps}
         />
       ) : null}

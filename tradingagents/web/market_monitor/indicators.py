@@ -73,7 +73,7 @@ def zone_from_score(score: float, zones: list[tuple[float, str]]) -> str:
     return zones[-1][1]
 
 
-def slope_state(delta_1d: float, delta_5d: float) -> str:
+def benefit_score_slope_state(delta_1d: float, delta_5d: float) -> str:
     if delta_1d > 3 and delta_5d > 8:
         return "加速改善"
     if delta_1d > 0 and delta_5d > 3:
@@ -85,6 +85,24 @@ def slope_state(delta_1d: float, delta_5d: float) -> str:
     if delta_1d < 0 and delta_5d < -3:
         return "缓慢恶化"
     return "震荡"
+
+
+def risk_score_slope_state(delta_1d: float, delta_5d: float) -> str:
+    if delta_1d > 3 and delta_5d > 8:
+        return "风险加速上升"
+    if delta_1d > 0 and delta_5d > 3:
+        return "风险缓慢上升"
+    if abs(delta_1d) <= 2:
+        return "风险钝化震荡"
+    if delta_1d < -3 and delta_5d < -8:
+        return "风险加速回落"
+    if delta_1d < 0 and delta_5d < -3:
+        return "风险缓慢回落"
+    return "风险震荡"
+
+
+def slope_state(delta_1d: float, delta_5d: float) -> str:
+    return benefit_score_slope_state(delta_1d, delta_5d)
 
 
 def bounded_score(value: float) -> float:

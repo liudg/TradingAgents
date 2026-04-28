@@ -6,11 +6,7 @@ from typing import Any
 import pandas as pd
 
 from .indicators import _column_series, latest_close, percent_change
-from .schemas import (
-    MarketMonitorEvidenceRef,
-    MarketMonitorFactSheet,
-    MarketMonitorSourceCoverage,
-)
+from .schemas import MarketMonitorEventFact, MarketMonitorEvidenceRef, MarketMonitorFactSheet
 
 
 def _frame_to_market_fact(symbol: str, frame: pd.DataFrame) -> dict[str, Any]:
@@ -39,10 +35,9 @@ def build_market_fact_sheet(
     core_data: dict[str, pd.DataFrame],
     local_market_data: dict[str, Any],
     derived_metrics: dict[str, Any],
-    source_coverage: MarketMonitorSourceCoverage,
     open_gaps: list[str],
     notes: list[str],
-    search_facts: list[dict[str, Any]] | None = None,
+    event_fact_sheet: list[MarketMonitorEventFact] | None = None,
 ) -> MarketMonitorFactSheet:
     timestamp = generated_at or datetime.now(timezone.utc)
     symbol_facts = {
@@ -53,22 +48,39 @@ def build_market_fact_sheet(
         "symbols": symbol_facts,
         "market_proxies": local_market_data,
     }
-    evidence_refs: list[MarketMonitorEvidenceRef] = []
+    evidence: list[MarketMonitorEvidenceRef] = []
     for symbol, fact in symbol_facts.items():
         if not fact.get("available"):
             continue
         snippet = f"{symbol} close={fact.get('latest_close')} 5d={fact.get('change_5d_pct')}% 20d={fact.get('change_20d_pct')}%"
-        evidence_refs.append(
+        evidence.append(
             MarketMonitorEvidenceRef(
                 source_type="local_market_data",
                 source_label=f"{symbol} 日线",
                 snippet=snippet,
                 timestamp=timestamp,
-                confidence="high",
+                confidence=0.95,
                 metadata={
                     "symbol": symbol,
                     "rows": fact.get("rows"),
                     "last_trade_date": fact.get("last_trade_date"),
+                },
+            )
+        )
+    for event in event_fact_sheet or []:
+        evidence.append(
+            MarketMonitorEvidenceRef(
+                source_type="event_fact_sheet",
+                source_label=f"{event.source_name}: {event.event}",
+                snippet=event.source_summary,
+                timestamp=event.observed_at,
+                confidence=event.confidence,
+                metadata={
+                    "event_id": event.event_id,
+                    "scope": event.scope,
+                    "severity": event.severity,
+                    "source_url": event.source_url,
+                    "expires_at": event.expires_at.isoformat(),
                 },
             )
         )
@@ -77,9 +89,8 @@ def build_market_fact_sheet(
         generated_at=timestamp,
         local_facts=local_facts,
         derived_metrics=derived_metrics,
-        search_facts=search_facts or [],
+        event_fact_sheet=event_fact_sheet or [],
         open_gaps=open_gaps,
-        source_coverage=source_coverage,
-        evidence_refs=evidence_refs,
+        evidence=evidence,
         notes=notes,
     )

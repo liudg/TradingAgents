@@ -19,7 +19,7 @@ import {
 } from "../api/hooks";
 import {
   DataStatusBlock,
-  EventRiskBlock,
+  EventFactSheetBlock,
   ExecutionCardBlock,
   HistoryBlock,
   PanicCardBlock,
@@ -77,13 +77,17 @@ export function MarketMonitorPage() {
             <Tag>{snapshot.execution_card.conflict_mode}</Tag>
             <Tag>更新时间 {formatDateTime(snapshot.timestamp)}</Tag>
             <Tag>交易日 {snapshot.as_of_date}</Tag>
+            <Tag>版本 {snapshot.scorecard_version}</Tag>
+            <Tag>Prompt {snapshot.prompt_version}</Tag>
+            <Tag>Model {snapshot.model_name || "-"}</Tag>
+            <Tag>数据模式 {snapshot.data_mode}</Tag>
             <Tag>数据新鲜度 {snapshot.data_freshness}</Tag>
-            <Tag color={snapshot.source_coverage.completeness === "high" ? "success" : snapshot.source_coverage.completeness === "medium" ? "warning" : "error"}>
-              完整度 {snapshot.source_coverage.completeness}
+            <Tag color={snapshot.input_data_status.core_symbols_missing.length ? "warning" : "success"}>
+              核心数据 {snapshot.input_data_status.core_symbols_available.length}/{snapshot.input_data_status.core_symbols_available.length + snapshot.input_data_status.core_symbols_missing.length}
             </Tag>
             {snapshot.run_id ? <Tag>运行 {snapshot.run_id.slice(0, 8)}</Tag> : null}
           </Space>
-          <Typography.Text>{snapshot.execution_card.summary}</Typography.Text>
+          <Typography.Text>{snapshot.execution_card.conflict_mode}</Typography.Text>
           <Space wrap>
             <Button type="primary" onClick={() => navigate("/monitor/create")}>新建运行</Button>
             {snapshot.run_id ? (
@@ -92,12 +96,12 @@ export function MarketMonitorPage() {
             {snapshot.prompt_traces?.length ? <Tag color="purple">Prompt Trace {snapshot.prompt_traces.length}</Tag> : null}
             <Button onClick={() => navigate("/monitor/history")}>查看历史记录</Button>
           </Space>
-          {snapshot.degraded_factors.length ? (
+          {snapshot.missing_data.length ? (
             <Alert
               type="warning"
               showIcon
-              message="当前结果包含降级输出"
-              description={snapshot.degraded_factors.join("；")}
+              message="当前结果存在缺失数据"
+              description={snapshot.missing_data.map((item) => `${item.field}: ${item.reason}`).join("；")}
             />
           ) : null}
         </Space>
@@ -121,16 +125,16 @@ export function MarketMonitorPage() {
         <Col xs={24} lg={12}>
           <Space direction="vertical" size={16} style={{ width: "100%" }}>
             <StyleCardBlock card={snapshot.style_effectiveness} />
-            <EventRiskBlock card={snapshot.event_risk_flag} />
+            <EventFactSheetBlock events={snapshot.event_fact_sheet} />
           </Space>
         </Col>
         <Col xs={24} lg={12}>
           <Space direction="vertical" size={16} style={{ width: "100%" }}>
             <PanicCardBlock card={snapshot.panic_reversal_score} />
             <DataStatusBlock
-              sourceCoverage={dataStatus?.source_coverage || snapshot.source_coverage}
-              degradedFactors={dataStatus?.degraded_factors || snapshot.degraded_factors}
-              notes={dataStatus?.notes || snapshot.notes}
+              inputDataStatus={dataStatus?.input_data_status || snapshot.input_data_status}
+              missingData={dataStatus?.missing_data || snapshot.missing_data}
+              risks={dataStatus?.risks || snapshot.risks}
               openGaps={dataStatus?.open_gaps || snapshot.fact_sheet?.open_gaps || []}
             />
           </Space>

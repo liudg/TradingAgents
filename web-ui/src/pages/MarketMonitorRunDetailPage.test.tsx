@@ -2,7 +2,11 @@ import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 
-import type { HistoricalMarketMonitorRunDetail } from "../api/types";
+import type {
+  HistoricalMarketMonitorRunDetail,
+  MarketMonitorFactorBreakdown,
+  MarketMonitorInputDataStatus,
+} from "../api/types";
 import { MarketMonitorRunDetailPage } from "./MarketMonitorRunDetailPage";
 
 const mockUseMarketMonitorRun = vi.fn();
@@ -44,17 +48,49 @@ function installMatchMedia() {
   });
 }
 
+const inputDataStatus: MarketMonitorInputDataStatus = {
+  core_symbols_available: ["SPY", "QQQ", "IWM", "DIA", "^VIX"],
+  core_symbols_missing: [],
+  interval: "1d",
+  includes_prepost: false,
+  source: "yfinance",
+  stale_symbols: [],
+  partial_symbols: [],
+};
+
+const factor: MarketMonitorFactorBreakdown = {
+  factor: "ETF proxy trend",
+  raw_value: 1.8,
+  raw_value_unit: "%",
+  percentile: 0.64,
+  polarity: "higher_is_better",
+  score: 66,
+  weight: 1,
+  reason: "核心 ETF 趋势保持正向。",
+  data_status: "available",
+};
+
 function baseReasoning() {
   return {
-    reasoning_summary: null,
-    key_drivers: [],
-    risks: [],
-    evidence_refs: [],
-    confidence: null,
+    reasoning_summary: "规则层分数为主，LLM 仅解释风险。",
+    key_drivers: ["ETF proxy 广度改善"],
+    risks: ["广度因子使用 ETF 代理池近似"],
+    evidence: [],
+    confidence: 0.82,
   };
 }
 
 function buildRunDetail(): HistoricalMarketMonitorRunDetail {
+  const missingData = [
+    {
+      field: "event_fact_sheet",
+      reason: "当前刷新周期未注入联网搜索事件事实",
+      impact: "事件风险按空事实表处理",
+      severity: "medium" as const,
+    },
+  ];
+  const risks = ["广度因子使用 ETF 代理池近似"];
+
   return {
     run_id: "run-12345678",
     trigger_endpoint: "snapshot",
@@ -62,10 +98,10 @@ function buildRunDetail(): HistoricalMarketMonitorRunDetail {
     days: null,
     status: "completed",
     generated_at: "2026-04-11T08:31:00Z",
-    data_freshness: "delayed_15min",
-    source_completeness: "medium",
+    data_freshness: "daily_final",
     regime_label: "黄绿灯-Swing",
     degraded: true,
+    recoverable: false,
     error_message: null,
     log_path: "results/market_monitor/2026-04-11/run-12345678/market_monitor.log",
     results_dir: "results/market_monitor/2026-04-11/run-12345678",
@@ -79,60 +115,73 @@ function buildRunDetail(): HistoricalMarketMonitorRunDetail {
     started_at: "2026-04-11T08:30:05Z",
     finished_at: "2026-04-11T08:31:00Z",
     snapshot: {
+      scorecard_version: "2.3.1",
+      prompt_version: "market-monitor-scorecard-2026-04-v2.3.1",
+      model_name: "test-model",
       timestamp: "2026-04-11T08:31:00Z",
       as_of_date: "2026-04-11",
-      data_freshness: "delayed_15min",
+      data_mode: "daily",
+      data_freshness: "daily_final",
+      input_data_status: inputDataStatus,
+      missing_data: missingData,
+      risks,
+      event_fact_sheet: [],
       run_id: "run-12345678",
       long_term_score: {
         ...baseReasoning(),
+        deterministic_score: 67.5,
         score: 68.5,
         zone: "进攻区",
         delta_1d: 2.1,
         delta_5d: 8.2,
         slope_state: "缓慢改善",
-        summary: "长线环境偏多。",
-        action: "建议维持趋势仓。",
         recommended_exposure: "60%-80%",
+        factor_breakdown: [factor],
+        score_adjustment: null,
       },
       short_term_score: {
         ...baseReasoning(),
+        deterministic_score: 61.3,
         score: 61.3,
         zone: "可做区",
         delta_1d: 1.1,
         delta_5d: 4.6,
         slope_state: "缓慢改善",
-        summary: "短线环境允许参与。",
-        action: "优先低吸。",
+        factor_breakdown: [factor],
+        score_adjustment: null,
       },
       system_risk_score: {
         ...baseReasoning(),
+        deterministic_score: 34.6,
         score: 34.6,
         zone: "正常区",
         delta_1d: -1.2,
         delta_5d: -3.5,
-        slope_state: "缓慢恶化",
-        summary: "系统性风险可控。",
-        action: "维持常规风控。",
+        slope_state: "风险缓慢回落",
+        factor_breakdown: [{ ...factor, polarity: "higher_is_riskier", score: 35 }],
+        score_adjustment: null,
         liquidity_stress_score: 31.2,
         risk_appetite_score: 38.0,
+        event_triggers: [],
       },
       style_effectiveness: {
         ...baseReasoning(),
         tactic_layer: {
-          trend_breakout: { score: 52, delta_5d: 0.8, valid: false },
-          dip_buy: { score: 66, delta_5d: 3.4, valid: true },
-          oversold_bounce: { score: 58, delta_5d: 2.1, valid: true },
+          trend_breakout: { score: 52, delta_5d: 0.8, valid: false, factor_breakdown: [factor] },
+          dip_buy: { score: 66, delta_5d: 3.4, valid: true, factor_breakdown: [factor] },
+          oversold_bounce: { score: 58, delta_5d: 2.1, valid: true, factor_breakdown: [factor] },
           top_tactic: "回调低吸",
           avoid_tactic: "趋势突破",
         },
         asset_layer: {
-          large_cap_tech: { score: 61, delta_5d: 3.2, preferred: true },
-          small_cap_momentum: { score: 44, delta_5d: -1.2, preferred: false },
-          defensive: { score: 70, delta_5d: 2.8, preferred: true },
-          energy_cyclical: { score: 64, delta_5d: 1.8, preferred: true },
-          financials: { score: 49, delta_5d: 0.4, preferred: false },
+          large_cap_tech: { score: 61, delta_5d: 3.2, preferred: true, factor_breakdown: [factor] },
+          small_cap_momentum: { score: 44, delta_5d: -1.2, preferred: false, factor_breakdown: [factor] },
+          defensive: { score: 70, delta_5d: 2.8, preferred: true, factor_breakdown: [factor] },
+          energy_cyclical: { score: 64, delta_5d: 1.8, preferred: true, factor_breakdown: [factor] },
+          financials: { score: 49, delta_5d: 0.4, preferred: false, factor_breakdown: [factor] },
           preferred_assets: ["防御板块", "能源/周期"],
           avoid_assets: ["小盘高弹性"],
+          factor_breakdown: [factor],
         },
       },
       execution_card: {
@@ -156,19 +205,17 @@ function buildRunDetail(): HistoricalMarketMonitorRunDetail {
           note: "当前 regime 为新近状态，继续观察 2 个交易日。",
         },
         event_risk_flag: {
-          ...baseReasoning(),
           index_level: {
-            active: true,
-            type: "宏观窗口",
-            days_to_event: 1,
-            action_modifier: { note: "未来一日可能出现宏观数据扰动，减少追高。" },
+            active: false,
+            events: [],
+            source_event_ids: [],
+            action_modifier: { note: "当前无指数级事件修正。" },
           },
           stock_level: {
-            earnings_stocks: ["NVDA", "META"],
-            rule: "财报股单票上限减半，禁追高，不影响指数 regime。",
+            earnings_stocks: [],
+            rule: "个股级事件只影响个股，不改变指数 regime。",
           },
         },
-        summary: "当前处于黄绿灯-Swing，总仓建议 50%-70%，优先 回调低吸。",
       },
       panic_reversal_score: {
         ...baseReasoning(),
@@ -178,6 +225,7 @@ function buildRunDetail(): HistoricalMarketMonitorRunDetail {
         panic_extreme_score: 38,
         selling_exhaustion_score: 45,
         intraday_reversal_score: 39,
+        factor_breakdown: [factor],
         action: "加入观察列表，等待确认。",
         system_risk_override: null,
         stop_loss: "ATR×1.0",
@@ -187,27 +235,6 @@ function buildRunDetail(): HistoricalMarketMonitorRunDetail {
         early_entry_allowed: false,
         max_position_hint: "20%-35%",
       },
-      event_risk_flag: {
-        ...baseReasoning(),
-        index_level: {
-          active: true,
-          type: "宏观窗口",
-          days_to_event: 1,
-          action_modifier: { note: "未来一日可能出现宏观数据扰动，减少追高。" },
-        },
-        stock_level: {
-          earnings_stocks: ["NVDA", "META"],
-          rule: "财报股单票上限减半，禁追高，不影响指数 regime。",
-        },
-      },
-      source_coverage: {
-        completeness: "medium",
-        available_sources: ["ETF/指数日线", "VIX 日线", "本地缓存"],
-        missing_sources: ["交易所级 breadth"],
-        degraded: true,
-      },
-      degraded_factors: ["广度因子使用 ETF 代理池近似"],
-      notes: ["已按代理池与降级规则输出结果。"],
       fact_sheet: null,
       prompt_traces: [],
     },
@@ -216,10 +243,12 @@ function buildRunDetail(): HistoricalMarketMonitorRunDetail {
       points: [
         {
           trade_date: "2026-04-10",
+          scorecard_version: "2.3.1",
           long_term_score: 64,
           short_term_score: 58,
           system_risk_score: 36,
-          panic_score: 22,
+          panic_reversal_score: 22,
+          panic_state: "无信号",
           regime_label: "黄灯",
         },
       ],
@@ -228,15 +257,13 @@ function buildRunDetail(): HistoricalMarketMonitorRunDetail {
     data_status: {
       timestamp: "2026-04-11T08:31:00Z",
       as_of_date: "2026-04-11",
-      source_coverage: {
-        completeness: "medium",
-        available_sources: ["ETF/指数日线", "VIX 日线", "本地缓存"],
-        missing_sources: ["交易所级 breadth"],
-        degraded: true,
-      },
-      degraded_factors: ["广度因子使用 ETF 代理池近似"],
-      notes: ["已按代理池与降级规则输出结果。"],
+      data_mode: "daily",
+      data_freshness: "daily_final",
+      input_data_status: inputDataStatus,
+      missing_data: missingData,
       open_gaps: ["缺少交易所级 breadth 原始数据"],
+      risks,
+      event_fact_sheet: [],
       fact_sheet: null,
       run_id: "run-12345678",
     },
@@ -259,7 +286,6 @@ function buildRunDetail(): HistoricalMarketMonitorRunDetail {
       error_message: null,
       recoverable: false,
       llm_config: null,
-      debug_options: null,
       stage_results: [],
       artifact_paths: {
         "history_snapshot_2026-04-10": "results/market_monitor/2026-04-11/run-12345678/artifacts/history_snapshot_2026-04-10.json",
@@ -269,28 +295,37 @@ function buildRunDetail(): HistoricalMarketMonitorRunDetail {
     },
     stage_results: [],
     prompt_traces: [],
-    recoverable: false,
   };
+}
+
+function mockCommonRunQueries(run: HistoricalMarketMonitorRunDetail) {
+  mockUseMarketMonitorRun.mockReturnValue({
+    isLoading: false,
+    isError: false,
+    error: null,
+    isFetching: false,
+    data: run,
+    refetch: vi.fn(),
+  });
+  mockUseMarketMonitorPromptTraces.mockReturnValue({ isFetching: false, data: [], refetch: vi.fn() });
+  mockUseMarketMonitorArtifact.mockReturnValue({ isFetching: false, data: null, refetch: vi.fn() });
+  mockUseRecoverMarketMonitorRun.mockReturnValue({ isPending: false, mutate: vi.fn() });
+}
+
+function resetMocks() {
+  installMatchMedia();
+  mockUseMarketMonitorRun.mockReset();
+  mockUseMarketMonitorRunLogs.mockReset();
+  mockUseMarketMonitorPromptTraces.mockReset();
+  mockUseMarketMonitorArtifact.mockReset();
+  mockUseRecoverMarketMonitorRun.mockReset();
+  mockNavigate.mockReset();
 }
 
 describe("MarketMonitorRunDetailPage", () => {
   it("renders run detail and logs", () => {
-    installMatchMedia();
-    mockUseMarketMonitorRun.mockReset();
-    mockUseMarketMonitorRunLogs.mockReset();
-    mockUseMarketMonitorPromptTraces.mockReset();
-    mockUseMarketMonitorArtifact.mockReset();
-    mockUseRecoverMarketMonitorRun.mockReset();
-    mockNavigate.mockReset();
-
-    mockUseMarketMonitorRun.mockReturnValue({
-      isLoading: false,
-      isError: false,
-      error: null,
-      isFetching: false,
-      data: buildRunDetail(),
-      refetch: vi.fn(),
-    });
+    resetMocks();
+    mockCommonRunQueries(buildRunDetail());
     mockUseMarketMonitorRunLogs.mockReturnValue({
       isFetching: false,
       data: [
@@ -302,20 +337,6 @@ describe("MarketMonitorRunDetailPage", () => {
         },
       ],
       refetch: vi.fn(),
-    });
-    mockUseMarketMonitorPromptTraces.mockReturnValue({
-      isFetching: false,
-      data: [],
-      refetch: vi.fn(),
-    });
-    mockUseMarketMonitorArtifact.mockReturnValue({
-      isFetching: false,
-      data: null,
-      refetch: vi.fn(),
-    });
-    mockUseRecoverMarketMonitorRun.mockReturnValue({
-      isPending: false,
-      mutate: vi.fn(),
     });
 
     render(
@@ -332,49 +353,18 @@ describe("MarketMonitorRunDetailPage", () => {
     expect(screen.getByText("History 日级产物")).toBeInTheDocument();
     expect(screen.getByText("history_snapshot_2026-04-10")).toBeInTheDocument();
     expect(screen.getByText("Market monitor run run-12345678 started")).toBeInTheDocument();
+    expect(screen.getByText("market-monitor-scorecard-2026-04-v2.3.1")).toBeInTheDocument();
+    expect(screen.getByText("test-model")).toBeInTheDocument();
     expect(screen.getByText("缺少交易所级 breadth 原始数据")).toBeInTheDocument();
   });
 
   it("renders detail when history and data status are missing", () => {
-    installMatchMedia();
-    mockUseMarketMonitorRun.mockReset();
-    mockUseMarketMonitorRunLogs.mockReset();
-    mockUseMarketMonitorPromptTraces.mockReset();
-    mockUseMarketMonitorArtifact.mockReset();
-    mockUseRecoverMarketMonitorRun.mockReset();
-    mockNavigate.mockReset();
-
+    resetMocks();
     const run = buildRunDetail();
     run.history = null;
     run.data_status = null;
-
-    mockUseMarketMonitorRun.mockReturnValue({
-      isLoading: false,
-      isError: false,
-      error: null,
-      isFetching: false,
-      data: run,
-      refetch: vi.fn(),
-    });
-    mockUseMarketMonitorRunLogs.mockReturnValue({
-      isFetching: false,
-      data: [],
-      refetch: vi.fn(),
-    });
-    mockUseMarketMonitorPromptTraces.mockReturnValue({
-      isFetching: false,
-      data: [],
-      refetch: vi.fn(),
-    });
-    mockUseMarketMonitorArtifact.mockReturnValue({
-      isFetching: false,
-      data: null,
-      refetch: vi.fn(),
-    });
-    mockUseRecoverMarketMonitorRun.mockReturnValue({
-      isPending: false,
-      mutate: vi.fn(),
-    });
+    mockCommonRunQueries(run);
+    mockUseMarketMonitorRunLogs.mockReturnValue({ isFetching: false, data: [], refetch: vi.fn() });
 
     render(
       <MemoryRouter initialEntries={["/monitor/runs/run-12345678"]}>
@@ -390,46 +380,13 @@ describe("MarketMonitorRunDetailPage", () => {
   });
 
   it("renders data status block for data-status-only runs", () => {
-    installMatchMedia();
-    mockUseMarketMonitorRun.mockReset();
-    mockUseMarketMonitorRunLogs.mockReset();
-    mockUseMarketMonitorPromptTraces.mockReset();
-    mockUseMarketMonitorArtifact.mockReset();
-    mockUseRecoverMarketMonitorRun.mockReset();
-    mockNavigate.mockReset();
-
+    resetMocks();
     const run = buildRunDetail();
     run.trigger_endpoint = "data_status";
     run.snapshot = null;
     run.history = null;
-
-    mockUseMarketMonitorRun.mockReturnValue({
-      isLoading: false,
-      isError: false,
-      error: null,
-      isFetching: false,
-      data: run,
-      refetch: vi.fn(),
-    });
-    mockUseMarketMonitorRunLogs.mockReturnValue({
-      isFetching: false,
-      data: [],
-      refetch: vi.fn(),
-    });
-    mockUseMarketMonitorPromptTraces.mockReturnValue({
-      isFetching: false,
-      data: [],
-      refetch: vi.fn(),
-    });
-    mockUseMarketMonitorArtifact.mockReturnValue({
-      isFetching: false,
-      data: null,
-      refetch: vi.fn(),
-    });
-    mockUseRecoverMarketMonitorRun.mockReturnValue({
-      isPending: false,
-      mutate: vi.fn(),
-    });
+    mockCommonRunQueries(run);
+    mockUseMarketMonitorRunLogs.mockReturnValue({ isFetching: false, data: [], refetch: vi.fn() });
 
     render(
       <MemoryRouter initialEntries={["/monitor/runs/run-12345678"]}>
@@ -439,100 +396,20 @@ describe("MarketMonitorRunDetailPage", () => {
       </MemoryRouter>,
     );
 
-    expect(screen.getByText("数据完整度与降级说明")).toBeInTheDocument();
+    expect(screen.getByText("数据状态与缺失说明")).toBeInTheDocument();
     expect(screen.getByText("缺少交易所级 breadth 原始数据")).toBeInTheDocument();
     expect(screen.queryByText("执行动作卡")).not.toBeInTheDocument();
   });
 
-  it("renders debug card result block", () => {
-    installMatchMedia();
-    mockUseMarketMonitorRun.mockReset();
-    mockUseMarketMonitorRunLogs.mockReset();
-    mockUseMarketMonitorPromptTraces.mockReset();
-    mockUseMarketMonitorArtifact.mockReset();
-    mockUseRecoverMarketMonitorRun.mockReset();
-    mockNavigate.mockReset();
-
-    const run = buildRunDetail();
-    run.trigger_endpoint = "debug_card";
-    run.snapshot = null;
-    run.history = null;
-    run.data_status = null;
-    run.debug_card = {
-      card_type: "execution",
-      as_of_date: "2026-04-11",
-      fact_sheet_reused: true,
-      fact_sheet_source_run_id: "run-source-1",
-      result: { regime_label: "黄绿灯-Swing" },
-      prompt_traces: [],
-    };
-
-    mockUseMarketMonitorRun.mockReturnValue({
-      isLoading: false,
-      isError: false,
-      error: null,
-      isFetching: false,
-      data: run,
-      refetch: vi.fn(),
-    });
-    mockUseMarketMonitorRunLogs.mockReturnValue({ isFetching: false, data: [], refetch: vi.fn() });
-    mockUseMarketMonitorPromptTraces.mockReturnValue({ isFetching: false, data: [], refetch: vi.fn() });
-    mockUseMarketMonitorArtifact.mockReturnValue({ isFetching: false, data: null, refetch: vi.fn() });
-    mockUseRecoverMarketMonitorRun.mockReturnValue({ isPending: false, mutate: vi.fn() });
-
-    render(
-      <MemoryRouter initialEntries={["/monitor/runs/run-12345678"]}>
-        <Routes>
-          <Route path="/monitor/runs/:runId" element={<MarketMonitorRunDetailPage />} />
-        </Routes>
-      </MemoryRouter>,
-    );
-
-    expect(screen.getByText("调试卡结果 · execution")).toBeInTheDocument();
-    expect(screen.getByText(/复用 fact sheet：是/)).toBeInTheDocument();
-    expect(screen.getByText(/run-source-1/)).toBeInTheDocument();
-  });
 
   it("shows recover button and triggers recovery", () => {
-    installMatchMedia();
-    mockUseMarketMonitorRun.mockReset();
-    mockUseMarketMonitorRunLogs.mockReset();
-    mockUseMarketMonitorPromptTraces.mockReset();
-    mockUseMarketMonitorArtifact.mockReset();
-    mockUseRecoverMarketMonitorRun.mockReset();
-    mockNavigate.mockReset();
-
+    resetMocks();
     const run = buildRunDetail();
     run.recoverable = true;
-
     const mutate = vi.fn();
-    mockUseMarketMonitorRun.mockReturnValue({
-      isLoading: false,
-      isError: false,
-      error: null,
-      isFetching: false,
-      data: run,
-      refetch: vi.fn(),
-    });
-    mockUseMarketMonitorRunLogs.mockReturnValue({
-      isFetching: false,
-      data: [],
-      refetch: vi.fn(),
-    });
-    mockUseMarketMonitorPromptTraces.mockReturnValue({
-      isFetching: false,
-      data: [],
-      refetch: vi.fn(),
-    });
-    mockUseMarketMonitorArtifact.mockReturnValue({
-      isFetching: false,
-      data: null,
-      refetch: vi.fn(),
-    });
-    mockUseRecoverMarketMonitorRun.mockReturnValue({
-      isPending: false,
-      mutate,
-    });
+    mockCommonRunQueries(run);
+    mockUseRecoverMarketMonitorRun.mockReturnValue({ isPending: false, mutate });
+    mockUseMarketMonitorRunLogs.mockReturnValue({ isFetching: false, data: [], refetch: vi.fn() });
 
     render(
       <MemoryRouter initialEntries={["/monitor/runs/run-12345678"]}>
@@ -547,41 +424,9 @@ describe("MarketMonitorRunDetailPage", () => {
   });
 
   it("goes back to history list when clicking return", () => {
-    installMatchMedia();
-    mockUseMarketMonitorRun.mockReset();
-    mockUseMarketMonitorRunLogs.mockReset();
-    mockUseMarketMonitorPromptTraces.mockReset();
-    mockUseMarketMonitorArtifact.mockReset();
-    mockUseRecoverMarketMonitorRun.mockReset();
-    mockNavigate.mockReset();
-
-    mockUseMarketMonitorRun.mockReturnValue({
-      isLoading: false,
-      isError: false,
-      error: null,
-      isFetching: false,
-      data: buildRunDetail(),
-      refetch: vi.fn(),
-    });
-    mockUseMarketMonitorRunLogs.mockReturnValue({
-      isFetching: false,
-      data: [],
-      refetch: vi.fn(),
-    });
-    mockUseMarketMonitorPromptTraces.mockReturnValue({
-      isFetching: false,
-      data: [],
-      refetch: vi.fn(),
-    });
-    mockUseMarketMonitorArtifact.mockReturnValue({
-      isFetching: false,
-      data: null,
-      refetch: vi.fn(),
-    });
-    mockUseRecoverMarketMonitorRun.mockReturnValue({
-      isPending: false,
-      mutate: vi.fn(),
-    });
+    resetMocks();
+    mockCommonRunQueries(buildRunDetail());
+    mockUseMarketMonitorRunLogs.mockReturnValue({ isFetching: false, data: [], refetch: vi.fn() });
 
     render(
       <MemoryRouter initialEntries={["/monitor/runs/run-12345678"]}>

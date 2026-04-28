@@ -7,7 +7,6 @@ from typing import Any
 from tradingagents.web.market_monitor.io_utils import write_json_atomic
 from tradingagents.web.market_monitor.schemas import (
     MarketMonitorDataStatusResponse,
-    MarketMonitorDebugCardResponse,
     MarketMonitorFactSheet,
     MarketMonitorHistoryResponse,
     MarketMonitorPromptTrace,
@@ -99,12 +98,6 @@ class MarketMonitorPersistence:
         write_json_atomic(path, fact_sheet.model_dump(mode="json"))
         return path
 
-    def write_debug_card_artifact(self, debug_card: MarketMonitorDebugCardResponse) -> Path:
-        self.ensure_layout()
-        path = self.artifact_path("debug_card")
-        write_json_atomic(path, debug_card.model_dump(mode="json"))
-        return path
-
     def read_snapshot_artifact(self) -> MarketMonitorSnapshotResponse:
         payload = json.loads(self.artifact_path("snapshot").read_text(encoding="utf-8"))
         return MarketMonitorSnapshotResponse.model_validate(payload)
@@ -120,10 +113,6 @@ class MarketMonitorPersistence:
     def read_fact_sheet_artifact(self) -> MarketMonitorFactSheet:
         payload = json.loads(self.artifact_path("fact_sheet").read_text(encoding="utf-8"))
         return MarketMonitorFactSheet.model_validate(payload)
-
-    def read_debug_card_artifact(self) -> MarketMonitorDebugCardResponse:
-        payload = json.loads(self.artifact_path("debug_card").read_text(encoding="utf-8"))
-        return MarketMonitorDebugCardResponse.model_validate(payload)
 
     def prompt_trace_path(self, trace_name: str) -> Path:
         return self.prompt_traces_dir / f"{trace_name}.json"

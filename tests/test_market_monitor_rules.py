@@ -1,34 +1,41 @@
 import unittest
-from datetime import date, datetime, timezone
+from datetime import date
 from typing import Any
 from unittest.mock import patch
 
 import pandas as pd
 
+from tests.market_monitor_v231_fixtures import (
+    fixture_fact_sheet,
+    fixture_panic_card,
+    fixture_score_card,
+    fixture_snapshot,
+    fixture_style_effectiveness,
+    fixture_system_risk_card,
+)
 from tradingagents.web.market_monitor.data import _expected_market_close_date
+from tradingagents.web.market_monitor.factors import build_execution_card, build_input_bundle, build_panic_card
 from tradingagents.web.market_monitor.metrics import build_market_snapshot
 from tradingagents.web.market_monitor.schemas import (
-    MarketMonitorActionModifier,
-    MarketMonitorEventRiskFlag,
-    MarketMonitorExecutionCard,
-    MarketMonitorFactSheet,
     MarketMonitorHistoryRequest,
-    MarketMonitorIndexEventRisk,
-    MarketMonitorPanicCard,
-    MarketMonitorScoreCard,
-    MarketMonitorSignalConfirmation,
     MarketMonitorSnapshotRequest,
-    MarketMonitorSnapshotResponse,
-    MarketMonitorSourceCoverage,
-    MarketMonitorStockEventRisk,
-    MarketMonitorStyleAssetLayer,
-    MarketMonitorStyleEffectiveness,
-    MarketMonitorStyleTacticLayer,
-    MarketMonitorLayerMetric,
-    MarketMonitorSystemRiskCard,
 )
 from tradingagents.web.market_monitor.snapshot_service import MarketMonitorSnapshotService
 from tradingagents.web.market_monitor.universe import get_market_monitor_universe
+
+
+class _FakeResponse:
+    content = "not json"
+
+
+class _FakeLlm:
+    def invoke(self, messages):
+        return _FakeResponse()
+
+
+class _FakeClient:
+    def get_llm(self):
+        return _FakeLlm()
 
 
 def _make_frame(base: float, days: int = 320) -> pd.DataFrame:
@@ -47,8 +54,12 @@ def _make_frame(base: float, days: int = 320) -> pd.DataFrame:
 
 def _complete_dataset() -> dict[str, Any]:
     universe = get_market_monitor_universe()
-    core = {symbol: _make_frame(100 + idx * 3) for idx, symbol in enumerate(universe["core_index_etfs"])}
-    core.update({symbol: _make_frame(80 + idx * 2) for idx, symbol in enumerate(universe["sector_etfs"])})
+    symbols: list[str] = []
+    for values in universe.values():
+        for symbol in values:
+            if symbol not in symbols:
+                symbols.append(symbol)
+    core = {symbol: _make_frame(100 + idx * 3) for idx, symbol in enumerate(symbols)}
     core["^VIX"] = _make_frame(18, days=320)
     return {
         "core": core,
@@ -92,127 +103,6 @@ def _complete_dataset() -> dict[str, Any]:
     }
 
 
-def _build_minimal_snapshot(as_of_date: date) -> MarketMonitorSnapshotResponse:
-    now = datetime(2026, 4, 12, 9, 30, 0, tzinfo=timezone.utc)
-    event_risk = MarketMonitorEventRiskFlag(
-        index_level=MarketMonitorIndexEventRisk(
-            active=True,
-            type="宏观窗口",
-            days_to_event=1,
-            action_modifier=MarketMonitorActionModifier(note="减少追高。"),
-        ),
-        stock_level=MarketMonitorStockEventRisk(earnings_stocks=["NVDA"], rule="财报股单票上限减半。"),
-    )
-    fact_sheet = MarketMonitorFactSheet(
-        as_of_date=as_of_date,
-        generated_at=now,
-        local_facts={"spy_close": 523.1},
-        derived_metrics={"breadth_above_200dma_pct": 63.0},
-        open_gaps=["缺少交易所级 breadth 原始数据"],
-        source_coverage=MarketMonitorSourceCoverage(
-            completeness="medium",
-            available_sources=["ETF/指数日线", "VIX 日线", "本地缓存"],
-            missing_sources=["交易所级 breadth"],
-            degraded=True,
-        ),
-    )
-    return MarketMonitorSnapshotResponse(
-        timestamp=now,
-        as_of_date=as_of_date,
-        data_freshness="delayed_15min",
-        long_term_score=MarketMonitorScoreCard(
-            score=68.5,
-            zone="进攻区",
-            delta_1d=2.1,
-            delta_5d=8.2,
-            slope_state="缓慢改善",
-            summary="长线环境偏多。",
-            action="建议维持趋势仓。",
-        ),
-        short_term_score=MarketMonitorScoreCard(
-            score=61.3,
-            zone="可做区",
-            delta_1d=1.1,
-            delta_5d=4.6,
-            slope_state="缓慢改善",
-            summary="短线环境允许参与。",
-            action="优先低吸。",
-        ),
-        system_risk_score=MarketMonitorSystemRiskCard(
-            score=34.6,
-            zone="正常区",
-            delta_1d=-1.2,
-            delta_5d=-3.5,
-            slope_state="缓慢恶化",
-            summary="系统性风险可控。",
-            action="维持常规风控。",
-            liquidity_stress_score=31.2,
-            risk_appetite_score=38.0,
-        ),
-        style_effectiveness=MarketMonitorStyleEffectiveness(
-            tactic_layer=MarketMonitorStyleTacticLayer(
-                trend_breakout=MarketMonitorLayerMetric(score=52, delta_5d=0.8, valid=False),
-                dip_buy=MarketMonitorLayerMetric(score=66, delta_5d=3.4, valid=True),
-                oversold_bounce=MarketMonitorLayerMetric(score=58, delta_5d=2.1, valid=True),
-                top_tactic="回调低吸",
-                avoid_tactic="趋势突破",
-            ),
-            asset_layer=MarketMonitorStyleAssetLayer(
-                large_cap_tech=MarketMonitorLayerMetric(score=61, delta_5d=3.2, preferred=True),
-                small_cap_momentum=MarketMonitorLayerMetric(score=44, delta_5d=-1.2, preferred=False),
-                defensive=MarketMonitorLayerMetric(score=70, delta_5d=2.8, preferred=True),
-                energy_cyclical=MarketMonitorLayerMetric(score=64, delta_5d=1.8, preferred=True),
-                financials=MarketMonitorLayerMetric(score=49, delta_5d=0.4, preferred=False),
-                preferred_assets=["防御板块", "能源/周期"],
-                avoid_assets=["小盘高弹性"],
-            ),
-        ),
-        execution_card=MarketMonitorExecutionCard(
-            regime_label="黄绿灯-Swing",
-            conflict_mode="长线中性+短线活跃+风险低",
-            total_exposure_range="50%-70%",
-            new_position_allowed=True,
-            chase_breakout_allowed=True,
-            dip_buy_allowed=True,
-            overnight_allowed=True,
-            leverage_allowed=False,
-            single_position_cap="12%",
-            daily_risk_budget="1.0R",
-            tactic_preference="回调低吸 > 趋势突破",
-            preferred_assets=["防御板块", "能源/周期"],
-            avoid_assets=["小盘高弹性"],
-            signal_confirmation=MarketMonitorSignalConfirmation(
-                current_regime_observations=1,
-                risk_loosening_unlock_in_observations=2,
-                note="当前 regime 为新近状态，继续观察 2 个交易日。",
-            ),
-            event_risk_flag=event_risk,
-            summary="当前处于黄绿灯-Swing，总仓建议 50%-70%。",
-        ),
-        panic_reversal_score=MarketMonitorPanicCard(
-            score=41.2,
-            zone="观察期",
-            state="panic_watch",
-            panic_extreme_score=38.0,
-            selling_exhaustion_score=45.0,
-            intraday_reversal_score=39.0,
-            action="加入观察列表，等待确认。",
-            stop_loss="ATR×1.0",
-            profit_rule="达 1R 兑现 50%，余仓移止损到成本线。",
-            timeout_warning=False,
-            refreshes_held=0,
-            early_entry_allowed=False,
-            max_position_hint="20%-35%",
-        ),
-        event_risk_flag=event_risk,
-        source_coverage=fact_sheet.source_coverage,
-        degraded_factors=["广度因子使用 ETF 代理池近似"],
-        notes=["已按代理池与降级规则输出结果。"],
-        fact_sheet=fact_sheet,
-        prompt_traces=[],
-    )
-
-
 class MarketMonitorRulesTests(unittest.TestCase):
     def test_symbol_cache_requires_requested_trading_day(self) -> None:
         self.assertEqual(_expected_market_close_date(date(2026, 4, 12)), pd.Timestamp("2026-04-10"))
@@ -230,9 +120,13 @@ class MarketMonitorRulesTests(unittest.TestCase):
         self.assertIn("breadth_above_200dma_pct", derived_metrics)
         self.assertIn("spy_range_position_3m_pct", derived_metrics)
 
-    def test_snapshot_service_builds_formal_snapshot(self) -> None:
+    def test_snapshot_service_builds_v231_snapshot(self) -> None:
         dataset = _complete_dataset()
-        service = MarketMonitorSnapshotService()
+        with patch(
+            "tradingagents.web.market_monitor.inference.base.create_llm_client",
+            return_value=_FakeClient(),
+        ):
+            service = MarketMonitorSnapshotService()
 
         with patch(
             "tradingagents.web.market_monitor.snapshot_service.build_market_dataset",
@@ -240,32 +134,35 @@ class MarketMonitorRulesTests(unittest.TestCase):
         ):
             snapshot = service.get_snapshot(MarketMonitorSnapshotRequest(as_of_date=date(2026, 4, 10)))
 
+        self.assertEqual(snapshot.scorecard_version, "2.3.1")
         self.assertEqual(snapshot.as_of_date, date(2026, 4, 10))
+        self.assertEqual(snapshot.data_mode, "daily")
         self.assertTrue(snapshot.execution_card.regime_label)
-        self.assertTrue(snapshot.execution_card.summary)
         self.assertEqual(snapshot.execution_card.signal_confirmation.current_regime_observations, 1)
         self.assertEqual(snapshot.execution_card.signal_confirmation.risk_loosening_unlock_in_observations, 2)
-        self.assertIn("ETF/指数日线", snapshot.source_coverage.available_sources)
-        self.assertIn("交易所级 breadth", snapshot.source_coverage.missing_sources)
-        self.assertIn("广度因子使用 ETF 代理池近似", snapshot.degraded_factors)
-        self.assertTrue(len(snapshot.notes) > 0)
-        self.assertGreaterEqual(snapshot.long_term_score.score, 0)
-        self.assertLessEqual(snapshot.long_term_score.score, 100)
-        self.assertGreaterEqual(snapshot.short_term_score.score, 0)
-        self.assertLessEqual(snapshot.short_term_score.score, 100)
-        self.assertGreaterEqual(snapshot.system_risk_score.score, 0)
-        self.assertLessEqual(snapshot.system_risk_score.score, 100)
+        self.assertTrue(snapshot.input_data_status.core_symbols_available)
+        self.assertTrue(snapshot.missing_data)
+        self.assertEqual(snapshot.event_fact_sheet, [])
+        self.assertTrue(snapshot.long_term_score.factor_breakdown)
+        self.assertIsNotNone(snapshot.long_term_score.deterministic_score)
+        self.assertGreaterEqual(snapshot.long_term_score.confidence, 0)
+        self.assertLessEqual(snapshot.long_term_score.confidence, 1)
+        self.assertIn("风险", snapshot.system_risk_score.slope_state)
         self.assertGreaterEqual(snapshot.panic_reversal_score.score, 0)
         self.assertLessEqual(snapshot.panic_reversal_score.score, 100)
-        self.assertEqual(len(snapshot.prompt_traces), 7)
+        self.assertEqual(len(snapshot.prompt_traces), 6)
         self.assertEqual(
             [trace.card_type for trace in snapshot.prompt_traces],
-            ["long_term", "short_term", "system_risk", "style", "event_risk", "panic", "execution"],
+            ["long_term", "short_term", "system_risk", "style", "panic", "execution"],
         )
 
     def test_snapshot_service_data_status_uses_open_gaps(self) -> None:
         dataset = _complete_dataset()
-        service = MarketMonitorSnapshotService()
+        with patch(
+            "tradingagents.web.market_monitor.inference.base.create_llm_client",
+            return_value=_FakeClient(),
+        ):
+            service = MarketMonitorSnapshotService()
 
         with patch(
             "tradingagents.web.market_monitor.snapshot_service.build_market_dataset",
@@ -274,16 +171,17 @@ class MarketMonitorRulesTests(unittest.TestCase):
             data_status = service.get_data_status(MarketMonitorSnapshotRequest(as_of_date=date(2026, 4, 10)))
 
         self.assertEqual(data_status.as_of_date, date(2026, 4, 10))
-        self.assertIn("缺少交易所级 breadth 原始数据", data_status.open_gaps)
-        self.assertIn("广度因子使用 ETF 代理池近似", data_status.degraded_factors)
-        self.assertTrue(data_status.source_coverage.degraded)
+        self.assertEqual(data_status.data_mode, "daily")
+        self.assertIn("未注入宏观日历、财报日历、政策/地缘与突发新闻搜索事实", data_status.open_gaps)
+        self.assertTrue(data_status.missing_data)
+        self.assertEqual(data_status.event_fact_sheet, [])
 
     def test_snapshot_service_history_returns_requested_days(self) -> None:
         service = MarketMonitorSnapshotService()
         snapshots = [
-            _build_minimal_snapshot(date(2026, 4, 8)),
-            _build_minimal_snapshot(date(2026, 4, 9)),
-            _build_minimal_snapshot(date(2026, 4, 10)),
+            fixture_snapshot(as_of_date=date(2026, 4, 8)),
+            fixture_snapshot(as_of_date=date(2026, 4, 9)),
+            fixture_snapshot(as_of_date=date(2026, 4, 10)),
         ]
 
         history = service.build_history_response(date(2026, 4, 10), snapshots)
@@ -291,7 +189,8 @@ class MarketMonitorRulesTests(unittest.TestCase):
         self.assertEqual(history.as_of_date, date(2026, 4, 10))
         self.assertEqual(len(history.points), 3)
         self.assertEqual(sorted(point.trade_date for point in history.points), [point.trade_date for point in history.points])
-        self.assertTrue(all(point.regime_label for point in history.points))
+        self.assertTrue(all(point.scorecard_version == "2.3.1" for point in history.points))
+        self.assertTrue(all(point.panic_state for point in history.points))
 
     def test_snapshot_service_history_skips_holidays(self) -> None:
         service = MarketMonitorSnapshotService()
@@ -301,27 +200,125 @@ class MarketMonitorRulesTests(unittest.TestCase):
 
         self.assertEqual(trade_dates, [date(2026, 4, 1), date(2026, 4, 2)])
 
-    def test_snapshot_service_event_risk_returns_conservative_fallback(self) -> None:
-        service = MarketMonitorSnapshotService()
+    def test_snapshot_service_event_fact_sheet_is_empty_without_structured_events(self) -> None:
+        dataset = _complete_dataset()
+        universe = get_market_monitor_universe()
+        bundle = build_input_bundle(as_of_date=date(2026, 4, 10), dataset=dataset, universe=universe)
 
-        wednesday = service._build_event_risk(date(2026, 4, 15))
-        friday = service._build_event_risk(date(2026, 4, 17))
+        from tradingagents.web.market_monitor.factors import build_event_fact_sheet
 
-        self.assertTrue(wednesday.index_level.active)
-        self.assertEqual(wednesday.index_level.type, "搜索增强缺失-默认收紧")
-        self.assertEqual(wednesday.stock_level.earnings_stocks, [])
-        self.assertIsNotNone(wednesday.stock_level.rule)
-        self.assertFalse(friday.index_level.active)
-        self.assertEqual(friday.stock_level.earnings_stocks, [])
+        self.assertEqual(build_event_fact_sheet(bundle), [])
+
+    def test_snapshot_service_does_not_mark_events_missing_when_fact_sheet_has_events(self) -> None:
+        dataset = _complete_dataset()
+        fact_sheet = fixture_fact_sheet(as_of_date=date(2026, 4, 10), include_event=True)
+        with patch(
+            "tradingagents.web.market_monitor.inference.base.create_llm_client",
+            return_value=_FakeClient(),
+        ):
+            service = MarketMonitorSnapshotService()
+
+        snapshot = service._build_snapshot(date(2026, 4, 10), dataset, fact_sheet_override=fact_sheet)
+
+        self.assertTrue(snapshot.event_fact_sheet)
+        self.assertNotIn("event_fact_sheet", [item.field for item in snapshot.missing_data])
+        self.assertNotIn("未注入宏观日历、财报日历、政策/地缘与突发新闻搜索事实", snapshot.fact_sheet.open_gaps)
+
+    def test_risk_loosening_requires_three_consecutive_observations(self) -> None:
+        previous = fixture_snapshot().model_copy(
+            update={
+                "execution_card": fixture_snapshot().execution_card.model_copy(
+                    update={
+                        "regime_label": "红灯",
+                        "conflict_mode": "上一轮防守状态",
+                        "total_exposure_range": "0%-20%",
+                        "new_position_allowed": False,
+                        "chase_breakout_allowed": False,
+                        "dip_buy_allowed": False,
+                        "overnight_allowed": False,
+                        "single_position_cap": "5%",
+                        "daily_risk_budget": "0.25R",
+                    }
+                )
+            }
+        )
+
+        first = build_execution_card(
+            fixture_score_card(deterministic_score=90, score=90, zone="强趋势区"),
+            fixture_score_card(deterministic_score=90, score=90, zone="高胜率区", recommended_exposure=None),
+            fixture_system_risk_card(score=10),
+            fixture_style_effectiveness(),
+            [],
+            previous_snapshots=[previous],
+        )
+        self.assertEqual(first.regime_label, "红灯")
+        self.assertFalse(first.new_position_allowed)
+        self.assertEqual(first.signal_confirmation.current_regime_observations, 1)
+        self.assertEqual(first.signal_confirmation.risk_loosening_unlock_in_observations, 2)
+
+        second_snapshot = previous.model_copy(update={"execution_card": first})
+        second = build_execution_card(
+            fixture_score_card(deterministic_score=90, score=90, zone="强趋势区"),
+            fixture_score_card(deterministic_score=90, score=90, zone="高胜率区", recommended_exposure=None),
+            fixture_system_risk_card(score=10),
+            fixture_style_effectiveness(),
+            [],
+            previous_snapshots=[previous, second_snapshot],
+        )
+        self.assertFalse(second.new_position_allowed)
+        self.assertEqual(second.signal_confirmation.current_regime_observations, 2)
+        self.assertEqual(second.signal_confirmation.risk_loosening_unlock_in_observations, 1)
+
+        third_snapshot = previous.model_copy(update={"execution_card": second})
+        third = build_execution_card(
+            fixture_score_card(deterministic_score=90, score=90, zone="强趋势区"),
+            fixture_score_card(deterministic_score=90, score=90, zone="高胜率区", recommended_exposure=None),
+            fixture_system_risk_card(score=10),
+            fixture_style_effectiveness(),
+            [],
+            previous_snapshots=[previous, second_snapshot, third_snapshot],
+        )
+        self.assertEqual(third.regime_label, "绿灯")
+        self.assertTrue(third.new_position_allowed)
+        self.assertEqual(third.signal_confirmation.risk_loosening_unlock_in_observations, 0)
+
+    def test_risk_tightening_applies_immediately_and_panic_refreshes_count(self) -> None:
+        previous = fixture_snapshot().model_copy(
+            update={
+                "execution_card": fixture_snapshot().execution_card.model_copy(update={"regime_label": "绿灯", "total_exposure_range": "80%-100%"}),
+                "panic_reversal_score": fixture_panic_card(state="panic_watch"),
+            }
+        )
+        current = build_execution_card(
+            fixture_score_card(deterministic_score=20, score=20, zone="防守区"),
+            fixture_score_card(deterministic_score=20, score=20, zone="弱势区", recommended_exposure=None),
+            fixture_system_risk_card(score=75),
+            fixture_style_effectiveness(),
+            [],
+            previous_snapshots=[previous],
+        )
+        self.assertEqual(current.regime_label, "红灯-高压")
+        self.assertFalse(current.new_position_allowed)
+        self.assertEqual(current.signal_confirmation.risk_loosening_unlock_in_observations, 0)
+
+        dataset = _complete_dataset()
+        bundle = build_input_bundle(as_of_date=date(2026, 4, 10), dataset=dataset, universe=get_market_monitor_universe())
+        panic = build_panic_card(bundle, 30, previous_snapshots=[previous])
+        if panic.state == "panic_watch":
+            self.assertEqual(panic.refreshes_held, 2)
+        elif panic.state == "无信号":
+            self.assertEqual(panic.refreshes_held, 0)
 
     def test_snapshot_service_open_gaps_include_missing_core_series(self) -> None:
         service = MarketMonitorSnapshotService()
-        gaps = service._build_open_gaps({"SPY": pd.DataFrame()})
+        universe = get_market_monitor_universe()
+        dataset = _complete_dataset()
+        dataset["core"]["QQQ"] = pd.DataFrame()
+        bundle = build_input_bundle(as_of_date=date(2026, 4, 10), dataset=dataset, universe=universe)
+        gaps = service._build_open_gaps(bundle, [])
 
         self.assertIn("缺少 QQQ 日线", gaps)
-        self.assertIn("缺少 IWM 日线", gaps)
-        self.assertIn("缺少 ^VIX 日线", gaps)
-        self.assertIn("缺少未来三日宏观与财报事件原始日历", gaps)
+        self.assertIn("未注入宏观日历、财报日历、政策/地缘与突发新闻搜索事实", gaps)
 
 
 if __name__ == "__main__":
