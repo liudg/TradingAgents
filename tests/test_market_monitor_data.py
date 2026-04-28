@@ -7,21 +7,25 @@ import pandas as pd
 from tradingagents.dataflows.yfinance_news import fetch_global_news_articles_yfinance
 from tradingagents.web.market_monitor.data import (
     _download_single_symbol,
+    _evaluate_intraday_symbol_state,
     _get_symbol_history,
+    _market_data_mode_policy,
     _required_trading_days,
     build_market_dataset,
     fetch_daily_history,
+    fetch_intraday_history,
 )
 from tradingagents.web.market_monitor.universe import get_market_monitor_universe
 
 
 class _FakeYFinance:
-    def __init__(self) -> None:
+    def __init__(self, frame: pd.DataFrame | None = None) -> None:
         self.calls: list[dict[str, object]] = []
+        self.frame = frame
 
     def download(self, **kwargs):
         self.calls.append(kwargs)
-        return pd.DataFrame()
+        return self.frame if self.frame is not None else pd.DataFrame()
 
 
 class _FakeSearchResult:
@@ -53,6 +57,20 @@ def _make_frame(days: int, end: str = "2026-04-10") -> pd.DataFrame:
             "Low": close,
             "Close": close + 1.5,
             "Volume": pd.Series([1_000] * days, index=index),
+        }
+    )
+
+
+def _make_intraday_frame(end: str = "2026-04-10 15:55", periods: int = 6) -> pd.DataFrame:
+    index = pd.date_range(end=pd.Timestamp(end), periods=periods, freq="5min")
+    close = pd.Series(range(periods), index=index, dtype=float)
+    return pd.DataFrame(
+        {
+            "Open": close + 1,
+            "High": close + 2,
+            "Low": close,
+            "Close": close + 1.5,
+            "Volume": pd.Series([1_000] * periods, index=index),
         }
     )
 
@@ -175,6 +193,113 @@ class MarketMonitorDataTests(unittest.TestCase):
 
         self.assertTrue(frame.empty)
         self.assertEqual(len(fake_yf.calls), 1)
+
+    def test_fetch_intraday_delayed_uses_five_minute_no_prepost(self) -> None:
+        fake_yf = _FakeYFinance(_make_intraday_frame())
+
+        with patch("tradingagents.web.market_monitor.data.get_yf", return_value=fake_yf):
+            frames, summary = fetch_intraday_history(["SPY"], date(2026, 4, 10), "intraday_delayed")
+
+        self.assertFalse(frames["SPY"].empty)
+        self.assertEqual(fake_yf.calls[0]["interval"], "5m")
+        self.assertFalse(fake_yf.calls[0]["prepost"])
+        self.assertEqual(summary["data_mode"], "intraday_delayed")
+        self.assertEqual(summary["interval"], "5m")
+        self.assertFalse(summary["includes_prepost"])
+        self.assertEqual(summary["result_counts"]["refreshed"], 1)
+        self.assertFalse(summary["symbols"][0]["partial"])
+
+    def test_fetch_intraday_realtime_uses_one_minute_prepost(self) -> None:
+        fake_yf = _FakeYFinance(_make_intraday_frame(end="2026-04-10 16:00", periods=3))
+
+        with patch("tradingagents.web.market_monitor.data.get_yf", return_value=fake_yf):
+            _, summary = fetch_intraday_history(["SPY"], date(2026, 4, 10), "intraday_realtime")
+
+        self.assertEqual(fake_yf.calls[0]["interval"], "1m")
+        self.assertTrue(fake_yf.calls[0]["prepost"])
+        self.assertEqual(summary["interval"], "1m")
+        self.assertTrue(summary["includes_prepost"])
+
+    def test_intraday_current_day_after_close_complete_bar_is_fresh(self) -> None:
+        policy = _market_data_mode_policy("intraday_delayed")
+        frame = _make_intraday_frame(end="2026-04-10 15:55")
+
+        result_state, partial, reason = _evaluate_intraday_symbol_state(
+            frame,
+            date(2026, 4, 10),
+            policy,
+            now=datetime(2026, 4, 10, 16, 30),
+        )
+
+        self.assertEqual(result_state, "refreshed")
+        self.assertFalse(partial)
+        self.assertIsNone(reason)
+
+    def test_intraday_historical_incomplete_session_is_stale(self) -> None:
+        policy = _market_data_mode_policy("intraday_delayed")
+        frame = _make_intraday_frame(end="2026-04-10 10:00")
+
+        result_state, partial, reason = _evaluate_intraday_symbol_state(
+            frame,
+            date(2026, 4, 10),
+            policy,
+            now=datetime(2026, 4, 11, 10, 30),
+        )
+
+        self.assertEqual(result_state, "stale_fallback")
+        self.assertTrue(partial)
+        self.assertIn("完整收盘时段", reason)
+
+    def test_intraday_current_day_during_session_stale_uses_age_threshold(self) -> None:
+        policy = _market_data_mode_policy("intraday_realtime")
+        frame = _make_intraday_frame(end="2026-04-10 10:00", periods=3)
+
+        result_state, partial, reason = _evaluate_intraday_symbol_state(
+            frame,
+            date(2026, 4, 10),
+            policy,
+            now=datetime(2026, 4, 10, 10, 30),
+        )
+
+        self.assertEqual(result_state, "stale_fallback")
+        self.assertTrue(partial)
+        self.assertIn("10 分钟", reason)
+
+    def test_fetch_intraday_empty_result_is_deterministic(self) -> None:
+        fake_yf = _FakeYFinance()
+
+        with patch("tradingagents.web.market_monitor.data.get_yf", return_value=fake_yf):
+            frames, summary = fetch_intraday_history(["SPY"], date(2026, 4, 10), "intraday_delayed")
+
+        self.assertTrue(frames["SPY"].empty)
+        self.assertEqual(summary["result_counts"]["empty"], 1)
+        self.assertEqual(summary["symbols"][0]["result_state"], "empty")
+        self.assertIn("5m", summary["symbols"][0]["reason"])
+
+    def test_fetch_intraday_stale_result_keeps_non_empty_data(self) -> None:
+        fake_yf = _FakeYFinance(_make_intraday_frame(end="2026-04-09 16:00"))
+
+        with patch("tradingagents.web.market_monitor.data.get_yf", return_value=fake_yf):
+            frames, summary = fetch_intraday_history(["SPY"], date(2026, 4, 10), "intraday_delayed")
+
+        self.assertFalse(frames["SPY"].empty)
+        self.assertEqual(summary["result_counts"]["stale_fallback"], 1)
+        self.assertEqual(summary["symbols"][0]["result_state"], "stale_fallback")
+        self.assertTrue(summary["symbols"][0]["partial"])
+
+    def test_build_market_dataset_intraday_bypasses_daily_cache(self) -> None:
+        fake_yf = _FakeYFinance(_make_intraday_frame())
+        universe = get_market_monitor_universe()
+
+        with patch("tradingagents.web.market_monitor.data.get_yf", return_value=fake_yf), patch(
+            "tradingagents.web.market_monitor.data.evaluate_symbol_daily_cache"
+        ) as cache_mock, patch("tradingagents.web.market_monitor.data.save_symbol_daily_cache") as save_mock:
+            dataset = build_market_dataset(universe, date(2026, 4, 10), data_mode="intraday_delayed", include_event_news=False)
+
+        self.assertEqual(dataset["data_mode"], "intraday_delayed")
+        self.assertEqual(dataset["cache_summary"]["interval"], "5m")
+        cache_mock.assert_not_called()
+        save_mock.assert_not_called()
 
     def test_get_symbol_history_returns_cache_hit_for_fresh_valid_cache(self) -> None:
         cached = _make_frame(_required_trading_days(420), end="2026-04-10")

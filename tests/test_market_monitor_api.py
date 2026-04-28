@@ -42,6 +42,23 @@ class MarketMonitorApiTests(unittest.TestCase):
     def _build_snapshot(self):
         return fixture_snapshot()
 
+    def _with_data_mode_status(self, payload, data_mode: str, interval: str, includes_prepost: bool):
+        input_status = payload.input_data_status.model_copy(update={"interval": interval, "includes_prepost": includes_prepost})
+        return payload.model_copy(
+            update={"data_mode": data_mode, "data_freshness": "intraday_fresh", "input_data_status": input_status}
+        )
+
+    def _assert_data_mode_endpoint(self, endpoint: str, service_method: str, payload, data_mode: str, interval: str, includes_prepost: bool) -> None:
+        with patch.object(market_monitor_manager.service, service_method, return_value=payload) as service_mock:
+            response = self.client.get(f"{endpoint}?data_mode={data_mode}")
+
+        self.assertEqual(response.status_code, 200)
+        response_payload = response.json()
+        self.assertEqual(response_payload["data_mode"], data_mode)
+        self.assertEqual(response_payload["input_data_status"]["interval"], interval)
+        self.assertEqual(response_payload["input_data_status"]["includes_prepost"], includes_prepost)
+        self.assertEqual(service_mock.call_args.args[0].data_mode, data_mode)
+
     def test_snapshot_api_returns_v231_market_monitor_payload(self) -> None:
         snapshot = self._build_snapshot()
         with patch.object(market_monitor_manager.service, "get_snapshot", return_value=snapshot):
@@ -174,6 +191,12 @@ class MarketMonitorApiTests(unittest.TestCase):
         self.assertIsNotNone(recovered_payload["history"])
         self.assertEqual(recovered_payload["history"]["points"][0]["panic_state"], "无信号")
 
+    def test_history_api_rejects_intraday_data_mode(self) -> None:
+        response = self.client.get("/api/market-monitor/history?data_mode=intraday_realtime")
+
+        self.assertEqual(response.status_code, 422)
+        self.assertIn("daily", response.json()["detail"])
+
     def test_history_api_returns_points(self) -> None:
         history = fixture_history_response()
         snapshot = self._build_snapshot()
@@ -201,6 +224,22 @@ class MarketMonitorApiTests(unittest.TestCase):
         self.assertIn("缺少交易所级 breadth 原始数据", payload["open_gaps"])
         self.assertEqual(payload["event_fact_sheet"][0]["event_id"], payload["fact_sheet"]["event_fact_sheet"][0]["event_id"])
         self.assertIsNotNone(payload["fact_sheet"])
+
+    def test_snapshot_api_accepts_intraday_data_modes(self) -> None:
+        for data_mode, interval, includes_prepost in (
+            ("intraday_delayed", "5m", False),
+            ("intraday_realtime", "1m", True),
+        ):
+            with self.subTest(data_mode=data_mode):
+                snapshot = self._with_data_mode_status(self._build_snapshot(), data_mode, interval, includes_prepost)
+                self._assert_data_mode_endpoint(
+                    "/api/market-monitor/snapshot",
+                    "get_snapshot",
+                    snapshot,
+                    data_mode,
+                    interval,
+                    includes_prepost,
+                )
 
     def test_snapshot_api_passes_force_refresh_flag(self) -> None:
         with patch.object(market_monitor_manager.service, "get_snapshot", return_value=self._build_snapshot()) as service_mock:
@@ -245,6 +284,22 @@ class MarketMonitorApiTests(unittest.TestCase):
         self.assertTrue(request.force_refresh)
         self.assertEqual(snapshots_mock.call_count, 1)
         self.assertEqual(build_mock.call_count, 1)
+
+    def test_data_status_api_accepts_intraday_data_modes(self) -> None:
+        for data_mode, interval, includes_prepost in (
+            ("intraday_delayed", "5m", False),
+            ("intraday_realtime", "1m", True),
+        ):
+            with self.subTest(data_mode=data_mode):
+                data_status = self._with_data_mode_status(fixture_data_status(), data_mode, interval, includes_prepost)
+                self._assert_data_mode_endpoint(
+                    "/api/market-monitor/data-status",
+                    "get_data_status",
+                    data_status,
+                    data_mode,
+                    interval,
+                    includes_prepost,
+                )
 
     def test_data_status_api_passes_force_refresh_flag(self) -> None:
         with patch.object(market_monitor_manager.service, "get_data_status", return_value=fixture_data_status()) as service_mock:

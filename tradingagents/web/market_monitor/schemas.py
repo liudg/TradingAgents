@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import date, datetime
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 from tradingagents.web.schemas import JobStatus
 
@@ -69,6 +69,7 @@ class MarketMonitorSymbolCacheReadResult(BaseModel):
 class MarketMonitorSnapshotRequest(BaseModel):
     as_of_date: date | None = None
     force_refresh: bool = False
+    data_mode: MarketMonitorDataMode = "daily"
 
     @field_validator("as_of_date")
     @classmethod
@@ -89,6 +90,7 @@ class MarketMonitorRunRequest(BaseModel):
     as_of_date: date | None = None
     days: int | None = Field(default=None, ge=1, le=60)
     force_refresh: bool = False
+    data_mode: MarketMonitorDataMode = "daily"
     mode: MarketMonitorRunMode | None = None
     llm_config: MarketMonitorRunLlmConfig | None = None
 
@@ -99,11 +101,18 @@ class MarketMonitorRunRequest(BaseModel):
             raise ValueError("as_of_date 不能晚于今天")
         return value
 
+    @model_validator(mode="after")
+    def validate_history_data_mode(self) -> "MarketMonitorRunRequest":
+        if self.trigger_endpoint == "history" and self.data_mode != "daily":
+            raise ValueError("历史回放暂只支持 daily 数据模式")
+        return self
+
 
 class MarketMonitorHistoryRequest(BaseModel):
     as_of_date: date | None = None
     days: int = Field(default=20, ge=1, le=60)
     force_refresh: bool = False
+    data_mode: MarketMonitorDataMode = "daily"
 
     @field_validator("as_of_date")
     @classmethod
@@ -111,6 +120,12 @@ class MarketMonitorHistoryRequest(BaseModel):
         if value and value > date.today():
             raise ValueError("as_of_date 不能晚于今天")
         return value
+
+    @model_validator(mode="after")
+    def validate_history_data_mode(self) -> "MarketMonitorHistoryRequest":
+        if self.data_mode != "daily":
+            raise ValueError("历史回放暂只支持 daily 数据模式")
+        return self
 
 
 class MarketMonitorEvidenceRef(BaseModel):

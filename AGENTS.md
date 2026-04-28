@@ -18,6 +18,8 @@ Run the interactive CLI:
 tradingagents
 .venv\Scripts\tradingagents.exe
 .venv\Scripts\python.exe -m cli.main
+tradingagents analyze --checkpoint
+tradingagents analyze --clear-checkpoints
 ```
 Start the FastAPI backend with the maintained script or the packaged entry point:
 ```powershell
@@ -51,10 +53,18 @@ npm run preview
 ```
 `.\scripts\start_web_stack.ps1` will install `web-ui` dependencies automatically when `web-ui\node_modules` is missing before launching the backend and frontend.
 If `scripts\sync_codex_to_cliproxy.ps1` is present, `.\scripts\start_web_stack.ps1` will attempt that optional local auth sync before launching the backend and frontend, but startup still continues if the sync step fails.
+You can also run the optional local auth sync helper manually before starting the web stack:
+```powershell
+.\scripts\sync_codex_to_cliproxy.ps1
+```
 For quick package smoke checks, run:
 ```bash
 .venv\Scripts\python.exe main.py
 .venv\Scripts\python.exe test.py
+```
+For provider-level structured-output smoke checks against the decision-making agents, run:
+```bash
+.venv\Scripts\python.exe scripts\smoke_structured_output.py openai
 ```
 Docker workflows are documented for container smoke runs:
 ```bash

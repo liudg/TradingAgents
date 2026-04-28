@@ -53,6 +53,7 @@ class MarketMonitorRunManager:
             trigger_endpoint="snapshot",
             as_of_date=request.as_of_date,
             force_refresh=request.force_refresh,
+            data_mode=request.data_mode,
             mode="snapshot",
         )
         _, snapshot, _, _ = self._execute_run(run_request)
@@ -69,6 +70,7 @@ class MarketMonitorRunManager:
             as_of_date=request.as_of_date,
             days=request.days,
             force_refresh=request.force_refresh,
+            data_mode=request.data_mode,
             mode="history",
         )
         _, _, history, _ = self._execute_run(run_request)
@@ -84,6 +86,7 @@ class MarketMonitorRunManager:
             trigger_endpoint="data_status",
             as_of_date=request.as_of_date,
             force_refresh=request.force_refresh,
+            data_mode=request.data_mode,
             mode="data_status",
         )
         _, _, _, data_status = self._execute_run(run_request)
@@ -259,7 +262,7 @@ class MarketMonitorRunManager:
             (
                 f"Market monitor run {run_id} started: endpoint={request.trigger_endpoint}, "
                 f"as_of_date={as_of_date.isoformat()}, days={request.days or 20}, "
-                f"force_refresh={request.force_refresh}"
+                f"force_refresh={request.force_refresh}, data_mode={request.data_mode}"
             ),
         )
         try:

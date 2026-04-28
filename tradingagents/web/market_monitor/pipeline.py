@@ -40,6 +40,7 @@ class MarketMonitorPipeline:
                 MarketMonitorSnapshotRequest(
                     as_of_date=request.as_of_date,
                     force_refresh=request.force_refresh,
+                    data_mode=request.data_mode,
                 ),
                 previous_snapshots=previous_snapshots,
             ).model_copy(update={"run_id": run_id})
@@ -53,6 +54,7 @@ class MarketMonitorPipeline:
                 as_of_date=request.as_of_date,
                 days=request.days or 20,
                 force_refresh=request.force_refresh,
+                data_mode=request.data_mode,
             )
             trade_dates = service.resolve_history_trade_dates(history_request)
             history_snapshots = [
@@ -79,6 +81,7 @@ class MarketMonitorPipeline:
             MarketMonitorSnapshotRequest(
                 as_of_date=request.as_of_date,
                 force_refresh=request.force_refresh,
+                data_mode=request.data_mode,
             )
         ).model_copy(update={"run_id": run_id})
         return MarketMonitorExecutionResult(

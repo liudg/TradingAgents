@@ -44,7 +44,7 @@ class MarketMonitorSnapshotService:
         previous_snapshots: list[MarketMonitorSnapshotResponse] | None = None,
     ) -> MarketMonitorSnapshotResponse:
         as_of_date = request.as_of_date or date.today()
-        dataset = build_market_dataset(self._universe, as_of_date, force_refresh=request.force_refresh)
+        dataset = build_market_dataset(self._universe, as_of_date, force_refresh=request.force_refresh, data_mode=request.data_mode)
         return self._build_snapshot(as_of_date, dataset, previous_snapshots=previous_snapshots)
 
     def get_history(self, request: MarketMonitorHistoryRequest) -> MarketMonitorHistoryResponse:
@@ -77,7 +77,13 @@ class MarketMonitorSnapshotService:
         snapshots: list[MarketMonitorSnapshotResponse] = []
         context = list(previous_snapshots or [])
         for trade_date in dates_to_build:
-            dataset = build_market_dataset(self._universe, trade_date, force_refresh=request.force_refresh, include_event_news=False)
+            dataset = build_market_dataset(
+                self._universe,
+                trade_date,
+                force_refresh=request.force_refresh,
+                include_event_news=False,
+                data_mode=request.data_mode,
+            )
             snapshot = self._build_snapshot(trade_date, dataset, previous_snapshots=context)
             snapshots.append(snapshot)
             context.append(snapshot)
@@ -108,7 +114,7 @@ class MarketMonitorSnapshotService:
 
     def get_data_status(self, request: MarketMonitorSnapshotRequest) -> MarketMonitorDataStatusResponse:
         as_of_date = request.as_of_date or date.today()
-        dataset = build_market_dataset(self._universe, as_of_date, force_refresh=request.force_refresh)
+        dataset = build_market_dataset(self._universe, as_of_date, force_refresh=request.force_refresh, data_mode=request.data_mode)
         snapshot = self._build_snapshot(as_of_date, dataset)
         return MarketMonitorDataStatusResponse(
             timestamp=snapshot.timestamp,
@@ -245,7 +251,8 @@ class MarketMonitorSnapshotService:
         )
 
     def _build_open_gaps(self, bundle: Any, event_fact_sheet: list[Any]) -> list[str]:
-        gaps = [f"缺少 {symbol} 日线" for symbol in bundle.input_data_status.core_symbols_missing]
+        interval = bundle.input_data_status.interval
+        gaps = [f"缺少 {symbol} {interval} 行情" for symbol in bundle.input_data_status.core_symbols_missing]
         if not event_fact_sheet:
             gaps.append("未注入宏观日历、财报日历、政策/地缘与突发新闻搜索事实")
         return gaps

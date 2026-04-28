@@ -176,6 +176,57 @@ class MarketMonitorRulesTests(unittest.TestCase):
         self.assertTrue(data_status.missing_data)
         self.assertEqual(data_status.event_fact_sheet, [])
 
+    def test_snapshot_service_uses_intraday_dataset_status(self) -> None:
+        dataset = _complete_dataset()
+        dataset["data_mode"] = "intraday_delayed"
+        dataset["cache_summary"]["data_mode"] = "intraday_delayed"
+        dataset["cache_summary"]["interval"] = "5m"
+        dataset["cache_summary"]["includes_prepost"] = False
+        dataset["cache_summary"]["symbols"][0]["partial"] = True
+        with patch(
+            "tradingagents.web.market_monitor.inference.base.create_llm_client",
+            return_value=_FakeClient(),
+        ):
+            service = MarketMonitorSnapshotService()
+
+        with patch(
+            "tradingagents.web.market_monitor.snapshot_service.build_market_dataset",
+            return_value=dataset,
+        ) as dataset_mock:
+            snapshot = service.get_snapshot(
+                MarketMonitorSnapshotRequest(as_of_date=date(2026, 4, 10), data_mode="intraday_delayed")
+            )
+
+        self.assertEqual(dataset_mock.call_args.kwargs["data_mode"], "intraday_delayed")
+        self.assertEqual(snapshot.data_mode, "intraday_delayed")
+        self.assertEqual(snapshot.data_freshness, "intraday_fresh")
+        self.assertEqual(snapshot.input_data_status.interval, "5m")
+        self.assertFalse(snapshot.input_data_status.includes_prepost)
+        self.assertEqual(snapshot.input_data_status.partial_symbols, ["SPY"])
+
+    def test_intraday_missing_core_symbol_is_not_fresh(self) -> None:
+        dataset = _complete_dataset()
+        dataset["core"]["QQQ"] = pd.DataFrame()
+        dataset["data_mode"] = "intraday_delayed"
+        dataset["cache_summary"]["symbols"].append(
+            {
+                "symbol": "QQQ",
+                "cache_state": "cache_disabled",
+                "result_state": "empty",
+                "rows": 0,
+                "expected_close_date": "2026-04-10",
+                "cache_end_date": None,
+                "last_successful_refresh_at": None,
+                "reason": "yfinance 未返回可用 5m 数据",
+                "partial": False,
+            }
+        )
+
+        bundle = build_input_bundle(as_of_date=date(2026, 4, 10), dataset=dataset, universe=get_market_monitor_universe())
+
+        self.assertEqual(bundle.data_freshness, "intraday_stale")
+        self.assertIn("QQQ", bundle.input_data_status.core_symbols_missing)
+
     def test_snapshot_service_history_disables_event_news_fetches(self) -> None:
         dataset = _complete_dataset()
         with patch(
@@ -335,7 +386,7 @@ class MarketMonitorRulesTests(unittest.TestCase):
         bundle = build_input_bundle(as_of_date=date(2026, 4, 10), dataset=dataset, universe=universe)
         gaps = service._build_open_gaps(bundle, [])
 
-        self.assertIn("缺少 QQQ 日线", gaps)
+        self.assertIn("缺少 QQQ 1d 行情", gaps)
         self.assertIn("未注入宏观日历、财报日历、政策/地缘与突发新闻搜索事实", gaps)
 
 

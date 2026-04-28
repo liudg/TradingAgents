@@ -4,7 +4,7 @@ import logging
 import math
 import time
 from dataclasses import dataclass
-from datetime import date, datetime, timedelta, timezone
+from datetime import date, datetime, time as dt_time, timedelta, timezone
 from typing import Any, Dict, Iterable
 from urllib.parse import urlparse
 
@@ -35,6 +35,18 @@ class SymbolHistoryResult:
     reason: str | None = None
     cache_end_date: str | None = None
     last_successful_refresh_at: str | None = None
+    partial: bool = False
+
+
+@dataclass(frozen=True)
+class MarketDataModePolicy:
+    data_mode: str
+    interval: str
+    includes_prepost: bool
+    intraday_lookback_days: int
+    stale_after_minutes: int
+    uses_daily_cache: bool
+    final_bar_time: dt_time | None = None
 
 
 def _normalize_ohlcv_frame(frame: pd.DataFrame) -> pd.DataFrame:
@@ -48,6 +60,37 @@ def _normalize_ohlcv_frame(frame: pd.DataFrame) -> pd.DataFrame:
     result = result[keep_columns].dropna(how="all")
     result.index = pd.to_datetime(result.index).normalize()
     return result
+
+
+def _normalize_intraday_ohlcv_frame(frame: pd.DataFrame) -> pd.DataFrame:
+    if frame.empty:
+        return pd.DataFrame(columns=["Open", "High", "Low", "Close", "Volume"])
+
+    result = frame.copy()
+    if isinstance(result.index, pd.DatetimeIndex) and result.index.tz is not None:
+        result.index = result.index.tz_convert("America/New_York").tz_localize(None)
+    keep_columns = [column for column in ["Open", "High", "Low", "Close", "Volume"] if column in result.columns]
+    result = result[keep_columns].dropna(how="all")
+    result.index = pd.to_datetime(result.index)
+    return result.sort_index()
+
+
+def _market_data_mode_policy(data_mode: str) -> MarketDataModePolicy:
+    if data_mode == "daily":
+        return MarketDataModePolicy(data_mode, "1d", False, 0, 0, True)
+    if data_mode == "intraday_delayed":
+        return MarketDataModePolicy(data_mode, "5m", False, 7, 30, False, dt_time(15, 55))
+    if data_mode == "intraday_realtime":
+        return MarketDataModePolicy(data_mode, "1m", True, 2, 10, False, dt_time(15, 59))
+    raise ValueError(f"Unsupported market monitor data_mode: {data_mode}")
+
+
+def _market_now_naive() -> datetime:
+    return pd.Timestamp.now(tz="America/New_York").tz_localize(None).to_pydatetime()
+
+
+def _intraday_session_is_complete(latest: datetime, policy: MarketDataModePolicy) -> bool:
+    return policy.final_bar_time is None or latest.time() >= policy.final_bar_time
 
 
 def fetch_daily_history(
@@ -90,10 +133,64 @@ def fetch_daily_history(
                 "cache_end_date": history.cache_end_date,
                 "last_successful_refresh_at": history.last_successful_refresh_at,
                 "reason": history.reason,
+                "partial": getattr(history, "partial", False),
             }
         )
     return result, {
         "force_refresh": force_refresh,
+        "data_mode": "daily",
+        "interval": "1d",
+        "includes_prepost": False,
+        "source": "yfinance",
+        "symbols": symbol_summaries,
+        "counts": counts,
+        "result_counts": result_counts,
+    }
+
+
+def fetch_intraday_history(
+    symbols: Iterable[str],
+    as_of_date: date,
+    data_mode: str,
+    force_refresh: bool = False,
+) -> tuple[Dict[str, pd.DataFrame], dict[str, Any]]:
+    policy = _market_data_mode_policy(data_mode)
+    symbol_list = list(dict.fromkeys(symbols))
+    result: Dict[str, pd.DataFrame] = {}
+    symbol_summaries: list[dict[str, Any]] = []
+    counts = {"cache_disabled": 0}
+    result_counts = {"refreshed": 0, "stale_fallback": 0, "empty": 0}
+    refresh_at = datetime.now(timezone.utc).isoformat()
+    expected_close_date = _expected_market_close_date(as_of_date)
+    now = _market_now_naive()
+
+    for symbol in symbol_list:
+        frame = _download_intraday_single_symbol(symbol, as_of_date, policy)
+        result_state, partial, reason = _evaluate_intraday_symbol_state(frame, as_of_date, policy, now)
+        result[symbol] = frame
+        counts["cache_disabled"] += 1
+        result_counts[result_state] = result_counts.get(result_state, 0) + 1
+        latest_timestamp = frame.index.max() if not frame.empty else None
+        symbol_summaries.append(
+            {
+                "symbol": symbol,
+                "cache_state": "cache_disabled",
+                "result_state": result_state,
+                "rows": int(len(frame.index)) if isinstance(frame.index, pd.Index) else 0,
+                "expected_close_date": expected_close_date.date().isoformat(),
+                "cache_end_date": latest_timestamp.isoformat() if latest_timestamp is not None else None,
+                "last_successful_refresh_at": refresh_at if result_state != "empty" else None,
+                "reason": reason,
+                "partial": partial,
+            }
+        )
+
+    return result, {
+        "force_refresh": force_refresh,
+        "data_mode": policy.data_mode,
+        "interval": policy.interval,
+        "includes_prepost": policy.includes_prepost,
+        "source": "yfinance",
         "symbols": symbol_summaries,
         "counts": counts,
         "result_counts": result_counts,
@@ -280,6 +377,67 @@ def _download_single_symbol(symbol: str, as_of_date: date, lookback_days: int) -
     return pd.DataFrame(columns=["Open", "High", "Low", "Close", "Volume"])
 
 
+def _download_intraday_single_symbol(symbol: str, as_of_date: date, policy: MarketDataModePolicy) -> pd.DataFrame:
+    yf = get_yf()
+    start = as_of_date - timedelta(days=policy.intraday_lookback_days)
+    end = as_of_date + timedelta(days=1)
+    for attempt in range(3):
+        try:
+            raw = yf.download(
+                tickers=symbol,
+                start=start.isoformat(),
+                end=end.isoformat(),
+                interval=policy.interval,
+                prepost=policy.includes_prepost,
+                auto_adjust=False,
+                progress=False,
+                threads=False,
+                multi_level_index=False,
+                timeout=YFINANCE_DOWNLOAD_TIMEOUT_SECONDS,
+            )
+            normalized = _normalize_intraday_ohlcv_frame(raw)
+            if not normalized.empty:
+                return normalized
+            return pd.DataFrame(columns=["Open", "High", "Low", "Close", "Volume"])
+        except YFRateLimitError:
+            time.sleep(1.5 * (attempt + 1))
+        except Exception:
+            logger.warning("下载 %s %s 数据失败", symbol, policy.interval, exc_info=True)
+            return pd.DataFrame(columns=["Open", "High", "Low", "Close", "Volume"])
+    return pd.DataFrame(columns=["Open", "High", "Low", "Close", "Volume"])
+
+
+def _evaluate_intraday_symbol_state(
+    frame: pd.DataFrame,
+    as_of_date: date,
+    policy: MarketDataModePolicy,
+    now: datetime | None = None,
+) -> tuple[str, bool, str | None]:
+    if frame.empty:
+        return "empty", False, f"yfinance 未返回可用 {policy.interval} 数据"
+
+    latest = pd.Timestamp(frame.index.max()).to_pydatetime()
+    expected_close = _expected_market_close_date(as_of_date).date()
+    if latest.date() < expected_close:
+        return "stale_fallback", True, f"最新 {policy.interval} 数据早于最近交易日 {expected_close.isoformat()}"
+
+    current = now or _market_now_naive()
+    session_complete = _intraday_session_is_complete(latest, policy)
+    if as_of_date == current.date() and _is_us_market_trading_day(as_of_date):
+        if current.time() < dt_time(16, 0):
+            age_minutes = (current - latest).total_seconds() / 60
+            if age_minutes > policy.stale_after_minutes:
+                return "stale_fallback", True, f"最新 {policy.interval} 数据延迟超过 {policy.stale_after_minutes} 分钟"
+            return "refreshed", not session_complete, None
+        if not session_complete:
+            return "stale_fallback", True, f"最新 {policy.interval} 数据未覆盖完整收盘时段"
+        return "refreshed", False, None
+
+    if as_of_date == latest.date() and not session_complete:
+        return "stale_fallback", True, f"最新 {policy.interval} 数据未覆盖完整收盘时段"
+    return "refreshed", False, None
+
+
 def _fetch_event_news(universe: dict[str, list[str]], as_of_date: date) -> tuple[list[dict[str, Any]], dict[str, Any]]:
     generated_at = datetime.now(timezone.utc)
     errors: list[str] = []
@@ -420,9 +578,14 @@ def build_market_dataset(
     as_of_date: date,
     force_refresh: bool = False,
     include_event_news: bool = True,
+    data_mode: str = "daily",
 ) -> dict[str, Any]:
+    policy = _market_data_mode_policy(data_mode)
     core_and_sector = universe["core_index_etfs"] + universe["sector_etfs"] + ["^VIX"]
-    core, cache_summary = fetch_daily_history(core_and_sector, as_of_date, force_refresh=force_refresh)
+    if policy.uses_daily_cache:
+        core, cache_summary = fetch_daily_history(core_and_sector, as_of_date, force_refresh=force_refresh)
+    else:
+        core, cache_summary = fetch_intraday_history(core_and_sector, as_of_date, policy.data_mode, force_refresh=force_refresh)
     if include_event_news:
         event_fact_candidates, search_status = _fetch_event_news(universe, as_of_date)
     else:
@@ -438,6 +601,7 @@ def build_market_dataset(
     return {
         "core": core,
         "cache_summary": cache_summary,
+        "data_mode": policy.data_mode,
         "search": {
             "event_fact_candidates": event_fact_candidates,
             "status": search_status,

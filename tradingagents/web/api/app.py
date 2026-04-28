@@ -27,6 +27,7 @@ from tradingagents.web.market_monitor.manager import MarketMonitorRunManager
 from tradingagents.web.market_monitor.schemas import (
     HistoricalMarketMonitorRunDetail,
     HistoricalMarketMonitorRunSummary,
+    MarketMonitorDataMode,
     MarketMonitorDataStatusResponse,
     MarketMonitorHistoryRequest,
     MarketMonitorHistoryResponse,
@@ -175,10 +176,12 @@ def get_historical_backtest(job_id: str) -> HistoricalBacktestDetail:
 def get_market_monitor_snapshot(
     as_of_date: date | None = None,
     force_refresh: bool = False,
+    data_mode: MarketMonitorDataMode = "daily",
 ) -> MarketMonitorSnapshotResponse:
     request = MarketMonitorSnapshotRequest(
         as_of_date=as_of_date,
         force_refresh=force_refresh,
+        data_mode=data_mode,
     )
     return market_monitor_manager.run_snapshot(request)
 
@@ -188,11 +191,15 @@ def get_market_monitor_history(
     as_of_date: date | None = None,
     days: int = 20,
     force_refresh: bool = False,
+    data_mode: MarketMonitorDataMode = "daily",
 ) -> MarketMonitorHistoryResponse:
+    if data_mode != "daily":
+        raise HTTPException(status_code=422, detail="历史回放暂只支持 daily 数据模式")
     request = MarketMonitorHistoryRequest(
         as_of_date=as_of_date,
         days=days,
         force_refresh=force_refresh,
+        data_mode=data_mode,
     )
     return market_monitor_manager.run_history(request)
 
@@ -201,10 +208,12 @@ def get_market_monitor_history(
 def get_market_monitor_data_status(
     as_of_date: date | None = None,
     force_refresh: bool = False,
+    data_mode: MarketMonitorDataMode = "daily",
 ) -> MarketMonitorDataStatusResponse:
     request = MarketMonitorSnapshotRequest(
         as_of_date=as_of_date,
         force_refresh=force_refresh,
+        data_mode=data_mode,
     )
     return market_monitor_manager.run_data_status(request)
 

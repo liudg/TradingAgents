@@ -74,34 +74,55 @@ def build_input_bundle(
     cache_summary = dataset.get("cache_summary", {})
     available = [symbol for symbol in CORE_REQUIRED_SYMBOLS if _has_close(core_data.get(symbol, pd.DataFrame()))]
     missing = [symbol for symbol in CORE_REQUIRED_SYMBOLS if symbol not in available]
-    stale_symbols = [
-        item["symbol"]
-        for item in cache_summary.get("symbols", [])
-        if item.get("result_state") == "stale_fallback"
-    ]
-    empty_symbols = [
-        item["symbol"]
-        for item in cache_summary.get("symbols", [])
-        if item.get("result_state") == "empty"
-    ]
+    data_mode = str(dataset.get("data_mode") or cache_summary.get("data_mode") or "daily")
+    interval = str(cache_summary.get("interval") or "1d")
+    includes_prepost = bool(cache_summary.get("includes_prepost", False))
+    source = str(cache_summary.get("source") or "yfinance")
+    core_required = set(CORE_REQUIRED_SYMBOLS)
+    stale_symbols: list[str] = []
+    empty_symbols: list[str] = []
+    core_empty_symbols: list[str] = []
+    partial_from_summary: list[str] = []
+    for item in cache_summary.get("symbols", []):
+        symbol = item.get("symbol")
+        if not isinstance(symbol, str):
+            continue
+        if item.get("result_state") == "stale_fallback":
+            stale_symbols.append(symbol)
+        if item.get("result_state") == "empty":
+            empty_symbols.append(symbol)
+            if symbol in core_required:
+                core_empty_symbols.append(symbol)
+        if item.get("partial") and symbol in core_required:
+            partial_from_summary.append(symbol)
     today = date.today()
     expected_close = _expected_market_close_date(as_of_date).date()
-    data_freshness = "daily_final" if as_of_date < today else "daily_partial"
-    if expected_close < as_of_date:
-        data_freshness = "previous_trading_day"
+    if data_mode == "daily":
+        data_freshness = "daily_final" if as_of_date < today else "daily_partial"
+        if expected_close < as_of_date:
+            data_freshness = "previous_trading_day"
+        partial_symbols = [] if data_freshness != "daily_partial" else available
+    else:
+        if len(core_empty_symbols) >= len(CORE_REQUIRED_SYMBOLS):
+            data_freshness = "intraday_empty"
+        elif core_empty_symbols or any(symbol in core_required for symbol in stale_symbols):
+            data_freshness = "intraday_stale"
+        else:
+            data_freshness = "intraday_fresh"
+        partial_symbols = partial_from_summary
     status = MarketMonitorInputDataStatus(
         core_symbols_available=available,
         core_symbols_missing=missing,
-        interval="1d",
-        includes_prepost=False,
-        source="yfinance",
+        interval=interval,
+        includes_prepost=includes_prepost,
+        source=source,
         stale_symbols=stale_symbols,
-        partial_symbols=[] if data_freshness != "daily_partial" else available,
+        partial_symbols=partial_symbols,
     )
     missing_data = [
         MarketMonitorMissingDataItem(
             field=f"symbol.{symbol}",
-            reason="yfinance 未返回可用日线数据",
+            reason=f"yfinance 未返回可用 {interval} 数据",
             impact="相关因子使用缺失标记并降低置信度",
             severity="high" if symbol in {"SPY", "QQQ", "IWM", "^VIX"} else "medium",
         )
@@ -113,7 +134,9 @@ def build_input_bundle(
     if stale_symbols:
         risks.append(f"部分标的使用 stale fallback: {', '.join(stale_symbols)}")
     if empty_symbols:
-        risks.append(f"部分标的无可用日线: {', '.join(empty_symbols)}")
+        risks.append(f"部分标的无可用 {interval} 数据: {', '.join(empty_symbols)}")
+    if partial_symbols:
+        risks.append(f"部分标的 {interval} 数据未完整收盘: {', '.join(partial_symbols)}")
     event_fact_candidates = _event_fact_candidates_from_dataset(dataset)
     _apply_search_status_to_gaps(_search_status_from_dataset(dataset), event_fact_candidates, missing_data, risks)
     return MarketMonitorInputBundle(
@@ -122,7 +145,7 @@ def build_input_bundle(
         core_data=core_data,
         cache_summary=cache_summary,
         universe=universe,
-        data_mode="daily",
+        data_mode=data_mode,
         data_freshness=data_freshness,
         input_data_status=status,
         missing_data=missing_data,
