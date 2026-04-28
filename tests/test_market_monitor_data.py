@@ -4,12 +4,15 @@ from unittest.mock import patch
 
 import pandas as pd
 
+from tradingagents.dataflows.yfinance_news import fetch_global_news_articles_yfinance
 from tradingagents.web.market_monitor.data import (
     _download_single_symbol,
     _get_symbol_history,
     _required_trading_days,
+    build_market_dataset,
     fetch_daily_history,
 )
+from tradingagents.web.market_monitor.universe import get_market_monitor_universe
 
 
 class _FakeYFinance:
@@ -19,6 +22,25 @@ class _FakeYFinance:
     def download(self, **kwargs):
         self.calls.append(kwargs)
         return pd.DataFrame()
+
+
+class _FakeSearchResult:
+    news = [
+        {
+            "content": {
+                "title": "Fed signals rates may stay higher",
+                "summary": "Policy makers discussed inflation risk.",
+                "provider": {"displayName": "Reuters"},
+                "canonicalUrl": {"url": "https://example.com/fed-rates"},
+                "pubDate": "2026-04-11T12:00:00Z",
+            }
+        }
+    ]
+
+
+class _FakeNewsYFinance:
+    def Search(self, **kwargs):
+        return _FakeSearchResult()
 
 
 def _make_frame(days: int, end: str = "2026-04-10") -> pd.DataFrame:
@@ -51,6 +73,91 @@ def _cache_result(state: str, frame: pd.DataFrame | None = None, reason: str | N
 
 
 class MarketMonitorDataTests(unittest.TestCase):
+    def test_fetch_global_news_articles_returns_structured_nested_articles(self) -> None:
+        with patch("tradingagents.dataflows.yfinance_news.get_yf", return_value=_FakeNewsYFinance()), patch(
+            "tradingagents.dataflows.yfinance_news.yf_retry",
+            side_effect=lambda func: func(),
+        ):
+            articles = fetch_global_news_articles_yfinance("2026-04-12", look_back_days=7, limit=1)
+
+        self.assertEqual(len(articles), 1)
+        self.assertEqual(articles[0]["title"], "Fed signals rates may stay higher")
+        self.assertEqual(articles[0]["publisher"], "Reuters")
+        self.assertEqual(articles[0]["link"], "https://example.com/fed-rates")
+        self.assertEqual(articles[0]["pub_date"], datetime(2026, 4, 11, 12, 0, tzinfo=timezone.utc))
+
+    def test_build_market_dataset_can_skip_event_news(self) -> None:
+        universe = get_market_monitor_universe()
+        with patch("tradingagents.web.market_monitor.data.fetch_daily_history", return_value=({}, {"symbols": []})), patch(
+            "tradingagents.web.market_monitor.data.fetch_global_news_articles_yfinance",
+            side_effect=AssertionError("global news should not be fetched"),
+        ), patch(
+            "tradingagents.web.market_monitor.data.fetch_ticker_news_articles_yfinance",
+            side_effect=AssertionError("ticker news should not be fetched"),
+        ):
+            dataset = build_market_dataset(universe, date(2026, 4, 12), include_event_news=False)
+
+        self.assertEqual(dataset["search"]["event_fact_candidates"], [])
+        self.assertEqual(dataset["search"]["status"]["source"], "disabled_for_history")
+        self.assertEqual(dataset["search"]["status"]["event_fact_candidate_count"], 0)
+
+    def test_build_market_dataset_injects_news_event_candidates(self) -> None:
+        universe = get_market_monitor_universe()
+        article = {
+            "title": "CPI data lifts inflation concerns",
+            "summary": "Investors prepared for a hotter CPI print.",
+            "publisher": "Reuters",
+            "link": "https://example.com/cpi",
+            "pub_date": datetime(2026, 4, 11, 13, 0, tzinfo=timezone.utc),
+        }
+
+        with patch("tradingagents.web.market_monitor.data.fetch_daily_history", return_value=({}, {"symbols": []})), patch(
+            "tradingagents.web.market_monitor.data.fetch_global_news_articles_yfinance",
+            return_value=[article],
+        ), patch("tradingagents.web.market_monitor.data.fetch_ticker_news_articles_yfinance", return_value=[]):
+            dataset = build_market_dataset(universe, date(2026, 4, 12))
+
+        candidates = dataset["search"]["event_fact_candidates"]
+        self.assertEqual(len(candidates), 1)
+        self.assertEqual(candidates[0]["event"], "CPI data lifts inflation concerns")
+        self.assertEqual(candidates[0]["scope"], "index_level")
+        self.assertEqual(candidates[0]["severity"], "high")
+        self.assertEqual(candidates[0]["source_name"], "Reuters")
+        self.assertEqual(candidates[0]["source_url"], "https://example.com/cpi")
+        self.assertEqual(dataset["search"]["status"]["event_fact_candidate_count"], 1)
+
+    def test_build_market_dataset_drops_news_with_unauditable_url(self) -> None:
+        universe = get_market_monitor_universe()
+        article = {
+            "title": "Fed signals rates may stay higher",
+            "summary": "Policy makers discussed inflation risk.",
+            "publisher": "Reuters",
+            "link": "javascript:alert(1)",
+            "pub_date": datetime(2026, 4, 11, 13, 0, tzinfo=timezone.utc),
+        }
+
+        with patch("tradingagents.web.market_monitor.data.fetch_daily_history", return_value=({}, {"symbols": []})), patch(
+            "tradingagents.web.market_monitor.data.fetch_global_news_articles_yfinance",
+            return_value=[article],
+        ), patch("tradingagents.web.market_monitor.data.fetch_ticker_news_articles_yfinance", return_value=[]):
+            dataset = build_market_dataset(universe, date(2026, 4, 12))
+
+        self.assertEqual(dataset["search"]["event_fact_candidates"], [])
+        self.assertEqual(dataset["search"]["status"]["global_news_count"], 1)
+        self.assertEqual(dataset["search"]["status"]["event_fact_candidate_count"], 0)
+
+    def test_build_market_dataset_records_news_failure_without_fabricated_events(self) -> None:
+        universe = get_market_monitor_universe()
+        with patch("tradingagents.web.market_monitor.data.fetch_daily_history", return_value=({}, {"symbols": []})), patch(
+            "tradingagents.web.market_monitor.data.fetch_global_news_articles_yfinance",
+            side_effect=RuntimeError("network down"),
+        ), patch("tradingagents.web.market_monitor.data.fetch_ticker_news_articles_yfinance", return_value=[]):
+            dataset = build_market_dataset(universe, date(2026, 4, 12))
+
+        self.assertEqual(dataset["search"]["event_fact_candidates"], [])
+        self.assertEqual(dataset["search"]["status"]["event_fact_candidate_count"], 0)
+        self.assertTrue(dataset["search"]["status"]["errors"])
+
     def test_download_single_symbol_sets_network_timeout(self) -> None:
         fake_yf = _FakeYFinance()
 

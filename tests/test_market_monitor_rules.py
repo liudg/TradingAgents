@@ -176,6 +176,24 @@ class MarketMonitorRulesTests(unittest.TestCase):
         self.assertTrue(data_status.missing_data)
         self.assertEqual(data_status.event_fact_sheet, [])
 
+    def test_snapshot_service_history_disables_event_news_fetches(self) -> None:
+        dataset = _complete_dataset()
+        with patch(
+            "tradingagents.web.market_monitor.inference.base.create_llm_client",
+            return_value=_FakeClient(),
+        ), patch(
+            "tradingagents.web.market_monitor.snapshot_service.build_market_dataset",
+            return_value=dataset,
+        ) as dataset_mock:
+            service = MarketMonitorSnapshotService()
+            service.get_history_snapshots(
+                MarketMonitorHistoryRequest(as_of_date=date(2026, 4, 10), days=2),
+                trade_dates=[date(2026, 4, 9), date(2026, 4, 10)],
+            )
+
+        self.assertEqual(dataset_mock.call_count, 2)
+        self.assertTrue(all(call.kwargs["include_event_news"] is False for call in dataset_mock.call_args_list))
+
     def test_snapshot_service_history_returns_requested_days(self) -> None:
         service = MarketMonitorSnapshotService()
         snapshots = [

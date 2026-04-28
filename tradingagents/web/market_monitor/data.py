@@ -4,12 +4,14 @@ import logging
 import math
 import time
 from dataclasses import dataclass
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta, timezone
 from typing import Any, Dict, Iterable
+from urllib.parse import urlparse
 
 import pandas as pd
 from yfinance.exceptions import YFRateLimitError
 
+from tradingagents.dataflows.yfinance_news import fetch_global_news_articles_yfinance, fetch_ticker_news_articles_yfinance
 from tradingagents.dataflows.yfinance_proxy import get_yf
 from .cache import evaluate_symbol_daily_cache, save_symbol_daily_cache
 
@@ -17,6 +19,10 @@ logger = logging.getLogger(__name__)
 
 YFINANCE_DOWNLOAD_TIMEOUT_SECONDS = 10
 MIN_REQUIRED_TRADING_DAYS = 252
+NEWS_LOOKBACK_DAYS = 7
+GLOBAL_NEWS_LIMIT = 10
+TICKER_NEWS_LIMIT = 3
+MARKET_EVENT_NEWS_SYMBOLS = ["SPY", "QQQ", "IWM", "DIA", "^VIX", "LQD", "JNK"]
 
 
 @dataclass(frozen=True)
@@ -274,14 +280,166 @@ def _download_single_symbol(symbol: str, as_of_date: date, lookback_days: int) -
     return pd.DataFrame(columns=["Open", "High", "Low", "Close", "Volume"])
 
 
+def _fetch_event_news(universe: dict[str, list[str]], as_of_date: date) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    generated_at = datetime.now(timezone.utc)
+    errors: list[str] = []
+    articles: list[dict[str, Any]] = []
+    global_news_count = 0
+    try:
+        global_articles = fetch_global_news_articles_yfinance(as_of_date.isoformat(), NEWS_LOOKBACK_DAYS, GLOBAL_NEWS_LIMIT)
+        global_news_count = len(global_articles)
+        articles.extend(global_articles)
+    except Exception as exc:
+        logger.warning("获取全球市场新闻失败", exc_info=True)
+        errors.append(f"global_news: {exc}")
+
+    ticker_news_count = 0
+    start_date = (as_of_date - timedelta(days=NEWS_LOOKBACK_DAYS)).isoformat()
+    end_date = as_of_date.isoformat()
+    monitored_symbols = set(universe["core_index_etfs"] + ["^VIX", "LQD", "JNK"])
+    news_symbols = [symbol for symbol in MARKET_EVENT_NEWS_SYMBOLS if symbol in monitored_symbols]
+    for symbol in news_symbols:
+        try:
+            ticker_articles = fetch_ticker_news_articles_yfinance(symbol, start_date, end_date, TICKER_NEWS_LIMIT)
+            ticker_news_count += len(ticker_articles)
+            articles.extend(ticker_articles)
+        except Exception as exc:
+            logger.warning("获取 %s 新闻失败", symbol, exc_info=True)
+            errors.append(f"ticker_news.{symbol}: {exc}")
+
+    candidates = _event_fact_candidates_from_articles(articles, universe, generated_at)
+    return candidates, {
+        "source": "yfinance_news",
+        "generated_at": generated_at.isoformat(),
+        "global_news_count": global_news_count,
+        "ticker_news_count": ticker_news_count,
+        "event_fact_candidate_count": len(candidates),
+        "errors": errors,
+    }
+
+
+def _event_fact_candidates_from_articles(
+    articles: list[dict[str, Any]],
+    universe: dict[str, list[str]],
+    generated_at: datetime,
+) -> list[dict[str, Any]]:
+    candidates: list[dict[str, Any]] = []
+    seen: set[tuple[str, str]] = set()
+    for article in articles:
+        candidate = _article_to_event_fact_candidate(article, universe, generated_at)
+        if candidate is None:
+            continue
+        key = (candidate["event"].lower(), candidate["source_url"])
+        if key in seen:
+            continue
+        seen.add(key)
+        candidates.append(candidate)
+    return candidates
+
+
+def _article_to_event_fact_candidate(
+    article: dict[str, Any],
+    universe: dict[str, list[str]],
+    generated_at: datetime,
+) -> dict[str, Any] | None:
+    title = _clean_article_text(article.get("title"))
+    source_name = _clean_article_text(article.get("publisher"))
+    source_url = _clean_article_text(article.get("link"))
+    if not title or title == "No title" or not source_name or source_name == "Unknown" or not _is_auditable_url(source_url):
+        return None
+    summary = _clean_article_text(article.get("summary")) or title
+    observed_at, has_observed_at = _article_observed_at(article.get("pub_date"), generated_at)
+    expires_at = observed_at + timedelta(days=1)
+    confidence = _article_confidence(source_name, has_observed_at)
+    return {
+        "event": title,
+        "scope": _article_scope(article, universe),
+        "severity": _article_severity(f"{title} {summary}"),
+        "source_type": "news",
+        "source_name": source_name,
+        "source_url": source_url,
+        "source_summary": summary,
+        "observed_at": observed_at.isoformat(),
+        "confidence": confidence,
+        "expires_at": expires_at.isoformat(),
+    }
+
+
+def _article_observed_at(value: Any, generated_at: datetime) -> tuple[datetime, bool]:
+    if isinstance(value, datetime):
+        observed_at = value
+        if observed_at.tzinfo is None:
+            observed_at = observed_at.replace(tzinfo=timezone.utc)
+        return observed_at, True
+    return generated_at, False
+
+
+def _article_scope(article: dict[str, Any], universe: dict[str, list[str]]) -> str:
+    ticker = _clean_article_text(article.get("ticker")).upper()
+    if ticker in {symbol.upper() for symbol in universe.get("sector_etfs", [])}:
+        return "sector_level"
+    if ticker in {"^VIX", "LQD", "JNK"}:
+        return "cross_asset"
+    if ticker:
+        return "index_level"
+    return "index_level"
+
+
+def _article_severity(text: str) -> str:
+    normalized = text.lower()
+    if any(token in normalized for token in ("war", "invasion", "default", "banking crisis", "emergency", "crash", "systemic", "shutdown")):
+        return "critical"
+    if any(token in normalized for token in ("fed", "fomc", "cpi", "inflation", "rates", "jobs", "payrolls", "tariff", "sanctions", "oil shock")):
+        return "high"
+    if any(token in normalized for token in ("volatility", "guidance", "sector rotation", "market outlook")):
+        return "medium"
+    return "medium"
+
+
+def _article_confidence(source_name: str, has_observed_at: bool) -> float:
+    normalized = source_name.lower()
+    confidence = 0.78 if any(token in normalized for token in ("reuters", "bloomberg", "cnbc", "marketwatch", "wsj", "yahoo")) else 0.68
+    if not has_observed_at:
+        confidence -= 0.08
+    return round(max(0.55, min(0.85, confidence)), 2)
+
+
+def _is_auditable_url(value: str) -> bool:
+    parsed = urlparse(value)
+    return parsed.scheme in {"http", "https"} and bool(parsed.netloc)
+
+
+def _clean_article_text(value: Any) -> str:
+    if value is None:
+        return ""
+    return " ".join(str(value).split()).strip()
+
+
 def build_market_dataset(
     universe: dict[str, list[str]],
     as_of_date: date,
     force_refresh: bool = False,
+    include_event_news: bool = True,
 ) -> dict[str, Any]:
     core_and_sector = universe["core_index_etfs"] + universe["sector_etfs"] + ["^VIX"]
     core, cache_summary = fetch_daily_history(core_and_sector, as_of_date, force_refresh=force_refresh)
+    if include_event_news:
+        event_fact_candidates, search_status = _fetch_event_news(universe, as_of_date)
+    else:
+        event_fact_candidates = []
+        search_status = {
+            "source": "disabled_for_history",
+            "generated_at": datetime.now(timezone.utc).isoformat(),
+            "global_news_count": 0,
+            "ticker_news_count": 0,
+            "event_fact_candidate_count": 0,
+            "errors": [],
+        }
     return {
         "core": core,
         "cache_summary": cache_summary,
+        "search": {
+            "event_fact_candidates": event_fact_candidates,
+            "status": search_status,
+        },
     }

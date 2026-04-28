@@ -7,6 +7,28 @@ import re
 from tradingagents.agents.utils.rating import parse_rating
 
 
+class FinancialSituationMemory:
+    def __init__(self, name: str, config: dict = None):
+        cfg = config or {}
+        self.name = str(name or "memory")
+        memory_dir = Path(cfg.get("memory_dir") or Path.home() / ".tradingagents" / "memory")
+        safe_name = re.sub(r"[^A-Za-z0-9_.-]+", "_", self.name).strip("_") or "memory"
+        self._path = memory_dir / f"{safe_name}.md"
+        self._path.parent.mkdir(parents=True, exist_ok=True)
+
+    def add_situations(self, situations_and_advice: List[tuple[str, str]]) -> None:
+        entries = []
+        for situation, advice in situations_and_advice:
+            situation_text = str(situation or "").strip()
+            advice_text = str(advice or "").strip()
+            if not situation_text and not advice_text:
+                continue
+            entries.append(f"## Situation\n\n{situation_text}\n\n## Advice\n\n{advice_text}\n")
+        if entries:
+            with open(self._path, "a", encoding="utf-8") as f:
+                f.write("\n---\n\n".join(entries) + "\n")
+
+
 class TradingMemoryLog:
     """Append-only markdown log of trading decisions and reflections."""
 

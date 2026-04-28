@@ -56,6 +56,7 @@ class MarketMonitorApiTests(unittest.TestCase):
         self.assertIn("factor_breakdown", payload["long_term_score"])
         self.assertEqual(payload["style_effectiveness"]["tactic_layer"]["top_tactic"], "回调低吸")
         self.assertEqual(payload["fact_sheet"]["derived_metrics"]["breadth_above_200dma_pct"], 63.0)
+        self.assertEqual(payload["event_fact_sheet"][0]["event_id"], payload["fact_sheet"]["event_fact_sheet"][0]["event_id"])
         self.assertEqual(len(payload["prompt_traces"]), 1)
         self.assertTrue(payload["run_id"])
 
@@ -66,6 +67,7 @@ class MarketMonitorApiTests(unittest.TestCase):
 
         detail_payload = self.client.get(f"/api/market-monitor/runs/{payload['run_id']}").json()
         self.assertEqual(detail_payload["snapshot"]["run_id"], payload["run_id"])
+        self.assertEqual(detail_payload["snapshot"]["event_fact_sheet"][0]["event_id"], detail_payload["snapshot"]["fact_sheet"]["event_fact_sheet"][0]["event_id"])
         self.assertIsNone(detail_payload["history"])
         self.assertIsNone(detail_payload["data_status"])
         self.assertEqual(len(detail_payload["stage_results"]), 2)
@@ -79,6 +81,7 @@ class MarketMonitorApiTests(unittest.TestCase):
         fact_sheet_response = self.client.get(f"/api/market-monitor/runs/{payload['run_id']}/artifacts/fact_sheet")
         self.assertEqual(fact_sheet_response.status_code, 200)
         self.assertEqual(fact_sheet_response.json()["derived_metrics"]["breadth_above_200dma_pct"], 63.0)
+        self.assertEqual(fact_sheet_response.json()["event_fact_sheet"][0]["event_id"], payload["event_fact_sheet"][0]["event_id"])
 
     def test_market_monitor_artifact_api_rejects_unsupported_artifact(self) -> None:
         with patch.object(market_monitor_manager.service, "get_snapshot", return_value=self._build_snapshot()):
@@ -186,7 +189,8 @@ class MarketMonitorApiTests(unittest.TestCase):
         self.assertEqual(response.json()["points"][0]["panic_state"], "无信号")
 
     def test_data_status_api_returns_v231_data_status(self) -> None:
-        data_status = fixture_data_status(fact_sheet=self._build_snapshot().fact_sheet)
+        snapshot = self._build_snapshot()
+        data_status = fixture_data_status(fact_sheet=snapshot.fact_sheet).model_copy(update={"event_fact_sheet": snapshot.event_fact_sheet})
         with patch.object(market_monitor_manager.service, "get_data_status", return_value=data_status):
             response = self.client.get("/api/market-monitor/data-status")
 
@@ -195,6 +199,7 @@ class MarketMonitorApiTests(unittest.TestCase):
         self.assertEqual(payload["data_mode"], "daily")
         self.assertEqual(payload["input_data_status"]["source"], "yfinance")
         self.assertIn("缺少交易所级 breadth 原始数据", payload["open_gaps"])
+        self.assertEqual(payload["event_fact_sheet"][0]["event_id"], payload["fact_sheet"]["event_fact_sheet"][0]["event_id"])
         self.assertIsNotNone(payload["fact_sheet"])
 
     def test_snapshot_api_passes_force_refresh_flag(self) -> None:

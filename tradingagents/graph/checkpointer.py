@@ -11,7 +11,10 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Generator
 
-from langgraph.checkpoint.sqlite import SqliteSaver
+try:
+    from langgraph.checkpoint.sqlite import SqliteSaver
+except ModuleNotFoundError:
+    SqliteSaver = None
 
 
 def _db_path(data_dir: str | Path, ticker: str) -> Path:
@@ -29,6 +32,8 @@ def thread_id(ticker: str, date: str) -> str:
 @contextmanager
 def get_checkpointer(data_dir: str | Path, ticker: str) -> Generator[SqliteSaver, None, None]:
     """Context manager yielding a SqliteSaver backed by a per-ticker DB."""
+    if SqliteSaver is None:
+        raise RuntimeError("Checkpoint support requires langgraph-checkpoint-sqlite")
     db = _db_path(data_dir, ticker)
     conn = sqlite3.connect(str(db), check_same_thread=False)
     try:

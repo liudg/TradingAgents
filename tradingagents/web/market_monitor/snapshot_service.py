@@ -77,7 +77,7 @@ class MarketMonitorSnapshotService:
         snapshots: list[MarketMonitorSnapshotResponse] = []
         context = list(previous_snapshots or [])
         for trade_date in dates_to_build:
-            dataset = build_market_dataset(self._universe, trade_date, force_refresh=request.force_refresh)
+            dataset = build_market_dataset(self._universe, trade_date, force_refresh=request.force_refresh, include_event_news=False)
             snapshot = self._build_snapshot(trade_date, dataset, previous_snapshots=context)
             snapshots.append(snapshot)
             context.append(snapshot)
@@ -138,7 +138,7 @@ class MarketMonitorSnapshotService:
         core_data = dataset["core"]
         local_market_data, derived_metrics = build_market_snapshot(core_data, self._universe["breadth_proxy_symbols"])
         event_fact_sheet = fact_sheet_override.event_fact_sheet if fact_sheet_override else build_event_fact_sheet(bundle)
-        if not event_fact_sheet:
+        if not event_fact_sheet and not any(item.field in {"event_fact_sheet", "search.event_fact_candidates"} for item in bundle.missing_data):
             bundle.missing_data.append(
                 MarketMonitorMissingDataItem(
                     field="event_fact_sheet",

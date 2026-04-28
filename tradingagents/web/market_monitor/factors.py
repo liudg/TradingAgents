@@ -114,6 +114,8 @@ def build_input_bundle(
         risks.append(f"部分标的使用 stale fallback: {', '.join(stale_symbols)}")
     if empty_symbols:
         risks.append(f"部分标的无可用日线: {', '.join(empty_symbols)}")
+    event_fact_candidates = _event_fact_candidates_from_dataset(dataset)
+    _apply_search_status_to_gaps(_search_status_from_dataset(dataset), event_fact_candidates, missing_data, risks)
     return MarketMonitorInputBundle(
         as_of_date=as_of_date,
         timestamp=generated_at,
@@ -125,7 +127,7 @@ def build_input_bundle(
         input_data_status=status,
         missing_data=missing_data,
         risks=risks,
-        event_fact_candidates=_event_fact_candidates_from_dataset(dataset),
+        event_fact_candidates=event_fact_candidates,
     )
 
 
@@ -150,6 +152,48 @@ def _event_fact_candidates_from_dataset(dataset: dict[str, Any]) -> list[Any]:
         if isinstance(value, list):
             candidates.extend(value)
     return candidates
+
+
+def _search_status_from_dataset(dataset: dict[str, Any]) -> dict[str, Any]:
+    search = dataset.get("search")
+    if not isinstance(search, dict):
+        return {}
+    status = search.get("status")
+    return status if isinstance(status, dict) else {}
+
+
+def _apply_search_status_to_gaps(
+    status: dict[str, Any],
+    event_fact_candidates: list[Any],
+    missing_data: list[MarketMonitorMissingDataItem],
+    risks: list[str],
+) -> None:
+    if not status:
+        return
+    errors = [str(error) for error in status.get("errors", []) if str(error).strip()]
+    candidate_count = status.get("event_fact_candidate_count")
+    if not isinstance(candidate_count, int):
+        candidate_count = len(event_fact_candidates)
+    news_count = int(status.get("global_news_count") or 0) + int(status.get("ticker_news_count") or 0)
+    if candidate_count == 0:
+        if status.get("source") == "disabled_for_history":
+            reason = "历史回放未注入联网事件事实"
+        elif errors:
+            reason = "联网新闻搜索失败，事件事实表按空表处理"
+        elif news_count > 0:
+            reason = "联网新闻搜索返回新闻，但未形成可追溯事件事实"
+        else:
+            reason = "联网新闻搜索未返回可用事件事实"
+        missing_data.append(
+            MarketMonitorMissingDataItem(
+                field="search.event_fact_candidates",
+                reason=reason,
+                impact="宏观日历、财报日历、政策/地缘和突发新闻不参与评分调整，不得编造事件",
+                severity="medium",
+            )
+        )
+    if errors and candidate_count > 0:
+        risks.append("部分联网新闻源失败，事件事实可能不完整。")
 
 
 def _normalize_event_fact(candidate: Any, bundle: MarketMonitorInputBundle) -> MarketMonitorEventFact | None:

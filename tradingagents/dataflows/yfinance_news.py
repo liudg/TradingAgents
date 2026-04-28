@@ -6,6 +6,13 @@ from dateutil.relativedelta import relativedelta
 from .stockstats_utils import yf_retry
 from .yfinance_proxy import get_yf
 
+GLOBAL_NEWS_SEARCH_QUERIES = [
+    "stock market economy",
+    "Federal Reserve interest rates",
+    "inflation economic outlook",
+    "global markets trading",
+]
+
 
 def _extract_article_data(article: dict) -> dict:
     """Extract article data from yfinance news format (handles nested 'content' structure)."""
@@ -46,6 +53,66 @@ def _extract_article_data(article: dict) -> dict:
             "link": article.get("link", ""),
             "pub_date": None,
         }
+
+
+def fetch_ticker_news_articles_yfinance(
+    ticker: str,
+    start_date: str,
+    end_date: str,
+    limit: int = 10,
+) -> list[dict]:
+    yf = get_yf()
+    stock = yf.Ticker(ticker)
+    news = yf_retry(lambda: stock.get_news(count=limit))
+    start_dt = datetime.strptime(start_date, "%Y-%m-%d")
+    end_dt = datetime.strptime(end_date, "%Y-%m-%d")
+    articles = []
+    for article in news or []:
+        data = _extract_article_data(article)
+        pub_date = data.get("pub_date")
+        if pub_date:
+            pub_date_naive = pub_date.replace(tzinfo=None)
+            if not (start_dt <= pub_date_naive <= end_dt + relativedelta(days=1)):
+                continue
+        data["ticker"] = ticker
+        articles.append(data)
+        if len(articles) >= limit:
+            break
+    return articles
+
+
+def fetch_global_news_articles_yfinance(
+    curr_date: str,
+    look_back_days: int = 7,
+    limit: int = 10,
+) -> list[dict]:
+    yf = get_yf()
+    curr_dt = datetime.strptime(curr_date, "%Y-%m-%d")
+    start_dt = curr_dt - relativedelta(days=look_back_days)
+    articles = []
+    seen_titles = set()
+    for query in GLOBAL_NEWS_SEARCH_QUERIES:
+        search = yf_retry(lambda q=query: yf.Search(
+            query=q,
+            news_count=limit,
+            enable_fuzzy_query=True,
+        ))
+        for article in getattr(search, "news", None) or []:
+            data = _extract_article_data(article)
+            title = data.get("title", "")
+            if not title or title in seen_titles:
+                continue
+            pub_date = data.get("pub_date")
+            if pub_date:
+                pub_date_naive = pub_date.replace(tzinfo=None)
+                if not (start_dt <= pub_date_naive <= curr_dt + relativedelta(days=1)):
+                    continue
+            seen_titles.add(title)
+            data["query"] = query
+            articles.append(data)
+            if len(articles) >= limit:
+                return articles
+    return articles
 
 
 def get_news_yfinance(
@@ -121,20 +188,12 @@ def get_global_news_yfinance(
     Returns:
         Formatted string containing global news articles
     """
-    # Search queries for macro/global news
-    search_queries = [
-        "stock market economy",
-        "Federal Reserve interest rates",
-        "inflation economic outlook",
-        "global markets trading",
-    ]
-
     all_news = []
     seen_titles = set()
 
     try:
         yf = get_yf()
-        for query in search_queries:
+        for query in GLOBAL_NEWS_SEARCH_QUERIES:
             search = yf_retry(lambda q=query: yf.Search(
                 query=q,
                 news_count=limit,

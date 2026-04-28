@@ -90,6 +90,105 @@ class MarketMonitorFactSheetTests(unittest.TestCase):
         self.assertEqual(facts[0].severity, "high")
         self.assertEqual(facts[0].confidence, 0.95)
 
+    def test_build_event_fact_sheet_reads_search_candidates(self) -> None:
+        now = datetime(2026, 4, 12, 9, 30, 0, tzinfo=timezone.utc)
+        bundle = build_input_bundle(
+            as_of_date=date(2026, 4, 12),
+            dataset={
+                "core": {},
+                "search": {
+                    "event_fact_candidates": [
+                        {
+                            "event": "Fed signals rates may stay higher",
+                            "scope": "index_level",
+                            "severity": "high",
+                            "source_type": "news",
+                            "source_name": "Reuters",
+                            "source_url": "https://example.com/fed-rates",
+                            "source_summary": "Policy makers discussed inflation risk.",
+                            "observed_at": now.isoformat(),
+                            "confidence": 0.78,
+                            "expires_at": (now + timedelta(days=1)).isoformat(),
+                        }
+                    ],
+                    "status": {"source": "yfinance_news", "event_fact_candidate_count": 1, "global_news_count": 1, "ticker_news_count": 0, "errors": []},
+                },
+            },
+            universe=get_market_monitor_universe(),
+            timestamp=now,
+        )
+
+        facts = build_event_fact_sheet(bundle)
+
+        self.assertEqual(len(facts), 1)
+        fact = facts[0]
+        self.assertTrue(fact.event_id.startswith("event-"))
+        self.assertEqual(fact.event, "Fed signals rates may stay higher")
+        self.assertEqual(fact.scope, "index_level")
+        self.assertEqual(fact.time_window, "next_24h")
+        self.assertEqual(fact.severity, "high")
+        self.assertEqual(fact.source_name, "Reuters")
+        self.assertEqual(fact.source_url, "https://example.com/fed-rates")
+        self.assertEqual(fact.confidence, 0.78)
+
+    def test_search_failure_adds_missing_data_without_event_facts(self) -> None:
+        now = datetime(2026, 4, 12, 9, 30, 0, tzinfo=timezone.utc)
+        bundle = build_input_bundle(
+            as_of_date=date(2026, 4, 12),
+            dataset={
+                "core": {},
+                "search": {
+                    "event_fact_candidates": [],
+                    "status": {"source": "yfinance_news", "event_fact_candidate_count": 0, "global_news_count": 0, "ticker_news_count": 0, "errors": ["global_news: network down"]},
+                },
+            },
+            universe=get_market_monitor_universe(),
+            timestamp=now,
+        )
+
+        facts = build_event_fact_sheet(bundle)
+
+        self.assertEqual(facts, [])
+        self.assertTrue(any(item.field == "search.event_fact_candidates" for item in bundle.missing_data))
+        self.assertTrue(any("联网新闻搜索失败" in item.reason for item in bundle.missing_data))
+        self.assertTrue(any("不得编造事件" in item.impact for item in bundle.missing_data))
+
+    def test_history_disabled_news_adds_specific_missing_data(self) -> None:
+        now = datetime(2026, 4, 12, 9, 30, 0, tzinfo=timezone.utc)
+        bundle = build_input_bundle(
+            as_of_date=date(2026, 4, 12),
+            dataset={
+                "core": {},
+                "search": {
+                    "event_fact_candidates": [],
+                    "status": {"source": "disabled_for_history", "event_fact_candidate_count": 0, "global_news_count": 0, "ticker_news_count": 0, "errors": []},
+                },
+            },
+            universe=get_market_monitor_universe(),
+            timestamp=now,
+        )
+
+        self.assertEqual(build_event_fact_sheet(bundle), [])
+        self.assertTrue(any("历史回放未注入联网事件事实" in item.reason for item in bundle.missing_data))
+
+    def test_search_articles_without_usable_candidates_adds_specific_missing_data(self) -> None:
+        now = datetime(2026, 4, 12, 9, 30, 0, tzinfo=timezone.utc)
+        bundle = build_input_bundle(
+            as_of_date=date(2026, 4, 12),
+            dataset={
+                "core": {},
+                "search": {
+                    "event_fact_candidates": [],
+                    "status": {"source": "yfinance_news", "event_fact_candidate_count": 0, "global_news_count": 1, "ticker_news_count": 0, "errors": []},
+                },
+            },
+            universe=get_market_monitor_universe(),
+            timestamp=now,
+        )
+
+        self.assertEqual(build_event_fact_sheet(bundle), [])
+        self.assertTrue(any("未形成可追溯事件事实" in item.reason for item in bundle.missing_data))
+
     def test_build_event_fact_sheet_dedupes_and_filters_expired_or_invalid_sources(self) -> None:
         now = datetime(2026, 4, 12, 9, 30, 0, tzinfo=timezone.utc)
         bundle = build_input_bundle(
