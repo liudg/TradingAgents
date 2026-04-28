@@ -16,31 +16,50 @@ On Windows, prefer the repository PowerShell helpers for first-time setup:
 Run the interactive CLI:
 ```bash
 tradingagents
+.venv\Scripts\tradingagents.exe
 .venv\Scripts\python.exe -m cli.main
 ```
 Start the FastAPI backend with the maintained script or the packaged entry point:
 ```powershell
 .\scripts\start_api.ps1
 .\.venv\Scripts\tradingagents-api.exe
+.\scripts\start_api.ps1 -BindHost 127.0.0.1 -Port 8000 -Reload
 ```
 To bring up the local web stack during development, use:
 ```powershell
 .\scripts\start_web_stack.ps1
+.\scripts\start_web_stack.ps1 -BindHost 127.0.0.1 -ApiPort 8000 -WebPort 5173 -Reload
 ```
 Run tests with standard library discovery:
 ```bash
 .venv\Scripts\python.exe -m unittest discover -s tests
 ```
+For targeted regressions, you can also run:
+```bash
+.venv\Scripts\python.exe -m unittest tests.test_web_api
+.venv\Scripts\python.exe -m unittest tests.test_market_monitor_api.MarketMonitorRunApiTests
+.venv\Scripts\python.exe -m unittest tests.test_market_monitor_api.MarketMonitorRunApiTests.test_run_api_exposes_pipeline_resources
+```
 Frontend work happens under `web-ui/` with Vite:
 ```bash
 cd web-ui
+npm install
 npm run dev
 npm run build
 npm run test
+npm run preview
 ```
+`.\scripts\start_web_stack.ps1` will install `web-ui` dependencies automatically when `web-ui\node_modules` is missing before launching the backend and frontend.
+If `scripts\sync_codex_to_cliproxy.ps1` is present, `.\scripts\start_web_stack.ps1` will attempt that optional local auth sync before launching the backend and frontend, but startup still continues if the sync step fails.
 For quick package smoke checks, run:
 ```bash
 .venv\Scripts\python.exe main.py
+.venv\Scripts\python.exe test.py
+```
+Docker workflows are documented for container smoke runs:
+```bash
+docker compose run --rm tradingagents
+docker compose --profile ollama run --rm tradingagents-ollama
 ```
 
 ## Coding Style & Naming Conventions

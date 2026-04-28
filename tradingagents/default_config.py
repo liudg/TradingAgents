@@ -9,7 +9,7 @@ DEFAULT_CONFIG = {
     "memory_dir": os.getenv("TRADINGAGENTS_MEMORY_DIR", os.path.join(_TRADINGAGENTS_HOME, "memory")),
     # LLM settings
     "llm_provider": "codex",
-    "deep_think_llm": "gpt-5.4",
+    "deep_think_llm": "gpt-5.5",
     "quick_think_llm": "gpt-5.4-mini",
     "backend_url": "http://127.0.0.1:8317/v1",
     "market_monitor_symbol_cache_max_age_days": 3,
