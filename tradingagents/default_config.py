@@ -7,20 +7,34 @@ DEFAULT_CONFIG = {
     "results_dir": os.getenv("TRADINGAGENTS_RESULTS_DIR", os.path.join(_TRADINGAGENTS_HOME, "logs")),
     "data_cache_dir": os.getenv("TRADINGAGENTS_CACHE_DIR", os.path.join(_TRADINGAGENTS_HOME, "cache")),
     "memory_dir": os.getenv("TRADINGAGENTS_MEMORY_DIR", os.path.join(_TRADINGAGENTS_HOME, "memory")),
+    "memory_log_path": os.getenv("TRADINGAGENTS_MEMORY_LOG_PATH", os.path.join(_TRADINGAGENTS_HOME, "memory", "trading_memory.md")),
+    # Optional cap on the number of resolved memory log entries. When set,
+    # the oldest resolved entries are pruned once this limit is exceeded.
+    # Pending entries are never pruned. None disables rotation entirely.
+    "memory_log_max_entries": None,
     # LLM settings
     "llm_provider": "codex",
     "deep_think_llm": "gpt-5.5",
     "quick_think_llm": "gpt-5.4-mini",
-    "backend_url": "http://127.0.0.1:8317/v1",
+    
     "market_monitor_symbol_cache_max_age_days": 3,
     "market_monitor_symbol_cache_retention_days": 30,
     "market_monitor_symbol_cache_cleanup_interval_seconds": 3600,
     "market_monitor_run_retention_days": 30,
+    # When None, each provider's client falls back to its own default endpoint
+    # (api.openai.com for OpenAI, generativelanguage.googleapis.com for Gemini, ...).
+    # The CLI overrides this per provider when the user picks one. Keeping a
+    # provider-specific URL here would leak (e.g. OpenAI's /v1 was previously
+    # being forwarded to Gemini, producing malformed request URLs).
+    "backend_url": None,
     # Provider-specific thinking configuration
     "google_thinking_level": None,      # "high", "minimal", etc.
     "openai_reasoning_effort": None,    # "medium", "high", "low"
     "codex_reasoning_effort": None,     # "medium", "high", "low"
     "anthropic_effort": None,           # "high", "medium", "low"
+    # Checkpoint/resume: when True, LangGraph saves state after each node
+    # so a crashed run can resume from the last successful step.
+    "checkpoint_enabled": False,
     # Output language for analyst reports and final decision
     # Internal agent debate stays in English for reasoning quality
     "output_language": "Chinese",
