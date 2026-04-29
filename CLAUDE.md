@@ -17,6 +17,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - Interactive CLI:
   - `.\.venv\Scripts\tradingagents.exe`
   - `.venv\Scripts\python.exe -m cli.main`
+  - `tradingagents analyze --checkpoint`
+  - `tradingagents analyze --clear-checkpoints`
 - FastAPI backend:
   - `powershell -File .\scripts\start_api.ps1`
   - `.venv\Scripts\tradingagents-api.exe`
@@ -30,6 +32,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
   - `powershell -File .\scripts\sync_codex_to_cliproxy.ps1`
 - Package smoke test/example run:
   - `.venv\Scripts\python.exe main.py`
+  - `.venv\Scripts\python.exe test.py`
+- Provider structured-output smoke check:
+  - `.venv\Scripts\python.exe scripts\smoke_structured_output.py openai`
 
 ### Frontend (`web-ui/`)
 - Install deps:
@@ -44,7 +49,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
   - `cd web-ui && npm run preview`
 
 ### Tests
-- The Python test suite uses `unittest`, not `pytest`.
+- Run the main Python test suite with `unittest` discovery. Some tests also use pytest markers, fixtures, or assertions; do not remove pytest support.
 - Run all Python tests:
   - `.venv\Scripts\python.exe -m unittest discover -s tests`
 - Run a single test file:
@@ -63,6 +68,55 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ### Notes on linting/type checks
 - No repo-level Python lint/format command is currently checked in.
 - For the frontend, `npm run build` performs the TypeScript build used in practice for validation.
+
+## Completion validation and structured review
+
+Before claiming a feature, bug fix, or refactor is complete, verify it with fresh evidence from this session. Do not report success based only on code inspection, assumptions, or prior runs.
+
+### Validation gate
+1. Identify the smallest command or manual flow that proves the changed behavior.
+2. Run the full relevant command or flow after the final code change.
+3. Read the output and check exit status, failures, warnings, and skipped checks.
+4. Fix failures before completion, or explicitly report what remains failing or unverified.
+5. In the final response, include what was verified, the command or flow used, and any remaining risk.
+
+### Choose validation by change type
+- Python backend or shared core changes:
+  - Prefer targeted `unittest` first, for example `.venv\Scripts\python.exe -m unittest tests.test_market_monitor_api`.
+  - Run the full suite with `.venv\Scripts\python.exe -m unittest discover -s tests` when the change affects shared graph execution, provider/model config, API routing, persistence, or cross-cutting behavior.
+- FastAPI/API changes:
+  - Run the relevant API test module or class.
+  - For job lifecycle changes, verify create/status/log/report or equivalent lifecycle endpoints, not just helper functions.
+- Market monitor changes:
+  - Run the relevant market monitor tests.
+  - Validate the intended staged workflow impact: input bundle, search slots, fact sheet, judgment cards, execution summary, evidence/log/prompt endpoints as applicable.
+- Frontend changes under `web-ui/`:
+  - Run `cd web-ui && npm run build` because it is the practical TypeScript validation command.
+  - Run `cd web-ui && npm run test` when behavior is covered by tests or when adding/updating tests.
+  - For UI behavior changes, start the dev server and manually verify the golden path and relevant edge cases in the browser before claiming completion. If browser verification is not possible, state that explicitly.
+- Cross frontend/backend changes:
+  - Validate both sides independently, then verify the integrated flow through `/api` or the relevant UI path.
+- Configuration, model/provider, or catalog changes:
+  - Keep `tradingagents/default_config.py`, `tradingagents/llm_clients/model_catalog.py`, and API metadata in `tradingagents/web/api/app.py` aligned.
+  - Run tests that exercise the changed provider/model surface, or state why the provider cannot be exercised locally.
+- Documentation-only changes:
+  - No test command is required unless examples, commands, or generated references were changed; still inspect the rendered/edited text for correctness.
+
+### Structured review before completion
+Use a short review checklist after implementation and before the final response:
+- Requirement fit: the implementation matches the requested behavior without adding unrelated features.
+- Regression risk: existing CLI/API/web/market monitor behavior affected by the change has been considered and tested where practical.
+- Data and state flow: async jobs, persisted reports, logs, prompt captures, and UI state transitions remain consistent where touched.
+- Interface contract: frontend/backend fields, API responses, config keys, and provider/model IDs stay aligned.
+- Simplicity: prefer the direct implementation; do not add old compatibility layers, broad fallbacks, or speculative abstractions unless explicitly required.
+- Security: check external input, file paths, command execution, and API boundaries touched by the change.
+
+### Final response format for completed work
+When reporting completed implementation work, use this concise structure:
+- Changed: what was modified.
+- Verified: commands or manual flows run, with pass/fail result.
+- Not verified: anything relevant that could not be run and why.
+- Remaining risk: only include real unresolved risk; omit if none.
 
 ## Repository architecture
 
@@ -95,7 +149,7 @@ Conditional transitions for repeated debate/tool loops live in `tradingagents/gr
 - `tradingagents/agents/`: agent role implementations and prompts for analysts, researchers, trader, risk, and managers.
 - `tradingagents/dataflows/`: market/news/fundamental data access and vendor routing.
 - `tradingagents/agents/utils/agent_utils.py`: abstract tool functions exposed to LangGraph tool nodes.
-- `tradingagents/llm_clients/`: provider abstraction and model catalog for OpenAI, Codex, Anthropic, Google, xAI, OpenRouter, and Ollama.
+- `tradingagents/llm_clients/`: provider abstraction and model catalog for OpenAI, Codex, Anthropic, Google, xAI, DeepSeek, Qwen, GLM, OpenRouter, Ollama, and Azure OpenAI.
 
 A useful implementation detail: tool nodes are organized by analyst domain rather than by provider. Provider selection happens underneath the tool layer via config.
 
@@ -103,8 +157,8 @@ A useful implementation detail: tool nodes are organized by analyst domain rathe
 Default runtime settings live in `tradingagents/default_config.py`.
 Important repo-specific defaults:
 - default LLM provider is `codex`
-- default deep/quick models are `gpt-5.4` and `gpt-5.4-mini`
-- default backend URL is `http://127.0.0.1:8317/v1`
+- default deep/quick models are `gpt-5.5` and `gpt-5.4-mini`
+- default backend URL is `None`; provider clients fall back to their own default endpoints unless the CLI or user config overrides it
 - user-facing output language defaults to `Chinese`
 - internal debate/reasoning remains English-oriented for model quality
 
@@ -154,6 +208,6 @@ The frontend is primarily a control surface for asynchronous backend jobs rather
 ## Project-specific conventions and gotchas
 - Prefer Simplified Chinese for CLI, web UI, and other user-facing copy. Keep English for identifiers, model/provider IDs, and technical terms when translation would reduce clarity.
 - Read and write repository text files as UTF-8. On Windows, avoid assuming terminal mojibake means the file encoding is wrong.
-- Tests are `unittest`-based and follow `tests/test_*.py` naming.
+- Tests are primarily `unittest`-based and follow `tests/test_*.py` naming; pytest support is present for markers, fixtures, and assertion helpers.
 - When changing model/provider support, check both the CLI/API-facing configuration surfaces and the backend provider catalog rather than updating only one layer.
-- The repo already includes `AGENTS.md`; its useful project-specific guidance has been folded into this file.
+- The repo also includes `AGENTS.md`; if guidance diverges, verify against current code and keep `CLAUDE.md` as the primary Claude Code instruction file.

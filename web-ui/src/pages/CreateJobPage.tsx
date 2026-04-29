@@ -197,6 +197,7 @@ export function CreateJobPage() {
         showIcon
         message="元数据加载失败"
         description={extractErrorMessage(metadataQuery.error)}
+        action={<Button size="small" onClick={() => metadataQuery.refetch()}>重试</Button>}
       />
     );
   }

@@ -37,20 +37,52 @@ async function parseError(response: Response): Promise<never> {
   throw new ApiError(response.status, text || `请求失败：${response.status}`);
 }
 
-async function requestJson<T>(path: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(path, {
-    headers: {
-      "Content-Type": "application/json",
-      ...(init?.headers || {}),
-    },
-    ...init,
-  });
+const DEFAULT_REQUEST_TIMEOUT_MS = 30_000;
+const MARKET_MONITOR_REQUEST_TIMEOUT_MS = 120_000;
 
-  if (!response.ok) {
-    return parseError(response);
+function getRequestTimeoutMs(path: string) {
+  return path.startsWith("/api/market-monitor/")
+    ? MARKET_MONITOR_REQUEST_TIMEOUT_MS
+    : DEFAULT_REQUEST_TIMEOUT_MS;
+}
+
+async function requestJson<T>(path: string, init?: RequestInit): Promise<T> {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), getRequestTimeoutMs(path));
+  const { signal, headers, ...restInit } = init || {};
+  const abortFromParent = () => controller.abort();
+
+  if (signal?.aborted) {
+    clearTimeout(timeoutId);
+    throw new ApiError(408, "接口请求超时，请检查后端服务是否正常运行");
   }
 
-  return (await response.json()) as T;
+  signal?.addEventListener("abort", abortFromParent, { once: true });
+
+  try {
+    const response = await fetch(path, {
+      ...restInit,
+      headers: {
+        "Content-Type": "application/json",
+        ...(headers || {}),
+      },
+      signal: controller.signal,
+    });
+
+    if (!response.ok) {
+      return parseError(response);
+    }
+
+    return (await response.json()) as T;
+  } catch (error) {
+    if (error instanceof DOMException && error.name === "AbortError") {
+      throw new ApiError(408, "接口请求超时，请检查后端服务是否正常运行");
+    }
+    throw error;
+  } finally {
+    clearTimeout(timeoutId);
+    signal?.removeEventListener("abort", abortFromParent);
+  }
 }
 
 export async function fetchMetadataOptions() {

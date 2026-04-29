@@ -18,8 +18,8 @@ from .base import InferenceResult, MarketMonitorInferenceRunner
 
 
 class MarketMonitorExecutionInferenceService:
-    def __init__(self, llm_config: MarketMonitorRunLlmConfig | None = None) -> None:
-        self.runner = MarketMonitorInferenceRunner(llm_config)
+    def __init__(self, llm_config: MarketMonitorRunLlmConfig | None = None, enable_llm: bool = True) -> None:
+        self.runner = MarketMonitorInferenceRunner(llm_config, enable_llm=enable_llm)
 
     def infer_execution(
         self,

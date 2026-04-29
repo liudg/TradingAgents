@@ -326,6 +326,12 @@ class MarketMonitorApiTests(unittest.TestCase):
         self.assertEqual(snapshot_mock.call_count, 0)
         self.assertEqual(history_mock.call_count, 0)
 
+    def test_run_manager_default_service_disables_llm_for_web_endpoints(self) -> None:
+        with patch("tradingagents.web.market_monitor.manager.MarketMonitorSnapshotService") as service_cls:
+            MarketMonitorRunManager(runs_root=Path(self.temp_dir.name))
+
+        service_cls.assert_called_once_with(enable_llm=False)
+
     def test_run_manager_uses_llm_config_for_snapshot_runs(self) -> None:
         manager = MarketMonitorRunManager(runs_root=Path(self.temp_dir.name))
         request = MarketMonitorRunRequest(
@@ -342,7 +348,7 @@ class MarketMonitorApiTests(unittest.TestCase):
             service.get_snapshot.return_value = snapshot
             run_id, result, history, data_status = manager._execute_run(request)
 
-        service_cls.assert_called_once_with(llm_config=request.llm_config)
+        service_cls.assert_called_once_with(llm_config=request.llm_config, enable_llm=True)
         service.get_snapshot.assert_called_once()
         self.assertTrue(run_id)
         self.assertIsNotNone(result)
@@ -440,7 +446,7 @@ class MarketMonitorApiTests(unittest.TestCase):
             service.get_snapshot.return_value = self._build_snapshot()
             detail = manager.recover_run(run_id)
 
-        service_cls.assert_called_once_with(llm_config=request.llm_config)
+        service_cls.assert_called_once_with(llm_config=request.llm_config, enable_llm=True)
         service.get_snapshot.assert_called_once()
         self.assertEqual(detail.status, "completed")
         self.assertEqual(detail.snapshot.run_id, run_id)

@@ -26,11 +26,11 @@ DEFAULT_CONFIG = {
     # The CLI overrides this per provider when the user picks one. Keeping a
     # provider-specific URL here would leak (e.g. OpenAI's /v1 was previously
     # being forwarded to Gemini, producing malformed request URLs).
-    "backend_url": None,
+    "backend_url": "http://127.0.0.1:8317/v1",
     # Provider-specific thinking configuration
     "google_thinking_level": None,      # "high", "minimal", etc.
     "openai_reasoning_effort": None,    # "medium", "high", "low"
-    "codex_reasoning_effort": None,     # "medium", "high", "low"
+    "codex_reasoning_effort": "medium",     # "medium", "high", "low"
     "anthropic_effort": None,           # "high", "medium", "low"
     # Checkpoint/resume: when True, LangGraph saves state after each node
     # so a crashed run can resume from the last successful step.

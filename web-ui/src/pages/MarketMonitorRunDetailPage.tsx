@@ -62,9 +62,14 @@ export function MarketMonitorRunDetailPage() {
         title="市场监控运行详情加载失败"
         subTitle={extractErrorMessage(runQuery.error)}
         extra={
-          <Button icon={<ArrowLeftOutlined />} onClick={() => navigate("/monitor/history")}>
-            返回历史列表
-          </Button>
+          <Space>
+            <Button icon={<ReloadOutlined />} onClick={() => runQuery.refetch()}>
+              重试
+            </Button>
+            <Button icon={<ArrowLeftOutlined />} onClick={() => navigate("/monitor/history")}>
+              返回历史列表
+            </Button>
+          </Space>
         }
       />
     );

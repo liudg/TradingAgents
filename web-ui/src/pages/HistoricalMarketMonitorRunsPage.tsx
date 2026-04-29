@@ -1,5 +1,6 @@
 import {
   Alert,
+  Button,
   Card,
   DatePicker,
   List,
@@ -62,6 +63,7 @@ export function HistoricalMarketMonitorRunsPage() {
         showIcon
         message="市场监控历史加载失败"
         description={extractErrorMessage(runsQuery.error)}
+        action={<Button size="small" onClick={() => runsQuery.refetch()}>重试</Button>}
       />
     );
   }

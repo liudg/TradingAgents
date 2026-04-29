@@ -33,10 +33,10 @@ from .universe import get_market_monitor_universe
 
 
 class MarketMonitorSnapshotService:
-    def __init__(self, llm_config: MarketMonitorRunLlmConfig | None = None) -> None:
+    def __init__(self, llm_config: MarketMonitorRunLlmConfig | None = None, enable_llm: bool = True) -> None:
         self._universe = get_market_monitor_universe()
-        self._inference = MarketMonitorCardInferenceService(llm_config)
-        self._execution_inference = MarketMonitorExecutionInferenceService(llm_config)
+        self._inference = MarketMonitorCardInferenceService(llm_config, enable_llm=enable_llm)
+        self._execution_inference = MarketMonitorExecutionInferenceService(llm_config, enable_llm=enable_llm)
 
     def get_snapshot(
         self,

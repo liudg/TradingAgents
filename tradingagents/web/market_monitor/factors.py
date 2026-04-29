@@ -399,19 +399,19 @@ def build_long_term_card(bundle: MarketMonitorInputBundle) -> MarketMonitorScore
     vix_change_5d = percent_change(vix, 5)
     credit = (percent_change(jnk, 10) - percent_change(lqd, 10) + percent_change(jnk, 10) - percent_change(spy, 10)) / 2
     factors = [
-        _factor("spy_ma200_distance", distance, "pct", None, "higher_is_better", bounded_score(50 + distance * 5), 0.12, "SPY 相对 200 日均线位置决定长线趋势背景。"),
-        _factor("spy_ma50_slope", ma50_slope, "pct", None, "higher_is_better", bounded_score(50 + ma50_slope * 8), 0.08, "50 日均线斜率反映中期趋势惯性。"),
-        _factor("spy_3m_range_position", range_pos, "pct", None, "higher_is_better", range_pos, 0.08, "SPY 三个月区间位置越高，长线环境越友好。"),
-        _factor("qqq_spy_sync", sync_score, "score", None, "higher_is_better", sync_score, 0.08, "QQQ 与 SPY 同向上升代表趋势同步性更好。"),
-        _factor("core_risk_asset_breadth", core_above, "score", None, "higher_is_better", core_above, 0.12, "核心宽基 ETF 站上均线数量越多，广度越友好。"),
-        _factor("sector_breadth", sector_positive, "score", None, "higher_is_better", sector_positive, 0.13, "行业 ETF 5日为正和站上 MA50 的比例代表广度修复。"),
-        _factor("offense_defense_spread", offense - defense, "pct", None, "higher_is_better", bounded_score(50 + (offense - defense) * 5), 0.10, "进攻板块相对防御板块越强，风险偏好越友好。"),
-        _factor("qqq_leadership", qqq_rel, "pct", None, "higher_is_better", bounded_score(50 + qqq_rel * 8), 0.05, "大盘科技相对 SPY 的 10 日动量代表龙头确认。"),
-        _factor("iwm_confirmation", iwm_rel, "pct", None, "higher_is_better", bounded_score(50 + iwm_rel * 8), 0.05, "小盘相对 SPY 走强代表风险偏好扩散。"),
-        _factor("cyclical_participation", cyclical, "pct", None, "higher_is_better", bounded_score(50 + cyclical * 8), 0.05, "周期板块相对 SPY 参与度越高越友好。"),
-        _factor("vix_level_health", vix_level, "index_points", vix_percentile, "lower_is_better", 100 - vix_percentile, 0.07, "VIX 分位越高，波动健康度越差。", data_status="available" if vix_level is not None else "missing"),
-        _factor("vix_trend_health", vix_change_5d, "pct", None, "lower_is_better", bounded_score(55 - vix_change_5d * 2), 0.04, "VIX 快速抬升会压低长线健康度。"),
-        _factor("credit_risk_proxy", credit, "pct", None, "higher_is_better", bounded_score(50 + credit * 8), 0.03, "JNK 相对 LQD/SPY 越强，信用风险偏好越好。"),
+        _audited_factor(bundle, ["SPY"], "spy_ma200_distance", distance, "pct", None, "higher_is_better", bounded_score(50 + distance * 5), 0.12, "SPY 相对 200 日均线位置决定长线趋势背景。"),
+        _audited_factor(bundle, ["SPY"], "spy_ma50_slope", ma50_slope, "pct", None, "higher_is_better", bounded_score(50 + ma50_slope * 8), 0.08, "50 日均线斜率反映中期趋势惯性。"),
+        _audited_factor(bundle, ["SPY"], "spy_3m_range_position", range_pos, "pct", None, "higher_is_better", range_pos, 0.08, "SPY 三个月区间位置越高，长线环境越友好。"),
+        _audited_factor(bundle, ["SPY", "QQQ"], "qqq_spy_sync", sync_score, "score", None, "higher_is_better", sync_score, 0.08, "QQQ 与 SPY 同向上升代表趋势同步性更好。"),
+        _audited_factor(bundle, ["SPY", "QQQ", "IWM", "DIA"], "core_risk_asset_breadth", core_above, "score", None, "higher_is_better", core_above, 0.12, "核心宽基 ETF 站上均线数量越多，广度越友好。"),
+        _audited_factor(bundle, bundle.universe["sector_etfs"], "sector_breadth", sector_positive, "score", None, "higher_is_better", sector_positive, 0.13, "行业 ETF 5日为正和站上 MA50 的比例代表广度修复。"),
+        _audited_factor(bundle, ["QQQ", "IWM", "XLU", "XLP", "XLV"], "offense_defense_spread", offense - defense, "pct", None, "higher_is_better", bounded_score(50 + (offense - defense) * 5), 0.10, "进攻板块相对防御板块越强，风险偏好越友好。"),
+        _audited_factor(bundle, ["QQQ", "SPY"], "qqq_leadership", qqq_rel, "pct", None, "higher_is_better", bounded_score(50 + qqq_rel * 8), 0.05, "大盘科技相对 SPY 的 10 日动量代表龙头确认。"),
+        _audited_factor(bundle, ["IWM", "SPY"], "iwm_confirmation", iwm_rel, "pct", None, "higher_is_better", bounded_score(50 + iwm_rel * 8), 0.05, "小盘相对 SPY 走强代表风险偏好扩散。"),
+        _audited_factor(bundle, ["XLE", "XLB", "XLF", "SPY"], "cyclical_participation", cyclical, "pct", None, "higher_is_better", bounded_score(50 + cyclical * 8), 0.05, "周期板块相对 SPY 参与度越高越友好。"),
+        _audited_factor(bundle, ["^VIX"], "vix_level_health", vix_level, "index_points", vix_percentile, "lower_is_better", 100 - vix_percentile, 0.07, "VIX 分位越高，波动健康度越差。"),
+        _audited_factor(bundle, ["^VIX"], "vix_trend_health", vix_change_5d, "pct", None, "lower_is_better", bounded_score(55 - vix_change_5d * 2), 0.04, "VIX 快速抬升会压低长线健康度。"),
+        _audited_factor(bundle, ["JNK", "LQD", "SPY"], "credit_risk_proxy", credit, "pct", None, "higher_is_better", bounded_score(50 + credit * 8), 0.03, "JNK 相对 LQD/SPY 越强，信用风险偏好越好。"),
     ]
     score = _weighted_score(factors)
     delta_1d = _rolling_score_delta(spy, 1)
@@ -448,14 +448,14 @@ def build_short_term_card(bundle: MarketMonitorInputBundle) -> MarketMonitorScor
     atr = atr_percent(data.get("SPY", pd.DataFrame()))
     vix_change = (percent_change(vix, 1) + percent_change(vix, 5)) / 2
     factors = [
-        _factor("sector_5d_vs_20d_momentum", sector_continuity, "pct", None, "higher_is_better", sector_continuity, 0.18, "行业 ETF 5日超额动量扩散越广，热点延续性越强。"),
-        _factor("sector_rotation_stability", rotation_stability, "score", None, "higher_is_better", rotation_stability, 0.12, "领先行业强弱顺序越稳定，短线可交易性越好。"),
-        _factor("etf_breakout_persistence", breakout, "score", None, "higher_is_better", breakout, 0.15, "主要 ETF 突破近20日高点后的延续情况。"),
-        _factor("etf_breakout_hold", hold_breakout, "score", None, "higher_is_better", hold_breakout, 0.10, "核心 ETF 近期正收益代表突破守住率 proxy。"),
-        _factor("high_beta_participation", high_beta, "pct", None, "higher_is_better", bounded_score(50 + high_beta * 10), 0.15, "高 Beta / 周期风格同步改善支持短线进攻。"),
-        _factor("defensive_suppression", defense, "pct", None, "higher_is_riskier", bounded_score(55 - defense * 10), 0.10, "防御板块跑赢越明显，短线进攻环境越差。"),
-        _factor("spy_atr_friendliness", atr, "pct", None, "middle_is_better", bounded_score(100 - abs(atr - 1.8) * 24), 0.10, "ATR 过低或过高都会降低短线交易友好度。"),
-        _factor("vix_change_friendliness", vix_change, "pct", None, "lower_is_better", bounded_score(55 - vix_change * 3), 0.10, "VIX 1日/5日快速抬升会压低短线分。"),
+        _audited_factor(bundle, bundle.universe["sector_etfs"], "sector_5d_vs_20d_momentum", sector_continuity, "pct", None, "higher_is_better", sector_continuity, 0.18, "行业 ETF 5日超额动量扩散越广，热点延续性越强。"),
+        _audited_factor(bundle, bundle.universe["sector_etfs"], "sector_rotation_stability", rotation_stability, "score", None, "higher_is_better", rotation_stability, 0.12, "领先行业强弱顺序越稳定，短线可交易性越好。"),
+        _audited_factor(bundle, ["SPY", "QQQ", "IWM"] + bundle.universe["sector_etfs"], "etf_breakout_persistence", breakout, "score", None, "higher_is_better", breakout, 0.15, "主要 ETF 突破近20日高点后的延续情况。"),
+        _audited_factor(bundle, ["SPY", "QQQ", "IWM"], "etf_breakout_hold", hold_breakout, "score", None, "higher_is_better", hold_breakout, 0.10, "核心 ETF 近期正收益代表突破守住率 proxy。"),
+        _audited_factor(bundle, ["ARKK", "IWM", "XLE", "XLF", "SPY"], "high_beta_participation", high_beta, "pct", None, "higher_is_better", bounded_score(50 + high_beta * 10), 0.15, "高 Beta / 周期风格同步改善支持短线进攻。"),
+        _audited_factor(bundle, ["XLU", "XLP", "XLV", "SPY"], "defensive_suppression", defense, "pct", None, "higher_is_riskier", bounded_score(55 - defense * 10), 0.10, "防御板块跑赢越明显，短线进攻环境越差。"),
+        _audited_factor(bundle, ["SPY"], "spy_atr_friendliness", atr, "pct", None, "middle_is_better", bounded_score(100 - abs(atr - 1.8) * 24), 0.10, "ATR 过低或过高都会降低短线交易友好度。"),
+        _audited_factor(bundle, ["^VIX"], "vix_change_friendliness", vix_change, "pct", None, "lower_is_better", bounded_score(55 - vix_change * 3), 0.10, "VIX 1日/5日快速抬升会压低短线分。"),
     ]
     score = _weighted_score(factors)
     delta_1d = _rolling_score_delta(spy, 1, 1.6)
@@ -496,16 +496,16 @@ def build_system_risk_card(bundle: MarketMonitorInputBundle, event_fact_sheet: l
     arkk_rel = percent_change(arkk, 5) - percent_change(spy, 5)
     sync_down = sum(1 for series in [spy, qqq, iwm, jnk] if percent_change(series, 5) < 0) / 4 * 100
     liquidity_factors = [
-        _factor("vix_level", vix_level, "index_points", vix_percentile, "higher_is_riskier", vix_percentile, 0.35, "VIX 252日分位越高，系统风险越高。", data_status="available" if vix_level is not None else "missing"),
-        _factor("vix_rise_speed", vix_5d, "pct", None, "higher_is_riskier", bounded_score(50 + vix_5d * 2), 0.20, "VIX 5日快速抬升代表流动性压力上升。"),
-        _factor("lqd_trend_pressure", lqd_trend, "pct", None, "lower_is_better", bounded_score(50 - lqd_trend * 8), 0.20, "LQD 跌破趋势代表投资级信用代理承压。"),
-        _factor("hy_credit_pressure", (jnk_lqd + jnk_spy) / 2, "pct", None, "lower_is_better", bounded_score(50 - (jnk_lqd + jnk_spy) * 5), 0.25, "JNK 相对 LQD/SPY 走弱代表高收益信用承压。"),
+        _audited_factor(bundle, ["^VIX"], "vix_level", vix_level, "index_points", vix_percentile, "higher_is_riskier", vix_percentile, 0.35, "VIX 252日分位越高，系统风险越高。"),
+        _audited_factor(bundle, ["^VIX"], "vix_rise_speed", vix_5d, "pct", None, "higher_is_riskier", bounded_score(50 + vix_5d * 2), 0.20, "VIX 5日快速抬升代表流动性压力上升。"),
+        _audited_factor(bundle, ["LQD"], "lqd_trend_pressure", lqd_trend, "pct", None, "lower_is_better", bounded_score(50 - lqd_trend * 8), 0.20, "LQD 跌破趋势代表投资级信用代理承压。"),
+        _audited_factor(bundle, ["JNK", "LQD", "SPY"], "hy_credit_pressure", (jnk_lqd + jnk_spy) / 2, "pct", None, "lower_is_better", bounded_score(50 - (jnk_lqd + jnk_spy) * 5), 0.25, "JNK 相对 LQD/SPY 走弱代表高收益信用承压。"),
     ]
     appetite_factors = [
-        _factor("iwm_spy_relative_weakness", iwm_rel, "pct", None, "lower_is_better", bounded_score(50 - iwm_rel * 8), 0.30, "IWM 相对 SPY 越弱，风险偏好越差。"),
-        _factor("xlu_spy_defensive_strength", xlu_rel, "pct", None, "higher_is_riskier", bounded_score(50 + xlu_rel * 8), 0.25, "XLU 相对 SPY 越强，避险偏好越强。"),
-        _factor("arkk_spy_relative_weakness", arkk_rel, "pct", None, "lower_is_better", bounded_score(50 - arkk_rel * 7), 0.20, "ARKK 相对走弱代表高 Beta 风险偏好下降。"),
-        _factor("cross_asset_sync_down", sync_down, "pct", None, "higher_is_riskier", sync_down, 0.25, "SPY/QQQ/IWM/JNK 同步走弱越多，系统风险越高。"),
+        _audited_factor(bundle, ["IWM", "SPY"], "iwm_spy_relative_weakness", iwm_rel, "pct", None, "lower_is_better", bounded_score(50 - iwm_rel * 8), 0.30, "IWM 相对 SPY 越弱，风险偏好越差。"),
+        _audited_factor(bundle, ["XLU", "SPY"], "xlu_spy_defensive_strength", xlu_rel, "pct", None, "higher_is_riskier", bounded_score(50 + xlu_rel * 8), 0.25, "XLU 相对 SPY 越强，避险偏好越强。"),
+        _audited_factor(bundle, ["ARKK", "SPY"], "arkk_spy_relative_weakness", arkk_rel, "pct", None, "lower_is_better", bounded_score(50 - arkk_rel * 7), 0.20, "ARKK 相对走弱代表高 Beta 风险偏好下降。"),
+        _audited_factor(bundle, ["SPY", "QQQ", "IWM", "JNK"], "cross_asset_sync_down", sync_down, "pct", None, "higher_is_riskier", sync_down, 0.25, "SPY/QQQ/IWM/JNK 同步走弱越多，系统风险越高。"),
     ]
     liquidity = _weighted_score(liquidity_factors)
     appetite = _weighted_score(appetite_factors)
@@ -534,18 +534,19 @@ def build_system_risk_card(bundle: MarketMonitorInputBundle, event_fact_sheet: l
 
 def build_style_effectiveness(bundle: MarketMonitorInputBundle) -> MarketMonitorStyleEffectiveness:
     data = bundle.core_data
-    trend = _layer_metric("trend_breakout", _breakout_persistence([_close(data, symbol) for symbol in ["SPY", "QQQ", "IWM"] + bundle.universe["sector_etfs"]]), 0.0, "主要 ETF 突破后的延续表现。")
+    trend_symbols = ["SPY", "QQQ", "IWM"] + bundle.universe["sector_etfs"]
+    trend = _layer_metric(bundle, "trend_breakout", trend_symbols, _breakout_persistence([_close(data, symbol) for symbol in trend_symbols]), 0.0, "主要 ETF 突破后的延续表现。")
     dip_delta = percent_change(_close(data, "SPY"), 5)
-    dip = _layer_metric("dip_buy", bounded_score(55 + dip_delta * 5), dip_delta, "SPY 回调后的近期修复表现。")
+    dip = _layer_metric(bundle, "dip_buy", ["SPY"], bounded_score(55 + dip_delta * 5), dip_delta, "SPY 回调后的近期修复表现。")
     oversold_delta = (percent_change(_close(data, "IWM"), 5) + percent_change(_close(data, "ARKK"), 5)) / 2
-    oversold = _layer_metric("oversold_bounce", bounded_score(55 + oversold_delta * 6), oversold_delta, "高 Beta proxy basket 急跌后的修复强度。")
+    oversold = _layer_metric(bundle, "oversold_bounce", ["IWM", "ARKK"], bounded_score(55 + oversold_delta * 6), oversold_delta, "高 Beta proxy basket 急跌后的修复强度。")
     tactic_pairs = {"趋势突破": trend.score, "回调低吸": dip.score, "超跌反弹": oversold.score}
     asset_metrics = {
-        "large_cap_tech": _relative_layer_metric(data, "large_cap_tech", ["QQQ"], "SPY", "大盘科技相对 SPY 10日动量。"),
-        "small_cap_momentum": _relative_layer_metric(data, "small_cap_momentum", ["IWM"], "SPY", "小盘高弹性相对 SPY 10日动量。"),
-        "defensive": _relative_layer_metric(data, "defensive", ["XLU", "XLV", "XLP"], "SPY", "防御板块相对 SPY 10日动量。"),
-        "energy_cyclical": _relative_layer_metric(data, "energy_cyclical", ["XLE", "XLB"], "SPY", "能源/周期相对 SPY 10日动量。"),
-        "financials": _relative_layer_metric(data, "financials", ["XLF"], "SPY", "金融相对 SPY 10日动量。"),
+        "large_cap_tech": _relative_layer_metric(bundle, data, "large_cap_tech", ["QQQ"], "SPY", "大盘科技相对 SPY 10日动量。"),
+        "small_cap_momentum": _relative_layer_metric(bundle, data, "small_cap_momentum", ["IWM"], "SPY", "小盘高弹性相对 SPY 10日动量。"),
+        "defensive": _relative_layer_metric(bundle, data, "defensive", ["XLU", "XLV", "XLP"], "SPY", "防御板块相对 SPY 10日动量。"),
+        "energy_cyclical": _relative_layer_metric(bundle, data, "energy_cyclical", ["XLE", "XLB"], "SPY", "能源/周期相对 SPY 10日动量。"),
+        "financials": _relative_layer_metric(bundle, data, "financials", ["XLF"], "SPY", "金融相对 SPY 10日动量。"),
     }
     asset_names = {
         "large_cap_tech": "大盘科技",
@@ -619,10 +620,15 @@ def build_panic_card(
     else:
         state = "panic_watch"
     zone = _panic_zone(state, panic_extreme, score)
+    reversal_reason = (
+        "日线模式下仅用当日/最近一根 OHLCV proxy 判断反弹确认。"
+        if bundle.data_mode == "daily"
+        else "盘中/实时模式下使用最近一根 OHLCV 和高 beta proxy 判断反弹确认。"
+    )
     factors = [
-        _factor("panic_extreme_score", panic_extreme, "score", None, "higher_is_riskier", panic_extreme, 0.40, "恐慌程度只代表抛压强度，不等于反转确认。"),
-        _factor("selling_exhaustion_score", selling_exhaustion, "score", None, "higher_is_better", selling_exhaustion, 0.30, "抛压衰竭迹象越充分，反弹确认条件越好。"),
-        _factor("intraday_reversal_score", intraday_reversal, "score", None, "higher_is_better", intraday_reversal, 0.30, "日线模式下仅用当日/最近一根 OHLCV proxy 判断反弹确认。"),
+        _audited_factor(bundle, ["SPY", "QQQ", "IWM", "DIA", "^VIX", "ARKK"], "panic_extreme_score", panic_extreme, "score", None, "higher_is_riskier", panic_extreme, 0.40, "恐慌程度只代表抛压强度，不等于反转确认。", intraday_proxy=False),
+        _audited_factor(bundle, ["SPY", "IWM", "ARKK", "XLE", "XLF", "^VIX"], "selling_exhaustion_score", selling_exhaustion, "score", None, "higher_is_better", selling_exhaustion, 0.30, "抛压衰竭迹象越充分，反弹确认条件越好。", intraday_proxy=False),
+        _audited_factor(bundle, ["SPY", "IWM", "ARKK"], "intraday_reversal_score", intraday_reversal, "score", None, "higher_is_better", intraday_reversal, 0.30, reversal_reason, intraday_proxy=False),
     ]
     early_entry_allowed = state == "panic_confirmed" and intraday_reversal >= 60
     max_position_hint = _panic_position_hint(state, score, system_risk_score)
@@ -1082,6 +1088,69 @@ def _breakout_persistence(series_list: list[pd.Series]) -> float:
     return sum(scores) / len(scores) if scores else 50.0
 
 
+def _factor_status(bundle: MarketMonitorInputBundle, symbols: list[str], *, intraday_proxy: bool = True) -> str:
+    if any(not _has_close(bundle.core_data.get(symbol, pd.DataFrame())) for symbol in symbols):
+        return "missing"
+    degraded_symbols = set(bundle.input_data_status.stale_symbols) | set(bundle.input_data_status.partial_symbols)
+    if any(symbol in degraded_symbols for symbol in symbols):
+        return "proxy_used"
+    if intraday_proxy and bundle.data_mode != "daily":
+        return "proxy_used"
+    return "available"
+
+
+def _status_reason(bundle: MarketMonitorInputBundle, reason: str, data_status: str) -> str:
+    interval = bundle.input_data_status.interval
+    if data_status == "missing":
+        return f"{reason} 相关行情缺失，本因子标记为缺失并从加权分数中剔除。"
+    if data_status == "proxy_used":
+        if bundle.data_mode == "daily":
+            return f"{reason} 部分行情为 stale/partial，使用可得 {interval} proxy。"
+        return f"{reason} 当前为 {bundle.data_mode}，使用可得 {interval} 数据作为该规则的 proxy。"
+    return reason
+
+
+def _audited_factor(
+    bundle: MarketMonitorInputBundle,
+    symbols: list[str],
+    factor: str,
+    raw_value: float | str | bool | None,
+    raw_value_unit: str | None,
+    percentile: float | None,
+    polarity: str,
+    score: float,
+    weight: float,
+    reason: str,
+    *,
+    intraday_proxy: bool = True,
+    neutral_score: float = 50.0,
+) -> MarketMonitorFactorBreakdown:
+    data_status = _factor_status(bundle, symbols, intraday_proxy=intraday_proxy)
+    if data_status == "missing":
+        return _factor(
+            factor,
+            None,
+            raw_value_unit,
+            None,
+            polarity,
+            neutral_score,
+            weight,
+            _status_reason(bundle, reason, data_status),
+            data_status=data_status,
+        )
+    return _factor(
+        factor,
+        raw_value,
+        raw_value_unit,
+        percentile,
+        polarity,
+        score,
+        weight,
+        _status_reason(bundle, reason, data_status),
+        data_status=data_status,
+    )
+
+
 def _factor(
     factor: str,
     raw_value: float | str | bool | None,
@@ -1128,6 +1197,8 @@ def _card_risks(bundle: MarketMonitorInputBundle, factors: list[MarketMonitorFac
     risks = list(bundle.risks)
     if any(factor.data_status == "missing" for factor in factors):
         risks.append("部分因子缺失，分数按可用 proxy 合成并降低置信度。")
+    if any(factor.data_status == "proxy_used" for factor in factors):
+        risks.append(f"部分因子使用 {bundle.input_data_status.interval} proxy 或 stale/partial 行情，需按降级口径审计。")
     if not risks:
         risks.append("当前分数仅基于刷新当刻可得的 yfinance 日线与空事件事实表。")
     return list(dict.fromkeys(risks))
@@ -1188,15 +1259,29 @@ def _system_event_triggers(
     return triggers
 
 
-def _layer_metric(name: str, score: float, delta_5d: float, reason: str) -> MarketMonitorLayerMetric:
-    factor = _factor(name, score, "score", None, "higher_is_better", score, 1.0, reason)
+def _layer_metric(
+    bundle: MarketMonitorInputBundle,
+    name: str,
+    symbols: list[str],
+    score: float,
+    delta_5d: float,
+    reason: str,
+) -> MarketMonitorLayerMetric:
+    factor = _audited_factor(bundle, symbols, name, score, "score", None, "higher_is_better", score, 1.0, reason)
     return MarketMonitorLayerMetric(score=round(score, 1), delta_5d=round(delta_5d, 1), valid=score >= 55, factor_breakdown=[factor])
 
 
-def _relative_layer_metric(data: dict[str, pd.DataFrame], name: str, symbols: list[str], benchmark: str, reason: str) -> MarketMonitorLayerMetric:
+def _relative_layer_metric(
+    bundle: MarketMonitorInputBundle,
+    data: dict[str, pd.DataFrame],
+    name: str,
+    symbols: list[str],
+    benchmark: str,
+    reason: str,
+) -> MarketMonitorLayerMetric:
     relative = _relative_group(data, symbols, benchmark, 10)
     score = bounded_score(50 + relative * 8)
-    factor = _factor(name, relative, "pct", None, "higher_is_better", score, 1.0, reason)
+    factor = _audited_factor(bundle, symbols + [benchmark], name, relative, "pct", None, "higher_is_better", score, 1.0, reason)
     return MarketMonitorLayerMetric(score=round(score, 1), delta_5d=round(relative, 1), preferred=score >= 60, factor_breakdown=[factor])
 
 

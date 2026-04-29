@@ -40,7 +40,7 @@ class MarketMonitorRunManager:
         service: MarketMonitorSnapshotService | None = None,
     ) -> None:
         self.runs_root = runs_root or Path(DEFAULT_CONFIG["results_dir"]) / "market_monitor"
-        self.service = service or MarketMonitorSnapshotService()
+        self.service = service or MarketMonitorSnapshotService(enable_llm=False)
         self._runs: dict[str, dict[str, Any]] = {}
         self._lock = Lock()
         self._restore_persisted_runs()
@@ -100,7 +100,7 @@ class MarketMonitorRunManager:
 
     def _resolve_service(self, request: MarketMonitorRunRequest) -> MarketMonitorSnapshotService:
         if request.llm_config is not None:
-            return MarketMonitorSnapshotService(llm_config=request.llm_config)
+            return MarketMonitorSnapshotService(llm_config=request.llm_config, enable_llm=True)
         return self.service
 
     def list_historical_runs(self) -> list[HistoricalMarketMonitorRunSummary]:

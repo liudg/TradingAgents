@@ -14,7 +14,16 @@ from tests.market_monitor_v231_fixtures import (
     fixture_system_risk_card,
 )
 from tradingagents.web.market_monitor.data import _expected_market_close_date
-from tradingagents.web.market_monitor.factors import build_execution_card, build_input_bundle, build_panic_card
+from tradingagents.web.market_monitor.factors import (
+    build_execution_card,
+    build_input_bundle,
+    build_long_term_card,
+    build_panic_card,
+    build_short_term_card,
+    build_style_effectiveness,
+    build_system_risk_card,
+)
+from tradingagents.web.market_monitor.indicators import percent_change, zone_from_score
 from tradingagents.web.market_monitor.metrics import build_market_snapshot
 from tradingagents.web.market_monitor.schemas import (
     MarketMonitorHistoryRequest,
@@ -101,6 +110,19 @@ def _complete_dataset() -> dict[str, Any]:
             ],
         },
     }
+
+
+def _dataset_for_mode(data_mode: str) -> dict[str, Any]:
+    dataset = _complete_dataset()
+    dataset["data_mode"] = data_mode
+    dataset["cache_summary"]["data_mode"] = data_mode
+    dataset["cache_summary"]["interval"] = "1d" if data_mode == "daily" else "5m"
+    dataset["cache_summary"]["includes_prepost"] = data_mode == "intraday_realtime"
+    return dataset
+
+
+def _factor_map(factors):
+    return {factor.factor: factor for factor in factors}
 
 
 class MarketMonitorRulesTests(unittest.TestCase):
@@ -226,6 +248,129 @@ class MarketMonitorRulesTests(unittest.TestCase):
 
         self.assertEqual(bundle.data_freshness, "intraday_stale")
         self.assertIn("QQQ", bundle.input_data_status.core_symbols_missing)
+
+    def test_factor_breakdown_is_complete_across_data_modes(self) -> None:
+        universe = get_market_monitor_universe()
+        expected_long = {
+            "spy_ma200_distance",
+            "spy_ma50_slope",
+            "spy_3m_range_position",
+            "qqq_spy_sync",
+            "core_risk_asset_breadth",
+            "sector_breadth",
+            "offense_defense_spread",
+            "qqq_leadership",
+            "iwm_confirmation",
+            "cyclical_participation",
+            "vix_level_health",
+            "vix_trend_health",
+            "credit_risk_proxy",
+        }
+        expected_short = {
+            "sector_5d_vs_20d_momentum",
+            "sector_rotation_stability",
+            "etf_breakout_persistence",
+            "etf_breakout_hold",
+            "high_beta_participation",
+            "defensive_suppression",
+            "spy_atr_friendliness",
+            "vix_change_friendliness",
+        }
+        expected_system = {
+            "vix_level",
+            "vix_rise_speed",
+            "lqd_trend_pressure",
+            "hy_credit_pressure",
+            "iwm_spy_relative_weakness",
+            "xlu_spy_defensive_strength",
+            "arkk_spy_relative_weakness",
+            "cross_asset_sync_down",
+        }
+        expected_style = {
+            "trend_breakout",
+            "dip_buy",
+            "oversold_bounce",
+            "large_cap_tech",
+            "small_cap_momentum",
+            "defensive",
+            "energy_cyclical",
+            "financials",
+        }
+        expected_panic = {"panic_extreme_score", "selling_exhaustion_score", "intraday_reversal_score"}
+
+        for data_mode in ["daily", "intraday_delayed", "intraday_realtime"]:
+            with self.subTest(data_mode=data_mode):
+                bundle = build_input_bundle(
+                    as_of_date=date(2026, 4, 10),
+                    dataset=_dataset_for_mode(data_mode),
+                    universe=universe,
+                )
+                long_term = build_long_term_card(bundle)
+                short_term = build_short_term_card(bundle)
+                system_risk = build_system_risk_card(bundle, [])
+                style = build_style_effectiveness(bundle)
+                panic = build_panic_card(bundle, system_risk.score)
+
+                self.assertEqual({factor.factor for factor in long_term.factor_breakdown}, expected_long)
+                self.assertEqual({factor.factor for factor in short_term.factor_breakdown}, expected_short)
+                self.assertEqual({factor.factor for factor in system_risk.factor_breakdown}, expected_system)
+                self.assertEqual({factor.factor for factor in style.asset_layer.factor_breakdown}, expected_style)
+                self.assertEqual({factor.factor for factor in panic.factor_breakdown}, expected_panic)
+                self.assertFalse(any(factor.data_status == "missing" for factor in long_term.factor_breakdown))
+                if data_mode == "daily":
+                    self.assertTrue(all(factor.data_status == "available" for factor in long_term.factor_breakdown))
+                else:
+                    self.assertTrue(any(factor.data_status == "proxy_used" for factor in long_term.factor_breakdown))
+
+    def test_degraded_and_missing_factors_are_explicit_and_audited(self) -> None:
+        dataset = _dataset_for_mode("intraday_delayed")
+        dataset["core"]["QQQ"] = pd.DataFrame()
+        dataset["cache_summary"]["symbols"][0]["partial"] = True
+        dataset["cache_summary"]["symbols"].append(
+            {
+                "symbol": "QQQ",
+                "cache_state": "cache_disabled",
+                "result_state": "empty",
+                "rows": 0,
+                "expected_close_date": "2026-04-10",
+                "cache_end_date": None,
+                "last_successful_refresh_at": None,
+                "reason": "yfinance 未返回可用 5m 数据",
+                "partial": False,
+            }
+        )
+        bundle = build_input_bundle(as_of_date=date(2026, 4, 10), dataset=dataset, universe=get_market_monitor_universe())
+
+        card = build_long_term_card(bundle)
+        factors = _factor_map(card.factor_breakdown)
+
+        self.assertEqual(factors["spy_ma200_distance"].data_status, "proxy_used")
+        self.assertEqual(factors["qqq_spy_sync"].data_status, "missing")
+        self.assertIsNone(factors["qqq_spy_sync"].raw_value)
+        self.assertIn("相关行情缺失", factors["qqq_spy_sync"].reason)
+        self.assertTrue(any("proxy" in risk for risk in card.risks))
+        self.assertTrue(any("因子缺失" in risk for risk in card.risks))
+
+    def test_panic_intraday_reason_is_mode_aware(self) -> None:
+        bundle = build_input_bundle(
+            as_of_date=date(2026, 4, 10),
+            dataset=_dataset_for_mode("intraday_realtime"),
+            universe=get_market_monitor_universe(),
+        )
+
+        panic = build_panic_card(bundle, 30)
+        reversal = _factor_map(panic.factor_breakdown)["intraday_reversal_score"]
+
+        self.assertIn("盘中/实时模式", reversal.reason)
+        self.assertNotIn("日线模式下", reversal.reason)
+
+    def test_thresholds_are_left_closed_right_open_and_percent_units(self) -> None:
+        zones = [(35, "防守区"), (50, "谨慎区"), (65, "试仓区")]
+
+        self.assertEqual(zone_from_score(34.9, zones), "防守区")
+        self.assertEqual(zone_from_score(35.0, zones), "谨慎区")
+        self.assertEqual(zone_from_score(50.0, zones), "试仓区")
+        self.assertEqual(percent_change(pd.Series([100.0, 120.0]), 1), 20.0)
 
     def test_snapshot_service_history_disables_event_news_fetches(self) -> None:
         dataset = _complete_dataset()

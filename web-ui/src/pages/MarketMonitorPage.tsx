@@ -12,16 +12,11 @@ import { ReloadOutlined } from "@ant-design/icons";
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 
-import {
-  useMarketMonitorDataStatus,
-  useMarketMonitorHistory,
-  useMarketMonitorSnapshot,
-} from "../api/hooks";
+import { useMarketMonitorSnapshot } from "../api/hooks";
 import {
   DataStatusBlock,
   EventFactSheetBlock,
   ExecutionCardBlock,
-  HistoryBlock,
   PanicCardBlock,
   ScoreCardBlock,
   StyleCardBlock,
@@ -33,8 +28,7 @@ export function MarketMonitorPage() {
   const [refreshToken, setRefreshToken] = useState(0);
   const forceRefresh = refreshToken > 0;
   const snapshotQuery = useMarketMonitorSnapshot(undefined, forceRefresh, refreshToken);
-  const historyQuery = useMarketMonitorHistory(20, undefined, forceRefresh, refreshToken);
-  const dataStatusQuery = useMarketMonitorDataStatus(undefined, forceRefresh, refreshToken);
+  const refreshSnapshot = () => setRefreshToken((value) => value + 1);
 
   if (snapshotQuery.isError && !snapshotQuery.data) {
     return (
@@ -43,6 +37,7 @@ export function MarketMonitorPage() {
         showIcon
         message="市场监控加载失败"
         description={extractErrorMessage(snapshotQuery.error)}
+        action={<Button size="small" onClick={refreshSnapshot}>重试</Button>}
       />
     );
   }
@@ -52,7 +47,6 @@ export function MarketMonitorPage() {
   }
 
   const snapshot = snapshotQuery.data;
-  const dataStatus = dataStatusQuery.data;
 
   return (
     <Space direction="vertical" size="large" style={{ width: "100%" }}>
@@ -64,7 +58,7 @@ export function MarketMonitorPage() {
             className="page-card-extra-button ant-btn ant-btn-default"
             onClick={(event) => {
               event.preventDefault();
-              setRefreshToken((value) => value + 1);
+              refreshSnapshot();
             }}
           >
             <ReloadOutlined /> 刷新
@@ -132,16 +126,15 @@ export function MarketMonitorPage() {
           <Space direction="vertical" size={16} style={{ width: "100%" }}>
             <PanicCardBlock card={snapshot.panic_reversal_score} />
             <DataStatusBlock
-              inputDataStatus={dataStatus?.input_data_status || snapshot.input_data_status}
-              missingData={dataStatus?.missing_data || snapshot.missing_data}
-              risks={dataStatus?.risks || snapshot.risks}
-              openGaps={dataStatus?.open_gaps || snapshot.fact_sheet?.open_gaps || []}
+              inputDataStatus={snapshot.input_data_status}
+              missingData={snapshot.missing_data}
+              risks={snapshot.risks}
+              openGaps={snapshot.fact_sheet?.open_gaps || []}
             />
           </Space>
         </Col>
       </Row>
 
-      <HistoryBlock points={historyQuery.data?.points || []} />
     </Space>
   );
 }
