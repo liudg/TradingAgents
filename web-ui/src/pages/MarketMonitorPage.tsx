@@ -1,5 +1,6 @@
 import {
   Alert,
+  App,
   Button,
   Card,
   Col,
@@ -9,10 +10,13 @@ import {
   Typography,
 } from "antd";
 import { ReloadOutlined } from "@ant-design/icons";
-import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 
-import { useMarketMonitorSnapshot } from "../api/hooks";
+import {
+  useCreateMarketMonitorRun,
+  useMarketMonitorRun,
+  useMarketMonitorRuns,
+} from "../api/hooks";
 import {
   DataStatusBlock,
   EventFactSheetBlock,
@@ -25,28 +29,96 @@ import { extractErrorMessage, formatDateTime } from "../utils/format";
 
 export function MarketMonitorPage() {
   const navigate = useNavigate();
-  const [refreshToken, setRefreshToken] = useState(0);
-  const forceRefresh = refreshToken > 0;
-  const snapshotQuery = useMarketMonitorSnapshot(undefined, forceRefresh, refreshToken);
-  const refreshSnapshot = () => setRefreshToken((value) => value + 1);
+  const { message } = App.useApp();
+  const runsQuery = useMarketMonitorRuns();
+  const createRunMutation = useCreateMarketMonitorRun();
+  const latestSnapshotRun = runsQuery.data?.find((run) => run.trigger_endpoint === "snapshot");
+  const runQuery = useMarketMonitorRun(latestSnapshotRun?.run_id || "");
+  const run = runQuery.data;
+  const snapshot = run?.snapshot;
 
-  if (snapshotQuery.isError && !snapshotQuery.data) {
+  const refreshRuns = () => {
+    runsQuery.refetch();
+    if (latestSnapshotRun?.run_id) {
+      runQuery.refetch();
+    }
+  };
+
+  const startSnapshotRun = async () => {
+    try {
+      const created = await createRunMutation.mutateAsync({
+        trigger_endpoint: "snapshot",
+        force_refresh: true,
+        mode: "snapshot",
+        data_mode: "daily",
+        llm_config: null,
+      });
+      navigate(`/monitor/runs/${created.run_id}`);
+    } catch (error) {
+      message?.error?.(extractErrorMessage(error));
+    }
+  };
+
+  if (runsQuery.isError && !runsQuery.data) {
     return (
       <Alert
         type="error"
         showIcon
         message="市场监控加载失败"
-        description={extractErrorMessage(snapshotQuery.error)}
-        action={<Button size="small" onClick={refreshSnapshot}>重试</Button>}
+        description={extractErrorMessage(runsQuery.error)}
+        action={<Button size="small" onClick={refreshRuns}>重试</Button>}
       />
     );
   }
 
-  if (!snapshotQuery.data) {
-    return <Alert type="info" showIcon message="正在加载市场监控快照" />;
+  if (runsQuery.isLoading) {
+    return <Alert type="info" showIcon message="正在加载市场监控运行记录" />;
   }
 
-  const snapshot = snapshotQuery.data;
+  if (!latestSnapshotRun) {
+    return (
+      <Card className="page-card" title="市场监控">
+        <Space direction="vertical" size={16}>
+          <Alert type="info" showIcon message="暂无市场监控快照" description="创建一个后台运行后，可在详情页查看进度和最终结果。" />
+          <Space wrap>
+            <Button type="primary" loading={createRunMutation.isPending} onClick={startSnapshotRun}>生成市场监控</Button>
+            <Button onClick={() => navigate("/monitor/create")}>新建运行</Button>
+            <Button onClick={() => navigate("/monitor/history")}>查看历史记录</Button>
+          </Space>
+        </Space>
+      </Card>
+    );
+  }
+
+  if (!snapshot) {
+    const isActive = latestSnapshotRun.status === "pending" || latestSnapshotRun.status === "running";
+    return (
+      <Card
+        className="page-card"
+        title="市场监控"
+        extra={
+          <Button icon={<ReloadOutlined />} loading={runsQuery.isFetching || runQuery.isFetching} onClick={refreshRuns}>
+            刷新
+          </Button>
+        }
+      >
+        <Space direction="vertical" size={16} style={{ width: "100%" }}>
+          <Alert
+            type={isActive ? "info" : "warning"}
+            showIcon
+            message={isActive ? "市场监控正在后台生成" : "最近一次市场监控未生成快照"}
+            description={isActive ? "详情页会自动刷新运行阶段、日志和最终结果。" : latestSnapshotRun.error_message || "可查看详情或重新创建运行。"}
+          />
+          <Space wrap>
+            <Button type="primary" onClick={() => navigate(`/monitor/runs/${latestSnapshotRun.run_id}`)}>查看运行详情</Button>
+            <Button loading={createRunMutation.isPending} onClick={startSnapshotRun}>重新生成市场监控</Button>
+            <Button onClick={() => navigate("/monitor/create")}>新建运行</Button>
+            <Button onClick={() => navigate("/monitor/history")}>查看历史记录</Button>
+          </Space>
+        </Space>
+      </Card>
+    );
+  }
 
   return (
     <Space direction="vertical" size="large" style={{ width: "100%" }}>
@@ -58,7 +130,7 @@ export function MarketMonitorPage() {
             className="page-card-extra-button ant-btn ant-btn-default"
             onClick={(event) => {
               event.preventDefault();
-              refreshSnapshot();
+              refreshRuns();
             }}
           >
             <ReloadOutlined /> 刷新
@@ -83,7 +155,8 @@ export function MarketMonitorPage() {
           </Space>
           <Typography.Text>{snapshot.execution_card.conflict_mode}</Typography.Text>
           <Space wrap>
-            <Button type="primary" onClick={() => navigate("/monitor/create")}>新建运行</Button>
+            <Button type="primary" loading={createRunMutation.isPending} onClick={startSnapshotRun}>生成市场监控</Button>
+            <Button onClick={() => navigate("/monitor/create")}>新建运行</Button>
             {snapshot.run_id ? (
               <Button onClick={() => navigate(`/monitor/runs/${snapshot.run_id}`)}>查看本次运行详情</Button>
             ) : null}
@@ -134,7 +207,6 @@ export function MarketMonitorPage() {
           </Space>
         </Col>
       </Row>
-
     </Space>
   );
 }

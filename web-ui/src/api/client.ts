@@ -15,10 +15,7 @@ import {
   HistoricalReportSummary,
   MarketMonitorArtifactPayload,
   MarketMonitorRunRequest,
-  MarketMonitorDataStatusResponse,
-  MarketMonitorHistoryResponse,
   MarketMonitorPromptTrace,
-  MarketMonitorSnapshotResponse,
   MetadataOptionsResponse,
 } from "./types";
 
@@ -157,7 +154,7 @@ export async function fetchMarketMonitorSnapshot(
   if (asOfDate) params.set("as_of_date", asOfDate);
   if (forceRefresh) params.set("force_refresh", "true");
   const suffix = params.toString() ? `?${params.toString()}` : "";
-  return requestJson<MarketMonitorSnapshotResponse>(`/api/market-monitor/snapshot${suffix}`);
+  return requestJson<HistoricalMarketMonitorRunDetail>(`/api/market-monitor/snapshot${suffix}`);
 }
 
 export async function fetchMarketMonitorHistory(
@@ -169,7 +166,7 @@ export async function fetchMarketMonitorHistory(
   params.set("days", String(days));
   if (asOfDate) params.set("as_of_date", asOfDate);
   if (forceRefresh) params.set("force_refresh", "true");
-  return requestJson<MarketMonitorHistoryResponse>(`/api/market-monitor/history?${params.toString()}`);
+  return requestJson<HistoricalMarketMonitorRunDetail>(`/api/market-monitor/history?${params.toString()}`);
 }
 
 export async function fetchMarketMonitorDataStatus(
@@ -180,7 +177,7 @@ export async function fetchMarketMonitorDataStatus(
   if (asOfDate) params.set("as_of_date", asOfDate);
   if (forceRefresh) params.set("force_refresh", "true");
   const suffix = params.toString() ? `?${params.toString()}` : "";
-  return requestJson<MarketMonitorDataStatusResponse>(`/api/market-monitor/data-status${suffix}`);
+  return requestJson<HistoricalMarketMonitorRunDetail>(`/api/market-monitor/data-status${suffix}`);
 }
 
 export async function fetchMarketMonitorRuns() {

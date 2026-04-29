@@ -24,7 +24,7 @@ class InferenceResult(Generic[T]):
 
 
 class MarketMonitorInferenceRunner:
-    def __init__(self, llm_config: MarketMonitorRunLlmConfig | None = None, enable_llm: bool = True) -> None:
+    def __init__(self, llm_config: MarketMonitorRunLlmConfig | None = None) -> None:
         config = llm_config or MarketMonitorRunLlmConfig(
             provider=DEFAULT_CONFIG["llm_provider"],
             model=DEFAULT_CONFIG["deep_think_llm"],
@@ -39,8 +39,7 @@ class MarketMonitorInferenceRunner:
             ),
         )
         self.llm_config = config
-        self.enable_llm = enable_llm
-        self.llm = self._create_llm(config) if enable_llm else None
+        self.llm = self._create_llm(config)
 
     def _create_llm(self, config: MarketMonitorRunLlmConfig):
         kwargs: dict[str, Any] = {}
@@ -75,8 +74,6 @@ class MarketMonitorInferenceRunner:
         error = None
         used_fallback = False
         try:
-            if self.llm is None:
-                raise RuntimeError("LLM inference disabled for this market monitor run")
             response = self.llm.invoke([
                 ("system", system_prompt),
                 ("human", user_prompt),

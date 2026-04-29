@@ -178,6 +178,10 @@ export function useMarketMonitorRuns() {
   return useQuery({
     queryKey: ["market-monitor-runs"],
     queryFn: fetchMarketMonitorRuns,
+    refetchInterval: (query) => {
+      const runs = query.state.data ?? [];
+      return runs.some((run) => activeStatuses.includes(run.status)) ? 2000 : false;
+    },
   });
 }
 
@@ -185,22 +189,30 @@ export function useMarketMonitorRun(runId: string) {
   return useQuery({
     queryKey: ["market-monitor-run", runId],
     queryFn: () => fetchMarketMonitorRun(runId),
+    refetchInterval: (query) => {
+      const status = query.state.data?.status;
+      return status && activeStatuses.includes(status) ? 2000 : false;
+    },
     enabled: Boolean(runId),
   });
 }
 
-export function useMarketMonitorRunLogs(runId: string) {
+export function useMarketMonitorRunLogs(runId: string, status?: JobStatus) {
   return useQuery({
     queryKey: ["market-monitor-run-logs", runId],
     queryFn: () => fetchMarketMonitorRunLogs(runId),
+    refetchInterval:
+      status && activeStatuses.includes(status) ? 2000 : false,
     enabled: Boolean(runId),
   });
 }
 
-export function useMarketMonitorPromptTraces(runId: string) {
+export function useMarketMonitorPromptTraces(runId: string, status?: JobStatus) {
   return useQuery({
     queryKey: ["market-monitor-prompt-traces", runId],
     queryFn: () => fetchMarketMonitorPromptTraces(runId),
+    refetchInterval:
+      status && activeStatuses.includes(status) ? 2000 : false,
     enabled: Boolean(runId),
   });
 }

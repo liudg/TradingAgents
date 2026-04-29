@@ -1,23 +1,35 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { App as AntApp } from "antd";
 import { describe, expect, it, vi } from "vitest";
 import { MemoryRouter } from "react-router-dom";
 
 import type {
+  HistoricalMarketMonitorRunDetail,
+  HistoricalMarketMonitorRunSummary,
   MarketMonitorFactorBreakdown,
   MarketMonitorInputDataStatus,
   MarketMonitorSnapshotResponse,
 } from "../api/types";
 import { MarketMonitorPage } from "./MarketMonitorPage";
 
-const mockUseMarketMonitorSnapshot = vi.fn();
-const mockUseMarketMonitorHistory = vi.fn();
-const mockUseMarketMonitorDataStatus = vi.fn();
+const mockUseCreateMarketMonitorRun = vi.fn();
+const mockUseMarketMonitorRun = vi.fn();
+const mockUseMarketMonitorRuns = vi.fn();
+const mockNavigate = vi.fn();
 
 vi.mock("../api/hooks", () => ({
-  useMarketMonitorSnapshot: (...args: unknown[]) => mockUseMarketMonitorSnapshot(...args),
-  useMarketMonitorHistory: (...args: unknown[]) => mockUseMarketMonitorHistory(...args),
-  useMarketMonitorDataStatus: (...args: unknown[]) => mockUseMarketMonitorDataStatus(...args),
+  useCreateMarketMonitorRun: (...args: unknown[]) => mockUseCreateMarketMonitorRun(...args),
+  useMarketMonitorRun: (...args: unknown[]) => mockUseMarketMonitorRun(...args),
+  useMarketMonitorRuns: (...args: unknown[]) => mockUseMarketMonitorRuns(...args),
 }));
+
+vi.mock("react-router-dom", async () => {
+  const actual = await vi.importActual<typeof import("react-router-dom")>("react-router-dom");
+  return {
+    ...actual,
+    useNavigate: () => mockNavigate,
+  };
+});
 
 function installMatchMedia() {
   Object.defineProperty(window, "matchMedia", {
@@ -98,14 +110,7 @@ function buildSnapshot(): MarketMonitorSnapshotResponse {
       slope_state: "缓慢改善",
       recommended_exposure: "60%-80%",
       factor_breakdown: [factor],
-      score_adjustment: {
-        value: 1,
-        direction: "up",
-        reason: "统一事件事实表未显示额外压力。",
-        source_event_ids: [],
-        confidence: 0.7,
-        expires_at: null,
-      },
+      score_adjustment: null,
     },
     short_term_score: {
       ...reasoning(),
@@ -208,200 +213,128 @@ function buildSnapshot(): MarketMonitorSnapshotResponse {
   };
 }
 
-describe("MarketMonitorPage", () => {
-  it("renders snapshot cards with V2.3.1 formal API", () => {
-    installMatchMedia();
-    mockUseMarketMonitorSnapshot.mockReset();
-    mockUseMarketMonitorHistory.mockReset();
-    mockUseMarketMonitorDataStatus.mockReset();
+function buildRunSummary(status: "pending" | "running" | "completed" | "failed" = "completed"): HistoricalMarketMonitorRunSummary {
+  return {
+    run_id: "run-12345678",
+    trigger_endpoint: "snapshot",
+    as_of_date: "2026-04-11",
+    days: null,
+    status,
+    generated_at: "2026-04-11T08:31:00Z",
+    data_freshness: status === "completed" ? "daily_final" : null,
+    regime_label: status === "completed" ? "黄绿灯-Swing" : null,
+    degraded: status === "completed",
+    recoverable: false,
+    error_message: status === "failed" ? "snapshot boom" : null,
+    log_path: null,
+    results_dir: null,
+  };
+}
 
-    mockUseMarketMonitorSnapshot.mockImplementation(() => ({
-      isLoading: false,
-      isError: false,
-      data: buildSnapshot(),
-      error: null,
-      refetch: vi.fn(),
-    }));
-    mockUseMarketMonitorHistory.mockImplementation(() => ({
-      data: {
-        as_of_date: "2026-04-11",
-        points: [
-          {
-            trade_date: "2026-04-10",
-            scorecard_version: "2.3.1",
-            long_term_score: 64,
-            short_term_score: 58,
-            system_risk_score: 36,
-            panic_reversal_score: 22,
-            panic_state: "无信号",
-            regime_label: "黄灯",
-          },
-        ],
-      },
-      refetch: vi.fn(),
-    }));
-    mockUseMarketMonitorDataStatus.mockImplementation(() => ({
-      data: {
-        timestamp: "2026-04-11T08:30:00Z",
-        as_of_date: "2026-04-11",
-        data_mode: "daily",
-        data_freshness: "daily_final",
-        input_data_status: inputDataStatus,
-        missing_data: buildSnapshot().missing_data,
-        open_gaps: ["缺少交易所级 breadth 原始数据"],
-        risks: buildSnapshot().risks,
-        event_fact_sheet: [],
-      },
-      refetch: vi.fn(),
-    }));
+function buildRunDetail(status: "pending" | "running" | "completed" | "failed" = "completed"): HistoricalMarketMonitorRunDetail {
+  return {
+    ...buildRunSummary(status),
+    request: {
+      trigger_endpoint: "snapshot",
+      as_of_date: "2026-04-11",
+      days: null,
+      force_refresh: true,
+      mode: "snapshot",
+      data_mode: "daily",
+      llm_config: null,
+    },
+    created_at: "2026-04-11T08:30:00Z",
+    started_at: "2026-04-11T08:30:05Z",
+    finished_at: status === "completed" || status === "failed" ? "2026-04-11T08:31:00Z" : null,
+    snapshot: status === "completed" ? buildSnapshot() : null,
+    history: null,
+    data_status: null,
+    fact_sheet: null,
+    manifest: null,
+    stage_results: [],
+    prompt_traces: [],
+  };
+}
 
-    render(
+function renderPage() {
+  render(
+    <AntApp>
       <MemoryRouter>
         <MarketMonitorPage />
-      </MemoryRouter>,
-    );
+      </MemoryRouter>
+    </AntApp>,
+  );
+}
+
+function resetMocks() {
+  installMatchMedia();
+  mockUseCreateMarketMonitorRun.mockReset();
+  mockUseMarketMonitorRun.mockReset();
+  mockUseMarketMonitorRuns.mockReset();
+  mockNavigate.mockReset();
+  mockUseCreateMarketMonitorRun.mockReturnValue({ isPending: false, mutateAsync: vi.fn() });
+}
+
+describe("MarketMonitorPage", () => {
+  it("renders latest completed run snapshot cards", () => {
+    resetMocks();
+    mockUseMarketMonitorRuns.mockReturnValue({ isLoading: false, isError: false, data: [buildRunSummary()], error: null, isFetching: false, refetch: vi.fn() });
+    mockUseMarketMonitorRun.mockReturnValue({ isLoading: false, isError: false, data: buildRunDetail(), error: null, isFetching: false, refetch: vi.fn() });
+
+    renderPage();
 
     expect(screen.getAllByText("黄绿灯-Swing").length).toBeGreaterThan(0);
     expect(screen.getByText("执行动作卡")).toBeInTheDocument();
     expect(screen.getByText("市场手法与风格有效性卡")).toBeInTheDocument();
     expect(screen.getByText("统一事件事实表")).toBeInTheDocument();
-    expect(screen.getByText("历史趋势回看")).toBeInTheDocument();
-    expect(screen.getByText("新建运行")).toBeInTheDocument();
+    expect(screen.getByText("生成市场监控")).toBeInTheDocument();
     expect(screen.getByText("查看本次运行详情")).toBeInTheDocument();
-    expect(screen.getByText("查看历史记录")).toBeInTheDocument();
     expect(screen.getByText("Prompt market-monitor-scorecard-2026-04-v2.3.1")).toBeInTheDocument();
     expect(screen.getByText("Model test-model")).toBeInTheDocument();
     expect(screen.getAllByText("广度因子使用 ETF 代理池近似").length).toBeGreaterThan(0);
-    expect(screen.getByText(/event_fact_sheet：当前刷新周期未注入联网搜索事件事实/)).toBeInTheDocument();
+    expect(screen.getByText(/event_fact_sheet: 当前刷新周期未注入联网搜索事件事实/)).toBeInTheDocument();
   });
 
-  it("shows loading state before snapshot returns", () => {
-    installMatchMedia();
-    mockUseMarketMonitorSnapshot.mockReset();
-    mockUseMarketMonitorHistory.mockReset();
-    mockUseMarketMonitorDataStatus.mockReset();
+  it("shows loading state before runs return", () => {
+    resetMocks();
+    mockUseMarketMonitorRuns.mockReturnValue({ isLoading: true, isError: false, data: undefined, error: null, isFetching: false, refetch: vi.fn() });
+    mockUseMarketMonitorRun.mockReturnValue({ isLoading: false, isError: false, data: undefined, error: null, isFetching: false, refetch: vi.fn() });
 
-    mockUseMarketMonitorSnapshot.mockImplementation(() => ({
-      isLoading: true,
-      isError: false,
-      data: undefined,
-      error: null,
-      refetch: vi.fn(),
-    }));
-    mockUseMarketMonitorHistory.mockImplementation(() => ({
-      data: { as_of_date: "2026-04-11", points: [] },
-      refetch: vi.fn(),
-    }));
-    mockUseMarketMonitorDataStatus.mockImplementation(() => ({
-      data: undefined,
-      refetch: vi.fn(),
-    }));
+    renderPage();
 
-    render(
-      <MemoryRouter>
-        <MarketMonitorPage />
-      </MemoryRouter>,
-    );
-
-    expect(screen.getByText("正在加载市场监控快照")).toBeInTheDocument();
+    expect(screen.getByText("正在加载市场监控运行记录")).toBeInTheDocument();
   });
 
-  it("refreshes with force refresh enabled after clicking refresh", async () => {
-    installMatchMedia();
-    mockUseMarketMonitorSnapshot.mockReset();
-    mockUseMarketMonitorHistory.mockReset();
-    mockUseMarketMonitorDataStatus.mockReset();
+  it("shows active run entry while snapshot is still running", () => {
+    resetMocks();
+    mockUseMarketMonitorRuns.mockReturnValue({ isLoading: false, isError: false, data: [buildRunSummary("running")], error: null, isFetching: false, refetch: vi.fn() });
+    mockUseMarketMonitorRun.mockReturnValue({ isLoading: false, isError: false, data: buildRunDetail("running"), error: null, isFetching: false, refetch: vi.fn() });
 
-    mockUseMarketMonitorSnapshot.mockImplementation(() => ({
-      isLoading: false,
-      isError: false,
-      data: buildSnapshot(),
-      error: null,
-      refetch: vi.fn(),
-    }));
-    mockUseMarketMonitorHistory.mockImplementation(() => ({
-      data: { as_of_date: "2026-04-11", points: [] },
-      refetch: vi.fn(),
-    }));
-    mockUseMarketMonitorDataStatus.mockImplementation(() => ({
-      data: {
-        timestamp: "2026-04-11T08:30:00Z",
-        as_of_date: "2026-04-11",
+    renderPage();
+
+    expect(screen.getByText("市场监控正在后台生成")).toBeInTheDocument();
+    expect(screen.getByText("查看运行详情")).toBeInTheDocument();
+  });
+
+  it("creates a background snapshot run and navigates to detail", async () => {
+    resetMocks();
+    const mutateAsync = vi.fn().mockResolvedValue({ run_id: "new-run" });
+    mockUseCreateMarketMonitorRun.mockReturnValue({ isPending: false, mutateAsync });
+    mockUseMarketMonitorRuns.mockReturnValue({ isLoading: false, isError: false, data: [], error: null, isFetching: false, refetch: vi.fn() });
+    mockUseMarketMonitorRun.mockReturnValue({ isLoading: false, isError: false, data: undefined, error: null, isFetching: false, refetch: vi.fn() });
+
+    renderPage();
+    fireEvent.click(screen.getByText("生成市场监控"));
+
+    await waitFor(() => {
+      expect(mutateAsync).toHaveBeenCalledWith({
+        trigger_endpoint: "snapshot",
+        force_refresh: true,
+        mode: "snapshot",
         data_mode: "daily",
-        data_freshness: "daily_final",
-        input_data_status: inputDataStatus,
-        missing_data: buildSnapshot().missing_data,
-        open_gaps: [],
-        risks: buildSnapshot().risks,
-        event_fact_sheet: [],
-      },
-      refetch: vi.fn(),
-    }));
-
-    render(
-      <MemoryRouter>
-        <MarketMonitorPage />
-      </MemoryRouter>,
-    );
-
-    fireEvent.click(screen.getByText("刷新"));
-
-    await waitFor(() => {
-      expect(mockUseMarketMonitorSnapshot).toHaveBeenLastCalledWith(undefined, true, 1);
-      expect(mockUseMarketMonitorHistory).toHaveBeenLastCalledWith(20, undefined, true, 1);
-      expect(mockUseMarketMonitorDataStatus).toHaveBeenLastCalledWith(undefined, true, 1);
-    });
-  });
-
-  it("issues a new forced refresh on every refresh click", async () => {
-    installMatchMedia();
-    mockUseMarketMonitorSnapshot.mockReset();
-    mockUseMarketMonitorHistory.mockReset();
-    mockUseMarketMonitorDataStatus.mockReset();
-
-    mockUseMarketMonitorSnapshot.mockImplementation(() => ({
-      isLoading: false,
-      isError: false,
-      data: buildSnapshot(),
-      error: null,
-      refetch: vi.fn(),
-    }));
-    mockUseMarketMonitorHistory.mockImplementation(() => ({
-      data: { as_of_date: "2026-04-11", points: [] },
-      refetch: vi.fn(),
-    }));
-    mockUseMarketMonitorDataStatus.mockImplementation(() => ({
-      data: {
-        timestamp: "2026-04-11T08:30:00Z",
-        as_of_date: "2026-04-11",
-        data_mode: "daily",
-        data_freshness: "daily_final",
-        input_data_status: inputDataStatus,
-        missing_data: buildSnapshot().missing_data,
-        open_gaps: [],
-        risks: buildSnapshot().risks,
-        event_fact_sheet: [],
-      },
-      refetch: vi.fn(),
-    }));
-
-    render(
-      <MemoryRouter>
-        <MarketMonitorPage />
-      </MemoryRouter>,
-    );
-    const refreshButton = screen.getByText("刷新");
-
-    fireEvent.click(refreshButton);
-    await waitFor(() => {
-      expect(mockUseMarketMonitorSnapshot).toHaveBeenLastCalledWith(undefined, true, 1);
-    });
-
-    fireEvent.click(refreshButton);
-    await waitFor(() => {
-      expect(mockUseMarketMonitorSnapshot).toHaveBeenLastCalledWith(undefined, true, 2);
-      expect(mockUseMarketMonitorHistory).toHaveBeenLastCalledWith(20, undefined, true, 2);
-      expect(mockUseMarketMonitorDataStatus).toHaveBeenLastCalledWith(undefined, true, 2);
+        llm_config: null,
+      });
+      expect(mockNavigate).toHaveBeenCalledWith("/monitor/runs/new-run");
     });
   });
 });

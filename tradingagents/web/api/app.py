@@ -172,12 +172,12 @@ def get_historical_backtest(job_id: str) -> HistoricalBacktestDetail:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
 
 
-@app.get("/api/market-monitor/snapshot", response_model=MarketMonitorSnapshotResponse)
+@app.get("/api/market-monitor/snapshot", response_model=HistoricalMarketMonitorRunDetail)
 def get_market_monitor_snapshot(
     as_of_date: date | None = None,
     force_refresh: bool = False,
     data_mode: MarketMonitorDataMode = "daily",
-) -> MarketMonitorSnapshotResponse:
+) -> HistoricalMarketMonitorRunDetail:
     request = MarketMonitorSnapshotRequest(
         as_of_date=as_of_date,
         force_refresh=force_refresh,
@@ -186,13 +186,13 @@ def get_market_monitor_snapshot(
     return market_monitor_manager.run_snapshot(request)
 
 
-@app.get("/api/market-monitor/history", response_model=MarketMonitorHistoryResponse)
+@app.get("/api/market-monitor/history", response_model=HistoricalMarketMonitorRunDetail)
 def get_market_monitor_history(
     as_of_date: date | None = None,
     days: int = 20,
     force_refresh: bool = False,
     data_mode: MarketMonitorDataMode = "daily",
-) -> MarketMonitorHistoryResponse:
+) -> HistoricalMarketMonitorRunDetail:
     if data_mode != "daily":
         raise HTTPException(status_code=422, detail="历史回放暂只支持 daily 数据模式")
     request = MarketMonitorHistoryRequest(
@@ -204,12 +204,12 @@ def get_market_monitor_history(
     return market_monitor_manager.run_history(request)
 
 
-@app.get("/api/market-monitor/data-status", response_model=MarketMonitorDataStatusResponse)
+@app.get("/api/market-monitor/data-status", response_model=HistoricalMarketMonitorRunDetail)
 def get_market_monitor_data_status(
     as_of_date: date | None = None,
     force_refresh: bool = False,
     data_mode: MarketMonitorDataMode = "daily",
-) -> MarketMonitorDataStatusResponse:
+) -> HistoricalMarketMonitorRunDetail:
     request = MarketMonitorSnapshotRequest(
         as_of_date=as_of_date,
         force_refresh=force_refresh,

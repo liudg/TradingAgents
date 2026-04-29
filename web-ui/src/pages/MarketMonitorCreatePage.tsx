@@ -1,4 +1,5 @@
 import {
+  Alert,
   App,
   Button,
   Card,
@@ -24,6 +25,7 @@ interface MarketMonitorCreateFormValues {
   as_of_date?: Dayjs;
   days?: number;
   force_refresh: boolean;
+  data_mode: "daily" | "intraday_delayed" | "intraday_realtime";
   provider?: string;
   model?: string;
   reasoning_effort?: string;
@@ -33,6 +35,12 @@ const runTypeOptions = [
   { label: "快照", value: "snapshot" },
   { label: "历史", value: "history" },
   { label: "数据状态", value: "data_status" },
+] as const;
+
+const dataModeOptions = [
+  { label: "日线", value: "daily" },
+  { label: "盘中延迟", value: "intraday_delayed" },
+  { label: "盘中实时", value: "intraday_realtime" },
 ] as const;
 
 export function MarketMonitorCreatePage() {
@@ -49,6 +57,7 @@ export function MarketMonitorCreatePage() {
         as_of_date: values.as_of_date?.format("YYYY-MM-DD") || null,
         days: values.trigger_endpoint === "history" ? values.days || 20 : null,
         force_refresh: values.force_refresh,
+        data_mode: values.trigger_endpoint === "history" ? "daily" : values.data_mode,
         mode: values.trigger_endpoint,
         llm_config:
           values.provider || values.model || values.reasoning_effort
@@ -69,13 +78,20 @@ export function MarketMonitorCreatePage() {
 
   return (
     <Card className="page-card" title="新建市场监控运行">
-      <Form
-        form={form}
-        layout="vertical"
-        requiredMark={false}
-        initialValues={{ trigger_endpoint: "snapshot", days: 20, force_refresh: false }}
-        onFinish={handleSubmit}
-      >
+      <Space direction="vertical" size={16} style={{ width: "100%" }}>
+        <Alert
+          type="info"
+          showIcon
+          message="运行会在后台执行"
+          description="创建后立即进入详情页，LLM 默认为正式启用；如填写 Provider/模型/推理强度，会覆盖默认 LLM 配置。"
+        />
+        <Form
+          form={form}
+          layout="vertical"
+          requiredMark={false}
+          initialValues={{ trigger_endpoint: "snapshot", days: 20, force_refresh: false, data_mode: "daily" }}
+          onFinish={handleSubmit}
+        >
         <Row gutter={16}>
           <Col xs={24} md={8}>
             <Form.Item label="运行类型" name="trigger_endpoint" rules={[{ required: true, message: "请选择运行类型" }]}>
@@ -85,6 +101,11 @@ export function MarketMonitorCreatePage() {
           <Col xs={24} md={8}>
             <Form.Item label="交易日" name="as_of_date">
               <DatePicker style={{ width: "100%" }} disabledDate={(current) => (current ? current > dayjs().endOf("day") : false)} />
+            </Form.Item>
+          </Col>
+          <Col xs={24} md={8}>
+            <Form.Item label="数据模式" name="data_mode" rules={[{ required: true, message: "请选择数据模式" }]}>
+              <Select disabled={triggerEndpoint === "history"} options={dataModeOptions as never} />
             </Form.Item>
           </Col>
           {triggerEndpoint === "history" ? (
@@ -121,7 +142,8 @@ export function MarketMonitorCreatePage() {
           </Button>
           <Button onClick={() => navigate("/monitor")}>返回市场监控</Button>
         </Space>
-      </Form>
+        </Form>
+      </Space>
     </Card>
   );
 }

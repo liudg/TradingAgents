@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
 from datetime import date, timedelta
 from typing import Any
 
@@ -23,8 +24,8 @@ from .schemas import (
     MarketMonitorFactSheet,
     MarketMonitorHistoryPoint,
     MarketMonitorHistoryRequest,
-    MarketMonitorMissingDataItem,
     MarketMonitorHistoryResponse,
+    MarketMonitorMissingDataItem,
     MarketMonitorRunLlmConfig,
     MarketMonitorSnapshotRequest,
     MarketMonitorSnapshotResponse,
@@ -33,10 +34,11 @@ from .universe import get_market_monitor_universe
 
 
 class MarketMonitorSnapshotService:
-    def __init__(self, llm_config: MarketMonitorRunLlmConfig | None = None, enable_llm: bool = True) -> None:
+    def __init__(self, llm_config: MarketMonitorRunLlmConfig | None = None) -> None:
         self._universe = get_market_monitor_universe()
-        self._inference = MarketMonitorCardInferenceService(llm_config, enable_llm=enable_llm)
-        self._execution_inference = MarketMonitorExecutionInferenceService(llm_config, enable_llm=enable_llm)
+        self._llm_config = llm_config
+        self._inference = MarketMonitorCardInferenceService(llm_config)
+        self._execution_inference = MarketMonitorExecutionInferenceService(llm_config)
 
     def get_snapshot(
         self,
@@ -171,37 +173,54 @@ class MarketMonitorSnapshotService:
         system_risk_deterministic = build_system_risk_card(bundle, event_fact_sheet)
         style_deterministic = build_style_effectiveness(bundle)
 
-        long_term_result = self._inference.infer_long_term(
-            fact_sheet,
-            long_term_deterministic,
-            lambda: long_term_deterministic,
-        )
-        short_term_result = self._inference.infer_short_term(
-            fact_sheet,
-            short_term_deterministic,
-            lambda: short_term_deterministic,
-        )
-        system_risk_result = self._inference.infer_system_risk(
-            fact_sheet,
-            system_risk_deterministic,
-            lambda: system_risk_deterministic,
-        )
-        style_result = self._inference.infer_style(
-            fact_sheet,
-            style_deterministic,
-            lambda: style_deterministic,
-        )
+        def card_inference() -> MarketMonitorCardInferenceService:
+            return MarketMonitorCardInferenceService(self._llm_config)
+
+        with ThreadPoolExecutor(max_workers=4, thread_name_prefix="market-monitor-card") as executor:
+            long_term_future = executor.submit(
+                lambda: card_inference().infer_long_term(
+                    fact_sheet,
+                    long_term_deterministic,
+                    lambda: long_term_deterministic,
+                )
+            )
+            short_term_future = executor.submit(
+                lambda: card_inference().infer_short_term(
+                    fact_sheet,
+                    short_term_deterministic,
+                    lambda: short_term_deterministic,
+                )
+            )
+            system_risk_future = executor.submit(
+                lambda: card_inference().infer_system_risk(
+                    fact_sheet,
+                    system_risk_deterministic,
+                    lambda: system_risk_deterministic,
+                )
+            )
+            style_future = executor.submit(
+                lambda: card_inference().infer_style(
+                    fact_sheet,
+                    style_deterministic,
+                    lambda: style_deterministic,
+                )
+            )
+
+            system_risk_result = system_risk_future.result()
+            system_risk = system_risk_result.payload
+            panic_deterministic = build_panic_card(bundle, system_risk.score, previous_snapshots=previous_snapshots)
+            panic_result = card_inference().infer_panic(
+                fact_sheet,
+                panic_deterministic,
+                lambda: panic_deterministic,
+            )
+            long_term_result = long_term_future.result()
+            short_term_result = short_term_future.result()
+            style_result = style_future.result()
 
         long_term = long_term_result.payload
         short_term = short_term_result.payload
-        system_risk = system_risk_result.payload
         style = style_result.payload
-        panic_deterministic = build_panic_card(bundle, system_risk.score, previous_snapshots=previous_snapshots)
-        panic_result = self._inference.infer_panic(
-            fact_sheet,
-            panic_deterministic,
-            lambda: panic_deterministic,
-        )
         panic = panic_result.payload
         execution_fallback = lambda: build_execution_card(
             long_term,

@@ -50,6 +50,7 @@ describe("MarketMonitorCreatePage", () => {
       </AntApp>,
     );
     expect(screen.getByText("新建市场监控运行")).toBeInTheDocument();
+    expect(screen.getByText("运行会在后台执行")).toBeInTheDocument();
     expect(screen.getByText("创建运行")).toBeInTheDocument();
   });
 
@@ -73,6 +74,7 @@ describe("MarketMonitorCreatePage", () => {
         as_of_date: null,
         days: null,
         force_refresh: false,
+        data_mode: "daily",
         mode: "snapshot",
         llm_config: null,
       });

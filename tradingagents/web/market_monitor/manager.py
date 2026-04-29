@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import traceback
+from concurrent.futures import Future, ThreadPoolExecutor
 from datetime import date, datetime
 from pathlib import Path
 from threading import Lock
@@ -40,15 +41,17 @@ class MarketMonitorRunManager:
         service: MarketMonitorSnapshotService | None = None,
     ) -> None:
         self.runs_root = runs_root or Path(DEFAULT_CONFIG["results_dir"]) / "market_monitor"
-        self.service = service or MarketMonitorSnapshotService(enable_llm=False)
+        self.service = service or MarketMonitorSnapshotService()
         self._runs: dict[str, dict[str, Any]] = {}
+        self._futures: dict[str, Future] = {}
         self._lock = Lock()
+        self._executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="market-monitor-run")
         self._restore_persisted_runs()
 
     def run_snapshot(
         self,
         request: MarketMonitorSnapshotRequest,
-    ) -> MarketMonitorSnapshotResponse:
+    ) -> HistoricalMarketMonitorRunDetail:
         run_request = MarketMonitorRunRequest(
             trigger_endpoint="snapshot",
             as_of_date=request.as_of_date,
@@ -56,15 +59,12 @@ class MarketMonitorRunManager:
             data_mode=request.data_mode,
             mode="snapshot",
         )
-        _, snapshot, _, _ = self._execute_run(run_request)
-        if snapshot is None:
-            raise RuntimeError("snapshot payload missing")
-        return snapshot
+        return self.create_run(run_request)
 
     def run_history(
         self,
         request: MarketMonitorHistoryRequest,
-    ) -> MarketMonitorHistoryResponse:
+    ) -> HistoricalMarketMonitorRunDetail:
         run_request = MarketMonitorRunRequest(
             trigger_endpoint="history",
             as_of_date=request.as_of_date,
@@ -73,15 +73,12 @@ class MarketMonitorRunManager:
             data_mode=request.data_mode,
             mode="history",
         )
-        _, _, history, _ = self._execute_run(run_request)
-        if history is None:
-            raise RuntimeError("history payload missing")
-        return history
+        return self.create_run(run_request)
 
     def run_data_status(
         self,
         request: MarketMonitorSnapshotRequest,
-    ) -> MarketMonitorDataStatusResponse:
+    ) -> HistoricalMarketMonitorRunDetail:
         run_request = MarketMonitorRunRequest(
             trigger_endpoint="data_status",
             as_of_date=request.as_of_date,
@@ -89,27 +86,24 @@ class MarketMonitorRunManager:
             data_mode=request.data_mode,
             mode="data_status",
         )
-        _, _, _, data_status = self._execute_run(run_request)
-        if data_status is None:
-            raise RuntimeError("data status payload missing")
-        return data_status
+        return self.create_run(run_request)
 
     def create_run(self, request: MarketMonitorRunRequest) -> HistoricalMarketMonitorRunDetail:
-        run_id = self._execute_run(request)[0]
+        run_id, _, _, _ = self._prepare_run(request)
+        future = self._executor.submit(self._execute_prepared_run, request, run_id)
+        with self._lock:
+            self._futures[run_id] = future
+        future.add_done_callback(lambda _: self._forget_future(run_id))
         return self.get_historical_run(run_id)
 
     def _resolve_service(self, request: MarketMonitorRunRequest) -> MarketMonitorSnapshotService:
         if request.llm_config is not None:
-            return MarketMonitorSnapshotService(llm_config=request.llm_config, enable_llm=True)
+            return MarketMonitorSnapshotService(llm_config=request.llm_config)
         return self.service
 
     def list_historical_runs(self) -> list[HistoricalMarketMonitorRunSummary]:
         with self._lock:
-            snapshots = [
-                dict(run_data)
-                for run_data in self._runs.values()
-                if run_data.get("status") in {JobStatus.COMPLETED, JobStatus.FAILED}
-            ]
+            snapshots = [dict(run_data) for run_data in self._runs.values()]
         summaries = [self._build_summary(snapshot) for snapshot in snapshots]
         return sorted(summaries, key=lambda item: item.generated_at, reverse=True)
 
@@ -169,33 +163,27 @@ class MarketMonitorRunManager:
         request: MarketMonitorRunRequest = snapshot["request"]
         persistence = MarketMonitorPersistence(Path(snapshot["results_dir"]))
         log_path = Path(snapshot["log_path"])
+        reset_stages = [MarketMonitorStageResult(stage_name=stage.stage_name) for stage in manifest.stage_results]
         self._update_run(
             run_id,
-            status=JobStatus.RUNNING,
+            status=JobStatus.PENDING,
             error_message=None,
-            started_at=datetime.now(),
+            started_at=None,
             finished_at=None,
+            stage_results=reset_stages,
+            snapshot=None,
+            history=None,
+            data_status=None,
+            fact_sheet=None,
+            prompt_traces=[],
         )
-        reset_stages = [MarketMonitorStageResult(stage_name=stage.stage_name) for stage in manifest.stage_results]
-        self._update_run(run_id, stage_results=reset_stages)
-        self._set_stage_status(run_id, persistence, "request_received", "completed")
         self._sync_manifest(run_id, persistence)
         AnalysisJobManager._append_job_log(log_path, "System", f"Recovering market monitor run {run_id}")
-        try:
-            self._execute_run(request, existing_run_id=run_id, results_dir=Path(snapshot["results_dir"]))
-            return self.get_historical_run(run_id)
-        except Exception as exc:
-            if request.trigger_endpoint == "history":
-                self._set_stage_status(run_id, persistence, "history_materialization", "failed", error=str(exc))
-            self._set_stage_status(run_id, persistence, "artifact_generation", "failed", error=str(exc))
-            self._update_run(
-                run_id,
-                status=JobStatus.FAILED,
-                error_message=str(exc),
-                finished_at=datetime.now(),
-            )
-            self._sync_manifest(run_id, persistence, recoverable=True)
-            raise
+        future = self._executor.submit(self._execute_prepared_run, request, run_id)
+        with self._lock:
+            self._futures[run_id] = future
+        future.add_done_callback(lambda _: self._forget_future(run_id))
+        return self.get_historical_run(run_id)
 
     def _execute_run(
         self,
@@ -208,9 +196,27 @@ class MarketMonitorRunManager:
         MarketMonitorHistoryResponse | None,
         MarketMonitorDataStatusResponse | None,
     ]:
-        service = self._resolve_service(request)
+        run_id, _, _, _ = self._prepare_run(request, existing_run_id=existing_run_id, results_dir=results_dir, start_immediately=True)
+        return self._execute_prepared_run(request, run_id)
+
+    def _prepare_run(
+        self,
+        request: MarketMonitorRunRequest,
+        existing_run_id: str | None = None,
+        results_dir: Path | None = None,
+        start_immediately: bool = False,
+    ) -> tuple[str, date, Path, Path]:
         run_id = existing_run_id or uuid4().hex
         as_of_date = request.as_of_date or date.today()
+        if existing_run_id is not None:
+            snapshot = self._get_run_snapshot(existing_run_id)
+            actual_results_dir = results_dir or Path(snapshot["results_dir"])
+            log_path = Path(snapshot["log_path"])
+            if start_immediately:
+                self._update_run(run_id, status=JobStatus.RUNNING, started_at=datetime.now(), error_message=None, finished_at=None)
+                self._sync_manifest(run_id, MarketMonitorPersistence(actual_results_dir))
+            return run_id, as_of_date, actual_results_dir, log_path
+
         actual_results_dir = results_dir or self._get_results_dir(as_of_date, run_id)
         persistence = MarketMonitorPersistence(actual_results_dir)
         persistence.ensure_layout()
@@ -231,29 +237,50 @@ class MarketMonitorRunManager:
             llm_config=request.llm_config,
             stage_results=stage_results,
         )
-        if existing_run_id is None:
-            persistence.write_manifest(manifest)
-            run_data = {
-                "run_id": run_id,
-                "request": request,
-                "status": JobStatus.PENDING,
-                "snapshot": None,
-                "history": None,
-                "data_status": None,
-                "fact_sheet": None,
-                "manifest": manifest,
-                "stage_results": stage_results,
-                "prompt_traces": [],
-                "error_message": None,
-                "log_path": str(log_path),
-                "results_dir": str(actual_results_dir),
-                "created_at": created_at,
-                "started_at": None,
-                "finished_at": None,
-            }
-            with self._lock:
-                self._runs[run_id] = run_data
+        persistence.write_manifest(manifest)
+        run_data = {
+            "run_id": run_id,
+            "request": request,
+            "status": JobStatus.PENDING,
+            "snapshot": None,
+            "history": None,
+            "data_status": None,
+            "fact_sheet": None,
+            "manifest": manifest,
+            "stage_results": stage_results,
+            "prompt_traces": [],
+            "error_message": None,
+            "log_path": str(log_path),
+            "results_dir": str(actual_results_dir),
+            "created_at": created_at,
+            "started_at": None,
+            "finished_at": None,
+        }
+        with self._lock:
+            self._runs[run_id] = run_data
+        if start_immediately:
             self._update_run(run_id, status=JobStatus.RUNNING, started_at=datetime.now())
+            self._sync_manifest(run_id, persistence)
+        return run_id, as_of_date, actual_results_dir, log_path
+
+    def _execute_prepared_run(
+        self,
+        request: MarketMonitorRunRequest,
+        run_id: str,
+    ) -> tuple[
+        str,
+        MarketMonitorSnapshotResponse | None,
+        MarketMonitorHistoryResponse | None,
+        MarketMonitorDataStatusResponse | None,
+    ]:
+        snapshot = self._get_run_snapshot(run_id)
+        actual_results_dir = Path(snapshot["results_dir"])
+        persistence = MarketMonitorPersistence(actual_results_dir)
+        persistence.ensure_layout()
+        log_path = Path(snapshot["log_path"])
+        as_of_date = request.as_of_date or date.today()
+        if snapshot.get("status") != JobStatus.RUNNING:
+            self._update_run(run_id, status=JobStatus.RUNNING, started_at=datetime.now(), error_message=None, finished_at=None)
         self._set_stage_status(run_id, persistence, "request_received", "completed")
         self._sync_manifest(run_id, persistence)
         AnalysisJobManager._append_job_log(
@@ -266,6 +293,7 @@ class MarketMonitorRunManager:
             ),
         )
         try:
+            service = self._resolve_service(request)
             run_service = MarketMonitorRunService(
                 service,
                 MarketMonitorPipeline(),
@@ -346,6 +374,10 @@ class MarketMonitorRunManager:
             )
             self._sync_manifest(run_id, persistence, recoverable=True)
             raise
+
+    def _forget_future(self, run_id: str) -> None:
+        with self._lock:
+            self._futures.pop(run_id, None)
 
     def _get_run_snapshot(self, run_id: str) -> dict[str, Any]:
         with self._lock:

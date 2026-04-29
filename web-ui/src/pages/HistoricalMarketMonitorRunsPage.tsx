@@ -71,7 +71,11 @@ export function HistoricalMarketMonitorRunsPage() {
   const emptyText = runsQuery.data.length === 0 ? "暂无市场监控历史" : "没有匹配的运行记录";
 
   return (
-    <Card className="page-card" title="市场监控历史">
+    <Card
+      className="page-card"
+      title="市场监控历史"
+      extra={<Button onClick={() => navigate("/monitor/create")}>新建运行</Button>}
+    >
       <Space style={{ width: "100%", marginBottom: 16 }} size={12} wrap>
         <Select<EndpointFilter>
           style={{ minWidth: 200 }}
@@ -126,7 +130,13 @@ export function HistoricalMarketMonitorRunsPage() {
                 <Space direction="vertical" size={8}>
                   <Space wrap>
                     {run.data_freshness ? <Tag>新鲜度 {run.data_freshness}</Tag> : null}
-                    <Tag color={run.degraded ? "warning" : "success"}>{run.degraded ? "存在缺失数据" : "数据状态正常"}</Tag>
+                    {run.status === "pending" || run.status === "running" ? (
+                      <Tag color="processing">后台执行中</Tag>
+                    ) : run.status === "failed" ? (
+                      <Tag color="error">运行失败</Tag>
+                    ) : (
+                      <Tag color={run.degraded ? "warning" : "success"}>{run.degraded ? "存在缺失数据" : "数据状态正常"}</Tag>
+                    )}
                     {run.days ? <Tag>历史 {run.days} 天</Tag> : null}
                   </Space>
                   <Typography.Text type="secondary">

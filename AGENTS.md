@@ -27,6 +27,7 @@ Start the FastAPI backend with the maintained script or the packaged entry point
 .\.venv\Scripts\tradingagents-api.exe
 .\scripts\start_api.ps1 -BindHost 127.0.0.1 -Port 8000 -Reload
 ```
+After startup, open `http://127.0.0.1:8000/docs` for the API docs, or call `GET /api/metadata/options` as a quick health check.
 To bring up the local web stack during development, use:
 ```powershell
 .\scripts\start_web_stack.ps1

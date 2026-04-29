@@ -41,11 +41,11 @@ export function MarketMonitorRunDetailPage() {
   const { runId = "" } = useParams();
   const navigate = useNavigate();
   const runQuery = useMarketMonitorRun(runId);
-  const logsQuery = useMarketMonitorRunLogs(runId);
-  const promptTracesQuery = useMarketMonitorPromptTraces(runId);
+  const run = runQuery.data;
+  const logsQuery = useMarketMonitorRunLogs(runId, run?.status);
+  const promptTracesQuery = useMarketMonitorPromptTraces(runId, run?.status);
   const factSheetArtifactQuery = useMarketMonitorArtifact(runId, "fact_sheet", Boolean(runId));
   const recoverMutation = useRecoverMarketMonitorRun();
-  const run = runQuery.data;
 
   if (runQuery.isLoading) {
     return (
@@ -75,6 +75,7 @@ export function MarketMonitorRunDetailPage() {
     );
   }
 
+  const isActive = run.status === "pending" || run.status === "running";
   const snapshot = run.snapshot;
   const history = run.history;
   const dataStatus = run.data_status;
@@ -137,6 +138,15 @@ export function MarketMonitorRunDetailPage() {
           <Descriptions.Item label="可恢复">{run.recoverable ? "是" : "否"}</Descriptions.Item>
           <Descriptions.Item label="Prompt traces">{run.prompt_traces.length}</Descriptions.Item>
         </Descriptions>
+        {isActive ? (
+          <Alert
+            type="info"
+            showIcon
+            style={{ marginTop: 16 }}
+            message="运行正在后台执行"
+            description="本页会自动刷新阶段、日志、Prompt traces 和最终产物；完成或失败后轮询会停止。"
+          />
+        ) : null}
         {run.error_message ? (
           <Alert type="error" showIcon style={{ marginTop: 16 }} message="运行失败" description={run.error_message} />
         ) : null}
@@ -150,6 +160,9 @@ export function MarketMonitorRunDetailPage() {
 
       <PromptTraceBlock traces={promptTracesQuery.data || run.prompt_traces} />
 
+      {isActive && !snapshot && !history && !dataStatus ? (
+        <Alert type="info" showIcon message="等待最终结果" description="当前可先查看阶段时间线和执行日志。" />
+      ) : null}
 
       {snapshot ? <ExecutionCardBlock card={snapshot.execution_card} /> : null}
 

@@ -544,6 +544,7 @@ export interface MarketMonitorRunRequest {
   days?: number | null;
   force_refresh: boolean;
   mode?: "snapshot" | "history" | "data_status" | null;
+  data_mode?: "daily" | "intraday_delayed" | "intraday_realtime";
   llm_config?: MarketMonitorRunLlmConfig | null;
 }
 
