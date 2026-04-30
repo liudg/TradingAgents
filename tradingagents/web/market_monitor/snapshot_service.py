@@ -2,9 +2,10 @@ from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor
 from datetime import date, timedelta
-from typing import Any
+from typing import Any, Callable
 
-from .data import _expected_market_close_date, build_market_dataset
+from .data import build_market_dataset
+from .trading_calendar import is_us_market_trading_day, resolve_market_monitor_as_of_date
 from .fact_sheet import build_market_fact_sheet
 from .factors import (
     build_event_fact_sheet,
@@ -44,24 +45,26 @@ class MarketMonitorSnapshotService:
         self,
         request: MarketMonitorSnapshotRequest,
         previous_snapshots: list[MarketMonitorSnapshotResponse] | None = None,
+        log: Callable[[str], None] | None = None,
     ) -> MarketMonitorSnapshotResponse:
-        as_of_date = request.as_of_date or date.today()
+        as_of_date = resolve_market_monitor_as_of_date(request.as_of_date, request.data_mode)
+        _log(log, f"开始读取市场数据：美东交易日={as_of_date.isoformat()}，模式={request.data_mode}，force_refresh={str(request.force_refresh).lower()}")
         dataset = build_market_dataset(self._universe, as_of_date, force_refresh=request.force_refresh, data_mode=request.data_mode)
-        return self._build_snapshot(as_of_date, dataset, previous_snapshots=previous_snapshots)
+        return self._build_snapshot(as_of_date, dataset, previous_snapshots=previous_snapshots, log=log)
 
     def get_history(self, request: MarketMonitorHistoryRequest) -> MarketMonitorHistoryResponse:
-        as_of_date = request.as_of_date or date.today()
-        snapshots = self.get_history_snapshots(request)
+        as_of_date = resolve_market_monitor_as_of_date(request.as_of_date, request.data_mode)
+        snapshots = self.get_history_snapshots(request.model_copy(update={"as_of_date": as_of_date}))
         return self.build_history_response(as_of_date, snapshots)
 
     def resolve_history_trade_dates(self, request: MarketMonitorHistoryRequest) -> list[date]:
-        as_of_date = request.as_of_date or date.today()
+        as_of_date = resolve_market_monitor_as_of_date(request.as_of_date, request.data_mode)
         trade_dates: list[date] = []
         cursor = as_of_date
         attempts = 0
         while len(trade_dates) < request.days and attempts < request.days * 3:
             attempts += 1
-            if _expected_market_close_date(cursor).date() != cursor:
+            if not is_us_market_trading_day(cursor):
                 cursor -= timedelta(days=1)
                 continue
             trade_dates.append(cursor)
@@ -74,11 +77,15 @@ class MarketMonitorSnapshotService:
         request: MarketMonitorHistoryRequest,
         trade_dates: list[date] | None = None,
         previous_snapshots: list[MarketMonitorSnapshotResponse] | None = None,
+        log: Callable[[str], None] | None = None,
     ) -> list[MarketMonitorSnapshotResponse]:
         dates_to_build = trade_dates or self.resolve_history_trade_dates(request)
         snapshots: list[MarketMonitorSnapshotResponse] = []
         context = list(previous_snapshots or [])
-        for trade_date in dates_to_build:
+        total = len(dates_to_build)
+        for index, trade_date in enumerate(dates_to_build, start=1):
+            _log(log, f"开始生成历史快照：{index}/{total}，美东交易日={trade_date.isoformat()}")
+            _log(log, f"开始读取市场数据：美东交易日={trade_date.isoformat()}，模式={request.data_mode}，force_refresh={str(request.force_refresh).lower()}")
             dataset = build_market_dataset(
                 self._universe,
                 trade_date,
@@ -86,9 +93,10 @@ class MarketMonitorSnapshotService:
                 include_event_news=False,
                 data_mode=request.data_mode,
             )
-            snapshot = self._build_snapshot(trade_date, dataset, previous_snapshots=context)
+            snapshot = self._build_snapshot(trade_date, dataset, previous_snapshots=context, log=log)
             snapshots.append(snapshot)
             context.append(snapshot)
+            _log(log, f"历史快照生成完成：{index}/{total}，美东交易日={snapshot.as_of_date.isoformat()}")
         snapshots.sort(key=lambda item: item.as_of_date)
         return snapshots
 
@@ -114,10 +122,15 @@ class MarketMonitorSnapshotService:
             ],
         )
 
-    def get_data_status(self, request: MarketMonitorSnapshotRequest) -> MarketMonitorDataStatusResponse:
-        as_of_date = request.as_of_date or date.today()
+    def get_data_status(
+        self,
+        request: MarketMonitorSnapshotRequest,
+        log: Callable[[str], None] | None = None,
+    ) -> MarketMonitorDataStatusResponse:
+        as_of_date = resolve_market_monitor_as_of_date(request.as_of_date, request.data_mode)
+        _log(log, f"开始读取市场数据：美东交易日={as_of_date.isoformat()}，模式={request.data_mode}，force_refresh={str(request.force_refresh).lower()}")
         dataset = build_market_dataset(self._universe, as_of_date, force_refresh=request.force_refresh, data_mode=request.data_mode)
-        snapshot = self._build_snapshot(as_of_date, dataset)
+        snapshot = self._build_snapshot(as_of_date, dataset, log=log)
         return MarketMonitorDataStatusResponse(
             timestamp=snapshot.timestamp,
             as_of_date=snapshot.as_of_date,
@@ -137,7 +150,9 @@ class MarketMonitorSnapshotService:
         dataset: dict[str, Any],
         fact_sheet_override: MarketMonitorFactSheet | None = None,
         previous_snapshots: list[MarketMonitorSnapshotResponse] | None = None,
+        log: Callable[[str], None] | None = None,
     ) -> MarketMonitorSnapshotResponse:
+        _log(log, "开始构建输入特征与事实表")
         bundle = build_input_bundle(
             as_of_date=as_of_date,
             dataset=dataset,
@@ -167,15 +182,30 @@ class MarketMonitorSnapshotService:
             notes=notes,
             event_fact_sheet=event_fact_sheet,
         )
+        _log_data_quality(log, bundle.input_data_status)
+        _log(
+            log,
+            f"事实表构建完成：事件事实 {len(event_fact_sheet)} 条，开放缺口 {len(open_gaps)} 项，缺失数据 {len(bundle.missing_data)} 项",
+        )
 
         long_term_deterministic = build_long_term_card(bundle)
         short_term_deterministic = build_short_term_card(bundle)
         system_risk_deterministic = build_system_risk_card(bundle, event_fact_sheet)
         style_deterministic = build_style_effectiveness(bundle)
+        _log(
+            log,
+            (
+                "确定性评分完成："
+                f"长线={long_term_deterministic.score:.1f}，"
+                f"短线={short_term_deterministic.score:.1f}，"
+                f"系统风险={system_risk_deterministic.score:.1f}，风格层已生成"
+            ),
+        )
 
         def card_inference() -> MarketMonitorCardInferenceService:
             return MarketMonitorCardInferenceService(self._llm_config)
 
+        _log(log, "开始 LLM 推理：长线/短线/系统风险/风格卡并发执行")
         with ThreadPoolExecutor(max_workers=4, thread_name_prefix="market-monitor-card") as executor:
             long_term_future = executor.submit(
                 lambda: card_inference().infer_long_term(
@@ -207,16 +237,22 @@ class MarketMonitorSnapshotService:
             )
 
             system_risk_result = system_risk_future.result()
+            _log_inference_result(log, "系统风险卡", system_risk_result)
             system_risk = system_risk_result.payload
             panic_deterministic = build_panic_card(bundle, system_risk.score, previous_snapshots=previous_snapshots)
+            _log(log, "开始 LLM 推理：恐慌反转卡")
             panic_result = card_inference().infer_panic(
                 fact_sheet,
                 panic_deterministic,
                 lambda: panic_deterministic,
             )
+            _log_inference_result(log, "恐慌反转卡", panic_result)
             long_term_result = long_term_future.result()
+            _log_inference_result(log, "长线环境卡", long_term_result)
             short_term_result = short_term_future.result()
+            _log_inference_result(log, "短线环境卡", short_term_result)
             style_result = style_future.result()
+            _log_inference_result(log, "风格有效性卡", style_result)
 
         long_term = long_term_result.payload
         short_term = short_term_result.payload
@@ -231,6 +267,7 @@ class MarketMonitorSnapshotService:
             panic,
             previous_snapshots=previous_snapshots,
         )
+        _log(log, "开始 LLM 推理：执行建议卡")
         execution_result = self._execution_inference.infer_execution(
             fact_sheet=fact_sheet,
             long_term=long_term,
@@ -241,6 +278,7 @@ class MarketMonitorSnapshotService:
             event_fact_sheet=event_fact_sheet,
             fallback=execution_fallback,
         )
+        _log_inference_result(log, "执行建议卡", execution_result)
         prompt_traces = [
             long_term_result.trace,
             short_term_result.trace,
@@ -249,6 +287,7 @@ class MarketMonitorSnapshotService:
             panic_result.trace,
             execution_result.trace,
         ]
+        _log(log, f"快照组装完成：regime={execution_result.payload.regime_label}，Prompt trace {len(prompt_traces)} 条")
         return MarketMonitorSnapshotResponse(
             model_name=self._inference.runner.llm_config.model,
             timestamp=bundle.timestamp,
@@ -275,3 +314,49 @@ class MarketMonitorSnapshotService:
         if not event_fact_sheet:
             gaps.append("未注入宏观日历、财报日历、政策/地缘与突发新闻搜索事实")
         return gaps
+
+
+def _log(log: Callable[[str], None] | None, message: str) -> None:
+    if log is not None:
+        log(message)
+
+
+def _log_data_quality(log: Callable[[str], None] | None, input_status: Any) -> None:
+    _log(
+        log,
+        (
+            "市场数据读取完成："
+            f"可用核心标的 {len(input_status.core_symbols_available)} 个，"
+            f"缺失 {len(input_status.core_symbols_missing)} 个，"
+            f"陈旧 {len(input_status.stale_symbols)} 个，"
+            f"部分可用 {len(input_status.partial_symbols)} 个"
+        ),
+    )
+    if input_status.core_symbols_missing:
+        _log(log, f"数据质量提示：缺失核心标的 {len(input_status.core_symbols_missing)} 个：{_summarize_symbols(input_status.core_symbols_missing)}")
+    if input_status.stale_symbols:
+        _log(log, f"数据质量提示：陈旧标的 {len(input_status.stale_symbols)} 个：{_summarize_symbols(input_status.stale_symbols)}")
+    if input_status.partial_symbols:
+        _log(log, f"数据质量提示：部分可用标的 {len(input_status.partial_symbols)} 个：{_summarize_symbols(input_status.partial_symbols)}")
+
+
+def _log_inference_result(log: Callable[[str], None] | None, title: str, result: Any) -> None:
+    trace = result.trace
+    parsed = "成功" if trace.parsed_ok else "失败"
+    fallback = "是" if result.used_fallback else "否"
+    latency = f"，耗时={trace.latency_ms}ms" if trace.latency_ms is not None else ""
+    error = f"，错误={_short_error(trace.error)}" if trace.error else ""
+    _log(log, f"LLM 推理完成：{title}，解析={parsed}，fallback={fallback}{latency}{error}")
+
+
+def _summarize_symbols(symbols: list[str], limit: int = 5) -> str:
+    shown = symbols[:limit]
+    suffix = f" 等 {len(symbols)} 个" if len(symbols) > limit else ""
+    return ", ".join(shown) + suffix
+
+
+def _short_error(error: str, limit: int = 200) -> str:
+    compact = " ".join(error.split())
+    if len(compact) <= limit:
+        return compact
+    return compact[:limit].rstrip() + "..."

@@ -14,6 +14,7 @@ from yfinance.exceptions import YFRateLimitError
 from tradingagents.dataflows.yfinance_news import fetch_global_news_articles_yfinance, fetch_ticker_news_articles_yfinance
 from tradingagents.dataflows.yfinance_proxy import get_yf
 from .cache import evaluate_symbol_daily_cache, save_symbol_daily_cache
+from .trading_calendar import expected_market_close_date, is_us_market_trading_day, market_now_eastern
 
 logger = logging.getLogger(__name__)
 
@@ -86,7 +87,7 @@ def _market_data_mode_policy(data_mode: str) -> MarketDataModePolicy:
 
 
 def _market_now_naive() -> datetime:
-    return pd.Timestamp.now(tz="America/New_York").tz_localize(None).to_pydatetime()
+    return market_now_eastern().replace(tzinfo=None)
 
 
 def _intraday_session_is_complete(latest: datetime, policy: MarketDataModePolicy) -> bool:
@@ -277,76 +278,7 @@ def _required_trading_days(lookback_days: int) -> int:
 
 
 def _expected_market_close_date(as_of_date: date) -> pd.Timestamp:
-    target = pd.Timestamp(as_of_date)
-    while not _is_us_market_trading_day(target.date()):
-        target -= pd.Timedelta(days=1)
-    return target
-
-
-def _is_us_market_trading_day(target: date) -> bool:
-    return target.weekday() < 5 and target not in _us_market_holidays(target.year)
-
-
-def _us_market_holidays(year: int) -> set[date]:
-    return {
-        _observed_date(date(year, 1, 1)),
-        _nth_weekday_of_month(year, 1, 0, 3),
-        _nth_weekday_of_month(year, 2, 0, 3),
-        _good_friday(year),
-        _last_weekday_of_month(year, 5, 0),
-        _observed_date(date(year, 6, 19)),
-        _observed_date(date(year, 7, 4)),
-        _nth_weekday_of_month(year, 9, 0, 1),
-        _nth_weekday_of_month(year, 11, 3, 4),
-        _observed_date(date(year, 12, 25)),
-    }
-
-
-def _observed_date(target: date) -> date:
-    if target.weekday() == 5:
-        return target - timedelta(days=1)
-    if target.weekday() == 6:
-        return target + timedelta(days=1)
-    return target
-
-
-def _nth_weekday_of_month(year: int, month: int, weekday: int, occurrence: int) -> date:
-    first_day = date(year, month, 1)
-    day_offset = (weekday - first_day.weekday()) % 7
-    return first_day + timedelta(days=day_offset + (occurrence - 1) * 7)
-
-
-def _last_weekday_of_month(year: int, month: int, weekday: int) -> date:
-    if month == 12:
-        current = date(year + 1, 1, 1) - timedelta(days=1)
-    else:
-        current = date(year, month + 1, 1) - timedelta(days=1)
-    while current.weekday() != weekday:
-        current -= timedelta(days=1)
-    return current
-
-
-def _good_friday(year: int) -> date:
-    easter = _easter_sunday(year)
-    return easter - timedelta(days=2)
-
-
-def _easter_sunday(year: int) -> date:
-    a = year % 19
-    b = year // 100
-    c = year % 100
-    d = b // 4
-    e = b % 4
-    f = (b + 8) // 25
-    g = (b - f + 1) // 3
-    h = (19 * a + b - d - g + 15) % 30
-    i = c // 4
-    k = c % 4
-    l = (32 + 2 * e + 2 * i - h - k) % 7
-    m = (a + 11 * h + 22 * l) // 451
-    month = (h + l - 7 * m + 114) // 31
-    day = ((h + l - 7 * m + 114) % 31) + 1
-    return date(year, month, day)
+    return pd.Timestamp(expected_market_close_date(as_of_date))
 
 
 def _download_single_symbol(symbol: str, as_of_date: date, lookback_days: int) -> pd.DataFrame:
@@ -423,7 +355,7 @@ def _evaluate_intraday_symbol_state(
 
     current = now or _market_now_naive()
     session_complete = _intraday_session_is_complete(latest, policy)
-    if as_of_date == current.date() and _is_us_market_trading_day(as_of_date):
+    if as_of_date == current.date() and is_us_market_trading_day(as_of_date):
         if current.time() < dt_time(16, 0):
             age_minutes = (current - latest).total_seconds() / 60
             if age_minutes > policy.stale_after_minutes:
@@ -438,13 +370,20 @@ def _evaluate_intraday_symbol_state(
     return "refreshed", False, None
 
 
-def _fetch_event_news(universe: dict[str, list[str]], as_of_date: date) -> tuple[list[dict[str, Any]], dict[str, Any]]:
-    generated_at = datetime.now(timezone.utc)
+def _fetch_event_news(
+    universe: dict[str, list[str]],
+    collected_at: datetime | None = None,
+) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    generated_at = collected_at or datetime.now(timezone.utc)
+    if generated_at.tzinfo is None:
+        generated_at = generated_at.replace(tzinfo=timezone.utc)
+    news_end_date = generated_at.date()
+    news_start_date = news_end_date - timedelta(days=NEWS_LOOKBACK_DAYS)
     errors: list[str] = []
     articles: list[dict[str, Any]] = []
     global_news_count = 0
     try:
-        global_articles = fetch_global_news_articles_yfinance(as_of_date.isoformat(), NEWS_LOOKBACK_DAYS, GLOBAL_NEWS_LIMIT)
+        global_articles = fetch_global_news_articles_yfinance(news_end_date.isoformat(), NEWS_LOOKBACK_DAYS, GLOBAL_NEWS_LIMIT)
         global_news_count = len(global_articles)
         articles.extend(global_articles)
     except Exception as exc:
@@ -452,8 +391,8 @@ def _fetch_event_news(universe: dict[str, list[str]], as_of_date: date) -> tuple
         errors.append(f"global_news: {exc}")
 
     ticker_news_count = 0
-    start_date = (as_of_date - timedelta(days=NEWS_LOOKBACK_DAYS)).isoformat()
-    end_date = as_of_date.isoformat()
+    start_date = news_start_date.isoformat()
+    end_date = news_end_date.isoformat()
     monitored_symbols = set(universe["core_index_etfs"] + ["^VIX", "LQD", "JNK"])
     news_symbols = [symbol for symbol in MARKET_EVENT_NEWS_SYMBOLS if symbol in monitored_symbols]
     for symbol in news_symbols:
@@ -469,6 +408,8 @@ def _fetch_event_news(universe: dict[str, list[str]], as_of_date: date) -> tuple
     return candidates, {
         "source": "yfinance_news",
         "generated_at": generated_at.isoformat(),
+        "news_window_start": start_date,
+        "news_window_end": end_date,
         "global_news_count": global_news_count,
         "ticker_news_count": ticker_news_count,
         "event_fact_candidate_count": len(candidates),
@@ -587,7 +528,7 @@ def build_market_dataset(
     else:
         core, cache_summary = fetch_intraday_history(core_and_sector, as_of_date, policy.data_mode, force_refresh=force_refresh)
     if include_event_news:
-        event_fact_candidates, search_status = _fetch_event_news(universe, as_of_date)
+        event_fact_candidates, search_status = _fetch_event_news(universe)
     else:
         event_fact_candidates = []
         search_status = {

@@ -41,6 +41,7 @@ def _system_prompt(card_name: str, required_fields: str) -> str:
         "若没有事件事实，不得虚构宏观日历、财报、政策或地缘事件。"
         "score_adjustment 必须为 null，除非它引用 event_fact_sheet 中有效且未过期的 event_id；默认幅度必须在 ±5 内，source_event_ids 不得为空，expires_at 不得晚于来源事件过期时间，并写明 confidence。"
         "输出必须保留 deterministic_card 的结构和基础分，只允许补充 reasoning_summary、key_drivers、risks、evidence、confidence，并在规则允许范围内调整最终 score。"
+        "key_drivers 与 risks 必须是字符串数组，不得返回对象数组。"
         f"输出字段必须包含: {required_fields}。"
     )
 

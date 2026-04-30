@@ -10,6 +10,7 @@ from urllib.parse import urlparse
 import pandas as pd
 
 from .data import _expected_market_close_date
+from .trading_calendar import latest_complete_us_trading_day
 from .indicators import (
     _column_series,
     atr_percent,
@@ -95,10 +96,10 @@ def build_input_bundle(
                 core_empty_symbols.append(symbol)
         if item.get("partial") and symbol in core_required:
             partial_from_summary.append(symbol)
-    today = date.today()
+    latest_complete = latest_complete_us_trading_day()
     expected_close = _expected_market_close_date(as_of_date).date()
     if data_mode == "daily":
-        data_freshness = "daily_final" if as_of_date < today else "daily_partial"
+        data_freshness = "daily_final" if as_of_date <= latest_complete else "daily_partial"
         if expected_close < as_of_date:
             data_freshness = "previous_trading_day"
         partial_symbols = [] if data_freshness != "daily_partial" else available

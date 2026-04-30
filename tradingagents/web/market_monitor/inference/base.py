@@ -23,6 +23,83 @@ class InferenceResult(Generic[T]):
     used_fallback: bool = False
 
 
+def normalize_reasoning_updates(payload: dict[str, Any]) -> dict[str, Any]:
+    updates: dict[str, Any] = {}
+    if isinstance(payload.get("reasoning_summary"), str):
+        updates["reasoning_summary"] = payload["reasoning_summary"]
+    for field in ("key_drivers", "risks"):
+        values = _normalize_string_list(payload.get(field))
+        if values is not None:
+            updates[field] = values
+    evidence = _normalize_evidence_refs(payload.get("evidence"))
+    if evidence is not None:
+        updates["evidence"] = evidence
+    if "confidence" in payload:
+        try:
+            updates["confidence"] = round(max(0.0, min(1.0, float(payload["confidence"]))), 2)
+        except (TypeError, ValueError):
+            pass
+    return updates
+
+
+def _normalize_string_list(value: Any) -> list[str] | None:
+    if isinstance(value, list):
+        values = [_normalize_string_item(item) for item in value]
+        return [item for item in values if item]
+    if isinstance(value, str) and value.strip():
+        return [value.strip()]
+    return None
+
+
+def _normalize_string_item(value: Any) -> str | None:
+    if isinstance(value, dict):
+        for key in ("risk", "driver", "summary", "reason", "text", "label", "name"):
+            item = value.get(key)
+            if isinstance(item, str) and item.strip():
+                return item.strip()
+    text = str(value).strip()
+    return text or None
+
+
+def _normalize_evidence_refs(value: Any) -> list[dict[str, Any]] | None:
+    if not isinstance(value, list):
+        return None
+    refs = []
+    for item in value:
+        if not isinstance(item, dict):
+            continue
+        source_type = _string_or_none(item.get("source_type") or item.get("type") or item.get("source"))
+        source_label = _string_or_none(
+            item.get("source_label")
+            or item.get("source_name")
+            or item.get("label")
+            or item.get("name")
+            or item.get("id")
+            or item.get("factor")
+            or item.get("metric")
+        )
+        if not source_type or not source_label:
+            continue
+        ref: dict[str, Any] = {
+            "source_type": source_type,
+            "source_label": source_label,
+            "snippet": _string_or_none(item.get("snippet") or item.get("summary") or item.get("reason")),
+            "timestamp": item.get("timestamp") or item.get("observed_at"),
+            "confidence": item.get("confidence"),
+        }
+        if isinstance(item.get("metadata"), dict):
+            ref["metadata"] = item["metadata"]
+        refs.append(ref)
+    return refs
+
+
+def _string_or_none(value: Any) -> str | None:
+    if value is None:
+        return None
+    text = str(value).strip()
+    return text or None
+
+
 class MarketMonitorInferenceRunner:
     def __init__(self, llm_config: MarketMonitorRunLlmConfig | None = None) -> None:
         config = llm_config or MarketMonitorRunLlmConfig(

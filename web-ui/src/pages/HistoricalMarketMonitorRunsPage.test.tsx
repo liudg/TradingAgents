@@ -86,6 +86,7 @@ describe("HistoricalMarketMonitorRunsPage", () => {
     );
 
     expect(screen.getByText("市场监控历史")).toBeInTheDocument();
+    expect(screen.getByPlaceholderText("按美东交易日筛选")).toBeInTheDocument();
     expect(screen.getByText("黄绿灯-Swing")).toBeInTheDocument();
     expect(screen.queryByText("历史 20 天")).not.toBeInTheDocument();
 

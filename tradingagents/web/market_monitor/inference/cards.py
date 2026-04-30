@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Callable
+from typing import Any, Callable
 
 from tradingagents.web.market_monitor.indicators import bounded_score
 from tradingagents.web.market_monitor.prompts import (
@@ -23,7 +23,7 @@ from tradingagents.web.market_monitor.schemas import (
     MarketMonitorSystemRiskCard,
 )
 
-from .base import InferenceResult, MarketMonitorInferenceRunner
+from .base import InferenceResult, MarketMonitorInferenceRunner, normalize_reasoning_updates
 
 
 class MarketMonitorCardInferenceService:
@@ -43,7 +43,7 @@ class MarketMonitorCardInferenceService:
             system_prompt=system_prompt,
             user_prompt=user_prompt,
             input_summary=input_summary,
-            parser=lambda payload: _enforce_score_card(MarketMonitorScoreCard.model_validate(payload), deterministic_card, fact_sheet),
+            parser=lambda payload: _parse_score_card(payload, deterministic_card, fact_sheet),
             fallback=fallback,
         )
 
@@ -60,7 +60,7 @@ class MarketMonitorCardInferenceService:
             system_prompt=system_prompt,
             user_prompt=user_prompt,
             input_summary=input_summary,
-            parser=lambda payload: _enforce_score_card(MarketMonitorScoreCard.model_validate(payload), deterministic_card, fact_sheet),
+            parser=lambda payload: _parse_score_card(payload, deterministic_card, fact_sheet),
             fallback=fallback,
         )
 
@@ -77,7 +77,7 @@ class MarketMonitorCardInferenceService:
             system_prompt=system_prompt,
             user_prompt=user_prompt,
             input_summary=input_summary,
-            parser=lambda payload: _enforce_system_risk_card(MarketMonitorSystemRiskCard.model_validate(payload), deterministic_card, fact_sheet),
+            parser=lambda payload: _parse_system_risk_card(payload, deterministic_card, fact_sheet),
             fallback=fallback,
         )
 
@@ -94,7 +94,7 @@ class MarketMonitorCardInferenceService:
             system_prompt=system_prompt,
             user_prompt=user_prompt,
             input_summary=input_summary,
-            parser=lambda payload: _enforce_style_card(MarketMonitorStyleEffectiveness.model_validate(payload), deterministic_card),
+            parser=lambda payload: _parse_style_card(payload, deterministic_card),
             fallback=fallback,
         )
 
@@ -131,6 +131,62 @@ class MarketMonitorCardInferenceService:
             parser=lambda payload: _enforce_panic_card(MarketMonitorPanicCard.model_validate(payload), deterministic_card),
             fallback=fallback,
         )
+
+
+def _parse_score_card(
+    payload: dict[str, Any],
+    deterministic_card: MarketMonitorScoreCard,
+    fact_sheet: MarketMonitorFactSheet,
+) -> MarketMonitorScoreCard:
+    candidate = deterministic_card.model_dump(mode="json")
+    candidate.update(normalize_reasoning_updates(payload))
+    if "score_adjustment" in payload:
+        candidate["score_adjustment"] = _normalize_score_adjustment(payload.get("score_adjustment"))
+    card = MarketMonitorScoreCard.model_validate(candidate)
+    return _enforce_score_card(card, deterministic_card, fact_sheet)
+
+
+def _parse_system_risk_card(
+    payload: dict[str, Any],
+    deterministic_card: MarketMonitorSystemRiskCard,
+    fact_sheet: MarketMonitorFactSheet,
+) -> MarketMonitorSystemRiskCard:
+    candidate = deterministic_card.model_dump(mode="json")
+    candidate.update(normalize_reasoning_updates(payload))
+    if "score_adjustment" in payload:
+        candidate["score_adjustment"] = _normalize_score_adjustment(payload.get("score_adjustment"))
+    card = MarketMonitorSystemRiskCard.model_validate(candidate)
+    return _enforce_system_risk_card(card, deterministic_card, fact_sheet)
+
+
+def _parse_style_card(
+    payload: dict[str, Any],
+    deterministic_card: MarketMonitorStyleEffectiveness,
+) -> MarketMonitorStyleEffectiveness:
+    candidate = deterministic_card.model_dump(mode="json")
+    candidate.update(normalize_reasoning_updates(payload))
+    card = MarketMonitorStyleEffectiveness.model_validate(candidate)
+    return _enforce_style_card(card, deterministic_card)
+
+
+def _normalize_score_adjustment(raw: Any) -> dict[str, Any] | None:
+    if not isinstance(raw, dict):
+        return None
+    candidate = dict(raw)
+    if "value" not in candidate and "adjustment" in candidate:
+        candidate["value"] = candidate["adjustment"]
+    if "direction" not in candidate:
+        try:
+            value = float(candidate.get("value"))
+        except (TypeError, ValueError):
+            return None
+        candidate["direction"] = "up" if value > 0 else "down" if value < 0 else "flat"
+    if isinstance(candidate.get("source_event_ids"), str):
+        candidate["source_event_ids"] = [candidate["source_event_ids"]]
+    try:
+        return MarketMonitorScoreAdjustment.model_validate(candidate).model_dump(mode="json")
+    except ValueError:
+        return None
 
 
 def _enforce_score_card(

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import time
 import traceback
 from concurrent.futures import Future, ThreadPoolExecutor
 from datetime import date, datetime
@@ -28,6 +29,7 @@ from tradingagents.web.market_monitor.schemas import (
 )
 from tradingagents.web.market_monitor.service import MarketMonitorRunService
 from tradingagents.web.market_monitor.snapshot_service import MarketMonitorSnapshotService
+from tradingagents.web.market_monitor.trading_calendar import resolve_market_monitor_as_of_date
 from tradingagents.web.schemas import AnalysisJobLogEntry, JobStatus
 
 
@@ -89,12 +91,17 @@ class MarketMonitorRunManager:
         return self.create_run(run_request)
 
     def create_run(self, request: MarketMonitorRunRequest) -> HistoricalMarketMonitorRunDetail:
+        request = self._resolve_request_as_of_date(request)
         run_id, _, _, _ = self._prepare_run(request)
         future = self._executor.submit(self._execute_prepared_run, request, run_id)
         with self._lock:
             self._futures[run_id] = future
         future.add_done_callback(lambda _: self._forget_future(run_id))
         return self.get_historical_run(run_id)
+
+    def _resolve_request_as_of_date(self, request: MarketMonitorRunRequest) -> MarketMonitorRunRequest:
+        as_of_date = resolve_market_monitor_as_of_date(request.as_of_date, request.data_mode)
+        return request.model_copy(update={"as_of_date": as_of_date})
 
     def _resolve_service(self, request: MarketMonitorRunRequest) -> MarketMonitorSnapshotService:
         if request.llm_config is not None:
@@ -134,6 +141,15 @@ class MarketMonitorRunManager:
             entries.append(AnalysisJobManager._parse_job_log_line(line_no, raw_line))
         return entries
 
+    def _append_run_log(self, log_path: Path, message: str, level: str = "System") -> None:
+        AnalysisJobManager._append_job_log(log_path, level, message)
+
+    def _append_run_warning(self, log_path: Path, message: str) -> None:
+        self._append_run_log(log_path, message, "Warning")
+
+    def _append_run_error(self, log_path: Path, message: str) -> None:
+        self._append_run_log(log_path, message, "Error")
+
     def list_prompt_traces(self, run_id: str) -> list[MarketMonitorPromptTrace]:
         snapshot = self._get_run_snapshot(run_id)
         traces = snapshot.get("prompt_traces")
@@ -160,7 +176,7 @@ class MarketMonitorRunManager:
         manifest: MarketMonitorRunManifest | None = snapshot.get("manifest")
         if manifest is None or not manifest.recoverable:
             raise ValueError("Market monitor run is not recoverable")
-        request: MarketMonitorRunRequest = snapshot["request"]
+        request: MarketMonitorRunRequest = self._resolve_request_as_of_date(snapshot["request"])
         persistence = MarketMonitorPersistence(Path(snapshot["results_dir"]))
         log_path = Path(snapshot["log_path"])
         reset_stages = [MarketMonitorStageResult(stage_name=stage.stage_name) for stage in manifest.stage_results]
@@ -178,7 +194,7 @@ class MarketMonitorRunManager:
             prompt_traces=[],
         )
         self._sync_manifest(run_id, persistence)
-        AnalysisJobManager._append_job_log(log_path, "System", f"Recovering market monitor run {run_id}")
+        self._append_run_log(log_path, f"恢复运行已提交：run_id={run_id}")
         future = self._executor.submit(self._execute_prepared_run, request, run_id)
         with self._lock:
             self._futures[run_id] = future
@@ -196,6 +212,7 @@ class MarketMonitorRunManager:
         MarketMonitorHistoryResponse | None,
         MarketMonitorDataStatusResponse | None,
     ]:
+        request = self._resolve_request_as_of_date(request)
         run_id, _, _, _ = self._prepare_run(request, existing_run_id=existing_run_id, results_dir=results_dir, start_immediately=True)
         return self._execute_prepared_run(request, run_id)
 
@@ -206,8 +223,9 @@ class MarketMonitorRunManager:
         results_dir: Path | None = None,
         start_immediately: bool = False,
     ) -> tuple[str, date, Path, Path]:
+        request = self._resolve_request_as_of_date(request)
         run_id = existing_run_id or uuid4().hex
-        as_of_date = request.as_of_date or date.today()
+        as_of_date = request.as_of_date
         if existing_run_id is not None:
             snapshot = self._get_run_snapshot(existing_run_id)
             actual_results_dir = results_dir or Path(snapshot["results_dir"])
@@ -278,42 +296,67 @@ class MarketMonitorRunManager:
         persistence = MarketMonitorPersistence(actual_results_dir)
         persistence.ensure_layout()
         log_path = Path(snapshot["log_path"])
-        as_of_date = request.as_of_date or date.today()
+        request = self._resolve_request_as_of_date(request)
+        as_of_date = request.as_of_date
+        self._update_run(run_id, request=request)
+        started_perf = time.perf_counter()
         if snapshot.get("status") != JobStatus.RUNNING:
             self._update_run(run_id, status=JobStatus.RUNNING, started_at=datetime.now(), error_message=None, finished_at=None)
         self._set_stage_status(run_id, persistence, "request_received", "completed")
         self._sync_manifest(run_id, persistence)
-        AnalysisJobManager._append_job_log(
+        self._append_run_log(
             log_path,
-            "System",
             (
-                f"Market monitor run {run_id} started: endpoint={request.trigger_endpoint}, "
-                f"as_of_date={as_of_date.isoformat()}, days={request.days or 20}, "
-                f"force_refresh={request.force_refresh}, data_mode={request.data_mode}"
+                f"运行已开始：入口={request.trigger_endpoint}，美东交易日={as_of_date.isoformat()}，"
+                f"历史天数={request.days or 20}，force_refresh={str(request.force_refresh).lower()}，数据模式={request.data_mode}"
             ),
         )
         try:
             service = self._resolve_service(request)
+            llm_config = request.llm_config
+            provider = llm_config.provider if llm_config and llm_config.provider else DEFAULT_CONFIG["llm_provider"]
+            model = llm_config.model if llm_config and llm_config.model else DEFAULT_CONFIG["deep_think_llm"]
+            effort = llm_config.reasoning_effort if llm_config and llm_config.reasoning_effort else "默认"
+            source = "请求配置" if llm_config is not None else "默认配置"
+            self._append_run_log(log_path, f"已初始化市场监控服务：配置来源={source}，provider={provider}，model={model}，reasoning_effort={effort}")
             run_service = MarketMonitorRunService(
                 service,
                 MarketMonitorPipeline(),
             )
+            self._append_run_log(log_path, "阶段开始：生成市场监控产物")
             self._set_stage_status(run_id, persistence, "artifact_generation", "running")
             if request.trigger_endpoint == "history":
+                self._append_run_log(log_path, "阶段开始：历史回放日期解析与快照生成")
                 self._set_stage_status(run_id, persistence, "history_materialization", "running")
             previous_snapshots = self._previous_completed_snapshots(as_of_date, exclude_run_id=run_id)
-            execution = run_service.execute(request, run_id, previous_snapshots=previous_snapshots)
+            self._append_run_log(log_path, f"已加载历史上下文：可用快照 {len(previous_snapshots)} 条")
+            execution = run_service.execute(
+                request,
+                run_id,
+                previous_snapshots=previous_snapshots,
+                log=lambda message: self._append_run_log(log_path, message),
+            )
             if execution.snapshot is not None:
-                AnalysisJobManager._append_job_log(log_path, "System", "Building snapshot payload")
+                self._append_run_log(log_path, "开始写入单日快照产物")
                 if execution.fact_sheet is not None:
                     persistence.write_fact_sheet_artifact(execution.fact_sheet)
+                    self._append_run_log(log_path, "事实表产物写入完成")
                 for trace in execution.prompt_traces:
                     persistence.write_prompt_trace(f"{trace.stage}_{trace.card_type or 'general'}", trace)
+                self._append_run_log(log_path, f"Prompt trace 写入完成：{len(execution.prompt_traces)} 条")
                 persistence.write_snapshot_artifact(execution.snapshot)
-                AnalysisJobManager._append_job_log(log_path, "System", "Snapshot payload ready")
+                self._append_run_log(
+                    log_path,
+                    (
+                        "快照产物写入完成："
+                        f"Prompt trace {len(execution.prompt_traces)} 条，"
+                        f"缺失数据 {len(execution.snapshot.missing_data)} 项，"
+                        f"开放缺口 {len(execution.snapshot.fact_sheet.open_gaps if execution.snapshot.fact_sheet else [])} 项"
+                    ),
+                )
             elif execution.history is not None:
-                AnalysisJobManager._append_job_log(log_path, "System", "Building history payload")
-                for history_snapshot in execution.history_snapshots:
+                self._append_run_log(log_path, "开始写入历史回放产物")
+                for index, history_snapshot in enumerate(execution.history_snapshots, start=1):
                     suffix = history_snapshot.as_of_date.isoformat()
                     persistence.write_artifact_payload(
                         f"history_snapshot_{suffix}",
@@ -326,25 +369,33 @@ class MarketMonitorRunManager:
                         )
                     for trace in history_snapshot.prompt_traces:
                         persistence.write_prompt_trace(f"history_{suffix}_{trace.card_type or trace.stage}", trace)
-                    AnalysisJobManager._append_job_log(log_path, "System", f"History replay materialized for {suffix}")
+                    self._append_run_log(
+                        log_path,
+                        f"历史快照已落盘：{index}/{len(execution.history_snapshots)}，美东交易日={suffix}，Prompt trace {len(history_snapshot.prompt_traces)} 条，缺失数据 {len(history_snapshot.missing_data)} 项",
+                    )
                 persistence.write_history_artifact(execution.history)
                 self._set_stage_status(run_id, persistence, "history_materialization", "completed")
-                AnalysisJobManager._append_job_log(
-                    log_path,
-                    "System",
-                    f"History payload ready with {len(execution.history.points)} points",
-                )
+                self._append_run_log(log_path, "阶段完成：历史回放产物写入")
+                self._append_run_log(log_path, f"历史产物写入完成：点位 {len(execution.history.points)} 个，历史快照 {len(execution.history_snapshots)} 个")
             elif execution.data_status is not None:
-                AnalysisJobManager._append_job_log(log_path, "System", "Building data status payload")
+                self._append_run_log(log_path, "开始写入数据状态产物")
                 if execution.fact_sheet is not None:
                     persistence.write_fact_sheet_artifact(execution.fact_sheet)
+                    self._append_run_log(log_path, "事实表产物写入完成")
                 persistence.write_data_status_artifact(execution.data_status)
-                AnalysisJobManager._append_job_log(
+                self._append_run_log(
                     log_path,
-                    "System",
-                    f"Data status payload ready with {len(execution.data_status.open_gaps)} open gaps",
+                    (
+                        "数据状态产物写入完成："
+                        f"缺失数据 {len(execution.data_status.missing_data)} 项，"
+                        f"开放缺口 {len(execution.data_status.open_gaps)} 项，"
+                        f"风险提示 {len(execution.data_status.risks)} 项"
+                    ),
                 )
             self._set_stage_status(run_id, persistence, "artifact_generation", "completed")
+            self._append_run_log(log_path, "阶段完成：生成市场监控产物")
+            elapsed_ms = int((time.perf_counter() - started_perf) * 1000)
+            self._append_run_log(log_path, f"运行已完成：状态=completed，总耗时={elapsed_ms}ms")
             self._update_run(
                 run_id,
                 status=JobStatus.COMPLETED,
@@ -361,11 +412,9 @@ class MarketMonitorRunManager:
             if request.trigger_endpoint == "history":
                 self._set_stage_status(run_id, persistence, "history_materialization", "failed", error=str(exc))
             self._set_stage_status(run_id, persistence, "artifact_generation", "failed", error=str(exc))
-            AnalysisJobManager._append_job_log(
-                log_path,
-                "Error",
-                f"{type(exc).__name__}: {exc}\n{traceback.format_exc()}",
-            )
+            elapsed_ms = int((time.perf_counter() - started_perf) * 1000)
+            self._append_run_error(log_path, f"运行失败：{type(exc).__name__}: {exc}，耗时={elapsed_ms}ms")
+            self._append_run_error(log_path, traceback.format_exc())
             self._update_run(
                 run_id,
                 status=JobStatus.FAILED,

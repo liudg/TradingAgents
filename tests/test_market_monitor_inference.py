@@ -1,3 +1,4 @@
+import json
 import unittest
 
 from tests.market_monitor_v231_fixtures import (
@@ -60,6 +61,33 @@ class MarketMonitorInferenceTests(unittest.TestCase):
         self.assertFalse(result.used_fallback)
         self.assertTrue(result.trace.parsed_ok)
         self.assertEqual(result.trace.card_type, "long_term")
+
+    def test_score_adjustment_accepts_adjustment_alias_and_derives_direction(self) -> None:
+        deterministic = fixture_score_card(deterministic_score=67.5, score=67.5)
+        payload = deterministic.model_dump(mode="json") | {
+            "score_adjustment": {
+                "adjustment": -2.0,
+                "reason": "事件事实支持下调风险偏好。",
+                "source_event_ids": ["event-1"],
+                "confidence": 0.68,
+            }
+        }
+        with patch(
+            "tradingagents.web.market_monitor.inference.base.create_llm_client",
+            return_value=type("_FakeClient", (), {"get_llm": lambda self: _FakeLlm(json.dumps(payload, ensure_ascii=False))})(),
+        ):
+            service = MarketMonitorCardInferenceService()
+            result = service.infer_long_term(
+                fixture_fact_sheet(),
+                deterministic,
+                fallback=lambda: deterministic,
+            )
+
+        self.assertFalse(result.used_fallback)
+        self.assertTrue(result.trace.parsed_ok)
+        self.assertEqual(result.payload.score, 65.5)
+        self.assertEqual(result.payload.score_adjustment.value, -2.0)
+        self.assertEqual(result.payload.score_adjustment.direction, "down")
 
     def test_score_adjustment_is_dropped_without_valid_event_reference(self) -> None:
         deterministic = fixture_score_card(deterministic_score=67.5, score=67.5)
@@ -197,6 +225,35 @@ class MarketMonitorInferenceTests(unittest.TestCase):
         self.assertEqual(result.payload.asset_layer.preferred_assets, ["防御板块", "能源/周期"])
         self.assertEqual(result.payload.reasoning_summary, "LLM 只能解释风格，不能改写规则层。")
         self.assertEqual(result.trace.card_type, "style")
+
+    def test_style_inference_accepts_object_risks(self) -> None:
+        deterministic = fixture_style_effectiveness()
+        payload = deterministic.model_dump(mode="json") | {
+            "risks": [
+                {"risk": "指数处于高位，突破策略容易承受回撤。", "evidence": ["SPY 20d=9.42%"]},
+                {"risk": "AI/半导体相关事件可能放大成长风格波动。"},
+            ]
+        }
+        with patch(
+            "tradingagents.web.market_monitor.inference.base.create_llm_client",
+            return_value=type("_FakeClient", (), {"get_llm": lambda self: _FakeLlm(json.dumps(payload, ensure_ascii=False))})(),
+        ):
+            service = MarketMonitorCardInferenceService()
+            result = service.infer_style(
+                fixture_fact_sheet(),
+                deterministic,
+                fallback=lambda: deterministic,
+            )
+
+        self.assertFalse(result.used_fallback)
+        self.assertTrue(result.trace.parsed_ok)
+        self.assertEqual(
+            result.payload.risks,
+            [
+                "指数处于高位，突破策略容易承受回撤。",
+                "AI/半导体相关事件可能放大成长风格波动。",
+            ],
+        )
 
     def test_panic_inference_falls_back_when_json_invalid(self) -> None:
         deterministic = fixture_panic_card()

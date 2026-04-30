@@ -1,5 +1,6 @@
 import unittest
-from datetime import date
+from datetime import date, datetime
+from zoneinfo import ZoneInfo
 from typing import Any
 from unittest.mock import patch
 
@@ -30,6 +31,7 @@ from tradingagents.web.market_monitor.schemas import (
     MarketMonitorSnapshotRequest,
 )
 from tradingagents.web.market_monitor.snapshot_service import MarketMonitorSnapshotService
+from tradingagents.web.market_monitor.trading_calendar import latest_complete_us_trading_day
 from tradingagents.web.market_monitor.universe import get_market_monitor_universe
 
 
@@ -126,6 +128,21 @@ def _factor_map(factors):
 
 
 class MarketMonitorRulesTests(unittest.TestCase):
+    def test_latest_complete_trading_day_uses_eastern_close(self) -> None:
+        eastern = ZoneInfo("America/New_York")
+        self.assertEqual(
+            latest_complete_us_trading_day(datetime(2026, 4, 30, 10, 30, tzinfo=eastern)),
+            date(2026, 4, 29),
+        )
+        self.assertEqual(
+            latest_complete_us_trading_day(datetime(2026, 4, 30, 16, 1, tzinfo=eastern)),
+            date(2026, 4, 30),
+        )
+        self.assertEqual(
+            latest_complete_us_trading_day(datetime(2026, 4, 4, 12, 0, tzinfo=eastern)),
+            date(2026, 4, 2),
+        )
+
     def test_symbol_cache_requires_requested_trading_day(self) -> None:
         self.assertEqual(_expected_market_close_date(date(2026, 4, 12)), pd.Timestamp("2026-04-10"))
         self.assertEqual(_expected_market_close_date(date(2026, 4, 3)), pd.Timestamp("2026-04-02"))

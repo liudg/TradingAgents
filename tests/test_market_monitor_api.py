@@ -90,6 +90,25 @@ class MarketMonitorApiTests(unittest.TestCase):
         self.assertEqual(response_payload["input_data_status"]["includes_prepost"], includes_prepost)
         self.assertEqual(service_mock.call_args.args[0].data_mode, data_mode)
 
+    def test_snapshot_api_resolves_default_as_of_date_to_latest_complete_us_trading_day(self) -> None:
+        resolved_date = date(2026, 4, 29)
+        snapshot = self._build_snapshot().model_copy(update={"as_of_date": resolved_date})
+        with patch(
+            "tradingagents.web.market_monitor.manager.resolve_market_monitor_as_of_date",
+            return_value=resolved_date,
+        ), patch.object(market_monitor_manager.service, "get_snapshot", return_value=snapshot) as service_mock:
+            response = self.client.get("/api/market-monitor/snapshot")
+            self.assertEqual(response.status_code, 200)
+            start_payload = response.json()
+            self.assertEqual(start_payload["as_of_date"], "2026-04-29")
+            detail_payload = self._wait_for_run(start_payload["run_id"])
+
+        request = service_mock.call_args.args[0]
+        self.assertEqual(request.as_of_date, resolved_date)
+        self.assertEqual(detail_payload["request"]["as_of_date"], "2026-04-29")
+        self.assertIn("2026-04-29", detail_payload["results_dir"])
+        self.assertEqual(detail_payload["manifest"]["request"]["as_of_date"], "2026-04-29")
+
     def test_snapshot_api_starts_background_run_and_persists_v231_payload(self) -> None:
         snapshot = self._build_snapshot()
         with patch.object(market_monitor_manager.service, "get_snapshot", return_value=snapshot):
@@ -123,7 +142,12 @@ class MarketMonitorApiTests(unittest.TestCase):
         self.assertEqual(len(detail_payload["stage_results"]), 2)
 
         logs_payload = self.client.get(f"/api/market-monitor/runs/{run_id}/logs").json()
-        self.assertTrue(any("Market monitor run" in item["content"] for item in logs_payload))
+        log_contents = [item["content"] for item in logs_payload]
+        self.assertTrue(any("运行已开始" in content for content in log_contents))
+        self.assertTrue(any("已加载历史上下文" in content for content in log_contents))
+        self.assertTrue(any("开始生成单日快照" in content for content in log_contents))
+        self.assertTrue(any("快照产物写入完成" in content for content in log_contents))
+        self.assertTrue(any("运行已完成" in content for content in log_contents))
 
         traces_payload = self.client.get(f"/api/market-monitor/runs/{run_id}/prompt-traces").json()
         self.assertEqual(traces_payload[0]["card_type"], "long_term")
@@ -175,6 +199,11 @@ class MarketMonitorApiTests(unittest.TestCase):
         artifact_response = self.client.get(f"/api/market-monitor/runs/{run_id}/artifacts/history_snapshot_2026-04-10")
         self.assertEqual(artifact_response.status_code, 200)
         self.assertEqual(artifact_response.json()["as_of_date"], "2026-04-10")
+        logs_payload = self.client.get(f"/api/market-monitor/runs/{run_id}/logs").json()
+        log_contents = [item["content"] for item in logs_payload]
+        self.assertTrue(any("历史回放日期已解析" in content for content in log_contents))
+        self.assertTrue(any("历史快照已落盘" in content for content in log_contents))
+        self.assertTrue(any("历史产物写入完成" in content for content in log_contents))
 
     def test_history_run_can_be_recovered_from_interrupted_manifest(self) -> None:
         run_id = "run-recover-history"
@@ -260,6 +289,10 @@ class MarketMonitorApiTests(unittest.TestCase):
         self.assertIn("缺少交易所级 breadth 原始数据", payload["open_gaps"])
         self.assertEqual(payload["event_fact_sheet"][0]["event_id"], payload["fact_sheet"]["event_fact_sheet"][0]["event_id"])
         self.assertIsNotNone(payload["fact_sheet"])
+        logs_payload = self.client.get(f"/api/market-monitor/runs/{detail['run_id']}/logs").json()
+        log_contents = [item["content"] for item in logs_payload]
+        self.assertTrue(any("开始生成数据状态" in content for content in log_contents))
+        self.assertTrue(any("数据状态产物写入完成" in content for content in log_contents))
 
     def test_snapshot_api_accepts_intraday_data_modes(self) -> None:
         for data_mode, interval, includes_prepost in (

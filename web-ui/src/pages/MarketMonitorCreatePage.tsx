@@ -88,7 +88,7 @@ export function MarketMonitorCreatePage() {
             </Form.Item>
           </Col>
           <Col xs={24} md={8}>
-            <Form.Item label="交易日" name="as_of_date">
+            <Form.Item label="美东交易日" name="as_of_date" extra="留空则使用最近完整美股交易日">
               <DatePicker style={{ width: "100%" }} disabledDate={(current) => (current ? current > dayjs().endOf("day") : false)} />
             </Form.Item>
           </Col>

@@ -314,7 +314,7 @@ export function FactSheetBlock(props: { factSheet?: MarketMonitorFactSheet | nul
   return (
     <Card className="page-card" title="Fact Sheet">
       <Descriptions bordered size="small" column={1}>
-        <Descriptions.Item label="交易日">{props.factSheet.as_of_date}</Descriptions.Item>
+        <Descriptions.Item label="美东交易日">{props.factSheet.as_of_date}</Descriptions.Item>
         <Descriptions.Item label="生成时间">{props.factSheet.generated_at}</Descriptions.Item>
         <Descriptions.Item label="Open gaps">{props.factSheet.open_gaps.join("、") || "无"}</Descriptions.Item>
         <Descriptions.Item label="Notes">{props.factSheet.notes.join("、") || "无"}</Descriptions.Item>

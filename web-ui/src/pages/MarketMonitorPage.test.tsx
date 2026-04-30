@@ -292,6 +292,7 @@ describe("MarketMonitorPage", () => {
     expect(screen.getByText("生成市场监控")).toBeInTheDocument();
     expect(screen.getByText("查看本次运行详情")).toBeInTheDocument();
     expect(screen.queryByText(/^刷新$/)).not.toBeInTheDocument();
+    expect(screen.getByText("美东交易日 2026-04-11")).toBeInTheDocument();
     expect(screen.getByText("Prompt market-monitor-scorecard-2026-04-v2.3.1")).toBeInTheDocument();
     expect(screen.getByText("Model test-model")).toBeInTheDocument();
     expect(screen.getAllByText("广度因子使用 ETF 代理池近似").length).toBeGreaterThan(0);

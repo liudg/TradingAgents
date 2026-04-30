@@ -8,6 +8,7 @@ from tradingagents.dataflows.yfinance_news import fetch_global_news_articles_yfi
 from tradingagents.web.market_monitor.data import (
     _download_single_symbol,
     _evaluate_intraday_symbol_state,
+    _fetch_event_news,
     _get_symbol_history,
     _market_data_mode_policy,
     _required_trading_days,
@@ -118,6 +119,25 @@ class MarketMonitorDataTests(unittest.TestCase):
         self.assertEqual(dataset["search"]["event_fact_candidates"], [])
         self.assertEqual(dataset["search"]["status"]["source"], "disabled_for_history")
         self.assertEqual(dataset["search"]["status"]["event_fact_candidate_count"], 0)
+
+    def test_event_news_uses_realtime_collection_window(self) -> None:
+        universe = get_market_monitor_universe()
+        collected_at = datetime(2026, 4, 30, 12, 0, tzinfo=timezone.utc)
+        with patch(
+            "tradingagents.web.market_monitor.data.fetch_global_news_articles_yfinance",
+            return_value=[],
+        ) as global_news_mock, patch(
+            "tradingagents.web.market_monitor.data.fetch_ticker_news_articles_yfinance",
+            return_value=[],
+        ) as ticker_news_mock:
+            _, status = _fetch_event_news(universe, collected_at)
+
+        global_news_mock.assert_called_once_with("2026-04-30", 7, 10)
+        self.assertEqual(ticker_news_mock.call_args.args[1], "2026-04-23")
+        self.assertEqual(ticker_news_mock.call_args.args[2], "2026-04-30")
+        self.assertEqual(status["generated_at"], "2026-04-30T12:00:00+00:00")
+        self.assertEqual(status["news_window_start"], "2026-04-23")
+        self.assertEqual(status["news_window_end"], "2026-04-30")
 
     def test_build_market_dataset_injects_news_event_candidates(self) -> None:
         universe = get_market_monitor_universe()

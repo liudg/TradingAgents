@@ -120,7 +120,7 @@ export function MarketMonitorPage() {
             <Tag color="blue">{snapshot.execution_card.regime_label}</Tag>
             <Tag>{snapshot.execution_card.conflict_mode}</Tag>
             <Tag>更新时间 {formatDateTime(snapshot.timestamp)}</Tag>
-            <Tag>交易日 {snapshot.as_of_date}</Tag>
+            <Tag>美东交易日 {snapshot.as_of_date}</Tag>
             <Tag>版本 {snapshot.scorecard_version}</Tag>
             <Tag>Prompt {snapshot.prompt_version}</Tag>
             <Tag>Model {snapshot.model_name || "-"}</Tag>

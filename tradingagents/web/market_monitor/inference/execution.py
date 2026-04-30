@@ -14,7 +14,7 @@ from tradingagents.web.market_monitor.schemas import (
     MarketMonitorSystemRiskCard,
 )
 
-from .base import InferenceResult, MarketMonitorInferenceRunner
+from .base import InferenceResult, MarketMonitorInferenceRunner, normalize_reasoning_updates
 
 
 class MarketMonitorExecutionInferenceService:
@@ -48,9 +48,16 @@ class MarketMonitorExecutionInferenceService:
             system_prompt=system_prompt,
             user_prompt=user_prompt,
             input_summary=input_summary,
-            parser=lambda payload: _enforce_execution_card(MarketMonitorExecutionCard.model_validate(payload), fallback()),
+            parser=lambda payload: _parse_execution_card(payload, fallback()),
             fallback=fallback,
         )
+
+
+def _parse_execution_card(payload: dict, baseline: MarketMonitorExecutionCard) -> MarketMonitorExecutionCard:
+    candidate = baseline.model_dump(mode="json")
+    candidate.update(normalize_reasoning_updates(payload))
+    card = MarketMonitorExecutionCard.model_validate(candidate)
+    return _enforce_execution_card(card, baseline)
 
 
 def _enforce_execution_card(card: MarketMonitorExecutionCard, baseline: MarketMonitorExecutionCard) -> MarketMonitorExecutionCard:

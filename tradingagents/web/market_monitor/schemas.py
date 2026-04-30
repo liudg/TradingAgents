@@ -3,8 +3,9 @@ from __future__ import annotations
 from datetime import date, datetime
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import BaseModel, Field, model_validator
 
+from tradingagents.web.market_monitor.trading_calendar import validate_market_monitor_as_of_date
 from tradingagents.web.schemas import JobStatus
 
 
@@ -71,12 +72,10 @@ class MarketMonitorSnapshotRequest(BaseModel):
     force_refresh: bool = False
     data_mode: MarketMonitorDataMode = "daily"
 
-    @field_validator("as_of_date")
-    @classmethod
-    def validate_as_of_date(cls, value: date | None) -> date | None:
-        if value and value > date.today():
-            raise ValueError("as_of_date 不能晚于今天")
-        return value
+    @model_validator(mode="after")
+    def validate_as_of_date(self) -> "MarketMonitorSnapshotRequest":
+        validate_market_monitor_as_of_date(self.as_of_date, self.data_mode)
+        return self
 
 
 class MarketMonitorRunLlmConfig(BaseModel):
@@ -94,17 +93,11 @@ class MarketMonitorRunRequest(BaseModel):
     mode: MarketMonitorRunMode | None = None
     llm_config: MarketMonitorRunLlmConfig | None = None
 
-    @field_validator("as_of_date")
-    @classmethod
-    def validate_as_of_date(cls, value: date | None) -> date | None:
-        if value and value > date.today():
-            raise ValueError("as_of_date 不能晚于今天")
-        return value
-
     @model_validator(mode="after")
-    def validate_history_data_mode(self) -> "MarketMonitorRunRequest":
+    def validate_request(self) -> "MarketMonitorRunRequest":
         if self.trigger_endpoint == "history" and self.data_mode != "daily":
             raise ValueError("历史回放暂只支持 daily 数据模式")
+        validate_market_monitor_as_of_date(self.as_of_date, self.data_mode)
         return self
 
 
@@ -114,17 +107,11 @@ class MarketMonitorHistoryRequest(BaseModel):
     force_refresh: bool = False
     data_mode: MarketMonitorDataMode = "daily"
 
-    @field_validator("as_of_date")
-    @classmethod
-    def validate_as_of_date(cls, value: date | None) -> date | None:
-        if value and value > date.today():
-            raise ValueError("as_of_date 不能晚于今天")
-        return value
-
     @model_validator(mode="after")
-    def validate_history_data_mode(self) -> "MarketMonitorHistoryRequest":
+    def validate_history_request(self) -> "MarketMonitorHistoryRequest":
         if self.data_mode != "daily":
             raise ValueError("历史回放暂只支持 daily 数据模式")
+        validate_market_monitor_as_of_date(self.as_of_date, self.data_mode)
         return self
 
 

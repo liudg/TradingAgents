@@ -1,3 +1,4 @@
+import json
 import unittest
 from unittest.mock import patch
 
@@ -62,6 +63,44 @@ class MarketMonitorExecutionInferenceTests(unittest.TestCase):
         self.assertEqual(result.payload.regime_label, "黄绿灯-Swing")
         self.assertFalse(result.used_fallback)
         self.assertEqual(result.trace.stage, "execution_decision")
+
+    def test_execution_inference_ignores_malformed_rule_fields_and_normalizes_evidence(self) -> None:
+        payload = fixture_execution_card(active_event=True).model_dump(mode="json") | {
+            "evidence": [
+                {"type": "score_card", "name": "long_term_score", "snippet": "长线分数改善", "confidence": 0.86},
+                {"type": "derived_metric", "name": "price_vs_ma200_pct", "value": 6.3},
+            ],
+            "new_position_allowed": "有限允许，仅限小仓位确认型机会",
+            "tactic_preference": ["回调低吸", "等待确认"],
+            "signal_confirmation": {
+                "risk_tightening": "已立即生效",
+                "risk_loosening": "不得解读为趋势仓恢复",
+            },
+        }
+        with patch(
+            "tradingagents.web.market_monitor.inference.base.create_llm_client",
+            return_value=type("_FakeClient", (), {"get_llm": lambda self: _FakeLlm(json.dumps(payload, ensure_ascii=False))})(),
+        ):
+            service = MarketMonitorExecutionInferenceService()
+            fact_sheet, long_term, short_term, system_risk, style, panic, event_fact_sheet = self._build_inputs()
+            result = service.infer_execution(
+                fact_sheet=fact_sheet,
+                long_term=long_term,
+                short_term=short_term,
+                system_risk=system_risk,
+                style=style,
+                panic=panic,
+                event_fact_sheet=event_fact_sheet,
+                fallback=lambda: fixture_execution_card(active_event=False),
+            )
+
+        self.assertFalse(result.used_fallback)
+        self.assertTrue(result.trace.parsed_ok)
+        self.assertTrue(result.payload.new_position_allowed)
+        self.assertEqual(result.payload.tactic_preference, "回调低吸 > 趋势突破")
+        self.assertEqual(result.payload.signal_confirmation.current_regime_observations, 1)
+        self.assertEqual(result.payload.evidence[0].source_type, "score_card")
+        self.assertEqual(result.payload.evidence[0].source_label, "long_term_score")
 
     def test_execution_inference_preserves_rule_layer_permissions(self) -> None:
         long_term = fixture_score_card(deterministic_score=88.0, score=88.0, zone="强趋势区")

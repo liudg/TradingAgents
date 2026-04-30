@@ -38,6 +38,22 @@ import {
 } from "../components/MarketMonitorBlocks";
 import { extractErrorMessage, formatDateTime, getStatusColor, getStatusText } from "../utils/format";
 
+function getLogLevelColor(level: string) {
+  const normalized = level.toLowerCase();
+  if (normalized === "error") return "red";
+  if (normalized === "warning" || normalized === "warn") return "orange";
+  if (normalized === "system" || normalized === "info") return "blue";
+  return "default";
+}
+
+function getLogLevelText(level: string) {
+  const normalized = level.toLowerCase();
+  if (normalized === "error") return "错误";
+  if (normalized === "warning" || normalized === "warn") return "警告";
+  if (normalized === "system" || normalized === "info") return "系统";
+  return level;
+}
+
 export function MarketMonitorRunDetailPage() {
   const { runId = "" } = useParams();
   const navigate = useNavigate();
@@ -84,6 +100,7 @@ export function MarketMonitorRunDetailPage() {
   const missingData = dataStatus?.missing_data || snapshot?.missing_data || [];
   const dataRisks = dataStatus?.risks || snapshot?.risks || [];
   const dataStatusOpenGaps = dataStatus?.open_gaps || snapshot?.fact_sheet?.open_gaps || [];
+  const logs = logsQuery.data || [];
   const historyArtifacts = Object.keys(run.manifest?.artifact_paths || {})
     .filter((name) => name.startsWith("history_snapshot_") || name.startsWith("history_fact_sheet_"))
     .sort()
@@ -124,7 +141,7 @@ export function MarketMonitorRunDetailPage() {
             <Typography.Text copyable>{run.run_id}</Typography.Text>
           </Descriptions.Item>
           <Descriptions.Item label="触发入口">{run.trigger_endpoint}</Descriptions.Item>
-          <Descriptions.Item label="交易日">{run.as_of_date}</Descriptions.Item>
+          <Descriptions.Item label="美东交易日">{run.as_of_date}</Descriptions.Item>
           <Descriptions.Item label="状态">{getStatusText(run.status)}</Descriptions.Item>
           <Descriptions.Item label="历史天数">{run.days ?? "-"}</Descriptions.Item>
           <Descriptions.Item label="生成时间">{formatDateTime(run.generated_at)}</Descriptions.Item>
@@ -219,17 +236,30 @@ export function MarketMonitorRunDetailPage() {
 
       {historyArtifacts.length ? <HistoryArtifactsBlock items={historyArtifacts} /> : null}
 
-      <Card className="page-card" title="执行日志">
+      <Card
+        className="page-card"
+        title={`执行日志（${logs.length} 条）`}
+        extra={
+          <Space>
+            {isActive ? <Typography.Text type="secondary">运行中每 2 秒自动刷新</Typography.Text> : null}
+            <Button icon={<ReloadOutlined />} loading={logsQuery.isFetching} onClick={() => logsQuery.refetch()}>
+              刷新日志
+            </Button>
+          </Space>
+        }
+      >
         <List
-          dataSource={logsQuery.data || []}
+          dataSource={logs}
           locale={{ emptyText: "暂无日志" }}
           renderItem={(item) => (
             <List.Item>
-              <Space direction="vertical" size={2} style={{ width: "100%" }}>
-                <Typography.Text type="secondary">
-                  {formatDateTime(item.timestamp)} [{item.level}]
-                </Typography.Text>
-                <Typography.Text>{item.content}</Typography.Text>
+              <Space direction="vertical" size={4} style={{ width: "100%" }}>
+                <Space size={8} wrap>
+                  <Typography.Text type="secondary">{formatDateTime(item.timestamp)}</Typography.Text>
+                  <Tag color={getLogLevelColor(item.level)}>{getLogLevelText(item.level)}</Tag>
+                  <Typography.Text type="secondary">#{item.line_no}</Typography.Text>
+                </Space>
+                <Typography.Text style={{ whiteSpace: "pre-wrap" }}>{item.content}</Typography.Text>
               </Space>
             </List.Item>
           )}

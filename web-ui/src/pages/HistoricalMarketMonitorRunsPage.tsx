@@ -91,7 +91,7 @@ export function HistoricalMarketMonitorRunsPage() {
         <DatePicker
           allowClear
           style={{ minWidth: 180 }}
-          placeholder="按交易日筛选"
+          placeholder="按美东交易日筛选"
           value={dateFilter}
           onChange={(value) => setDateFilter(value)}
         />
