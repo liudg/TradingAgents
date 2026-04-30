@@ -9,7 +9,6 @@ import {
   Tag,
   Typography,
 } from "antd";
-import { ReloadOutlined } from "@ant-design/icons";
 import { useNavigate } from "react-router-dom";
 
 import {
@@ -20,6 +19,7 @@ import {
 import {
   DataStatusBlock,
   EventFactSheetBlock,
+  EventRiskBlock,
   ExecutionCardBlock,
   PanicCardBlock,
   ScoreCardBlock,
@@ -93,15 +93,7 @@ export function MarketMonitorPage() {
   if (!snapshot) {
     const isActive = latestSnapshotRun.status === "pending" || latestSnapshotRun.status === "running";
     return (
-      <Card
-        className="page-card"
-        title="市场监控"
-        extra={
-          <Button icon={<ReloadOutlined />} loading={runsQuery.isFetching || runQuery.isFetching} onClick={refreshRuns}>
-            刷新
-          </Button>
-        }
-      >
+      <Card className="page-card" title="市场监控">
         <Space direction="vertical" size={16} style={{ width: "100%" }}>
           <Alert
             type={isActive ? "info" : "warning"}
@@ -122,21 +114,7 @@ export function MarketMonitorPage() {
 
   return (
     <Space direction="vertical" size="large" style={{ width: "100%" }}>
-      <Card
-        className="page-card"
-        title="市场监控"
-        extra={
-          <a
-            className="page-card-extra-button ant-btn ant-btn-default"
-            onClick={(event) => {
-              event.preventDefault();
-              refreshRuns();
-            }}
-          >
-            <ReloadOutlined /> 刷新
-          </a>
-        }
-      >
+      <Card className="page-card" title="市场监控">
         <Space direction="vertical" size={12} style={{ width: "100%" }}>
           <Space wrap>
             <Tag color="blue">{snapshot.execution_card.regime_label}</Tag>
@@ -175,6 +153,7 @@ export function MarketMonitorPage() {
       </Card>
 
       <ExecutionCardBlock card={snapshot.execution_card} />
+      <EventRiskBlock card={snapshot.execution_card.event_risk_flag} />
 
       <Row gutter={[16, 16]}>
         <Col xs={24} lg={8}>

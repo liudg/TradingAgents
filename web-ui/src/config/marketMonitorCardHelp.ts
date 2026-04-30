@@ -21,7 +21,7 @@ export const MARKET_MONITOR_CARD_HELP: Record<
     title: "长线环境",
     purpose: "判断中期趋势、ETF proxy 广度、风险偏好与波动健康度是否支持持有风险资产。",
     rules:
-      "V2.3.1 先由本地 yfinance 数据确定性计算基础分和因子拆解，LLM 只能解释、标注风险，并在事件事实表支持下做受限评分调整。",
+      "V2.3.1 先由本地 yfinance 数据确定性计算基础分，LLM 只能解释、标注风险，并在事件事实表支持下做受限评分调整。",
   },
   short_term_card: {
     title: "短线环境",

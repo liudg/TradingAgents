@@ -7,7 +7,6 @@ import {
   Col,
   DatePicker,
   Form,
-  Input,
   InputNumber,
   Row,
   Select,
@@ -26,9 +25,6 @@ interface MarketMonitorCreateFormValues {
   days?: number;
   force_refresh: boolean;
   data_mode: "daily" | "intraday_delayed" | "intraday_realtime";
-  provider?: string;
-  model?: string;
-  reasoning_effort?: string;
 }
 
 const runTypeOptions = [
@@ -59,14 +55,7 @@ export function MarketMonitorCreatePage() {
         force_refresh: values.force_refresh,
         data_mode: values.trigger_endpoint === "history" ? "daily" : values.data_mode,
         mode: values.trigger_endpoint,
-        llm_config:
-          values.provider || values.model || values.reasoning_effort
-            ? {
-                provider: values.provider?.trim() || null,
-                model: values.model?.trim() || null,
-                reasoning_effort: values.reasoning_effort?.trim() || null,
-              }
-            : null,
+        llm_config: null,
       };
       const result = await createRunMutation.mutateAsync(payload);
       message?.success?.(`运行已创建：${result.run_id}`);
@@ -83,7 +72,7 @@ export function MarketMonitorCreatePage() {
           type="info"
           showIcon
           message="运行会在后台执行"
-          description="创建后立即进入详情页，LLM 默认为正式启用；如填写 Provider/模型/推理强度，会覆盖默认 LLM 配置。"
+          description="创建后立即进入详情页，LLM 使用系统默认配置。"
         />
         <Form
           form={form}
@@ -118,21 +107,6 @@ export function MarketMonitorCreatePage() {
           <Col xs={24}>
             <Form.Item name="force_refresh" valuePropName="checked" noStyle>
               <Checkbox>强制刷新数据</Checkbox>
-            </Form.Item>
-          </Col>
-          <Col xs={24} md={8}>
-            <Form.Item label="LLM Provider" name="provider">
-              <Input placeholder="例如 anthropic / openai / codex" />
-            </Form.Item>
-          </Col>
-          <Col xs={24} md={8}>
-            <Form.Item label="模型" name="model">
-              <Input placeholder="例如 claude-sonnet-4-6" />
-            </Form.Item>
-          </Col>
-          <Col xs={24} md={8}>
-            <Form.Item label="推理强度" name="reasoning_effort">
-              <Input placeholder="例如 low / medium / high" />
             </Form.Item>
           </Col>
         </Row>

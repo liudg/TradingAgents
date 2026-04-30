@@ -349,6 +349,8 @@ describe("MarketMonitorRunDetailPage", () => {
 
     expect(screen.getByText("市场监控运行详情")).toBeInTheDocument();
     expect(screen.getByText("执行动作卡")).toBeInTheDocument();
+    expect(screen.getByText("事件风险")).toBeInTheDocument();
+    expect(screen.queryByText("因子拆解")).not.toBeInTheDocument();
     expect(screen.getByText("执行日志")).toBeInTheDocument();
     expect(screen.getByText("History 日级产物")).toBeInTheDocument();
     expect(screen.getByText("history_snapshot_2026-04-10")).toBeInTheDocument();

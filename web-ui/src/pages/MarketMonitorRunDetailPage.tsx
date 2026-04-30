@@ -25,6 +25,7 @@ import {
 import {
   DataStatusBlock,
   EventFactSheetBlock,
+  EventRiskBlock,
   ExecutionCardBlock,
   FactSheetBlock,
   HistoryArtifactsBlock,
@@ -165,6 +166,7 @@ export function MarketMonitorRunDetailPage() {
       ) : null}
 
       {snapshot ? <ExecutionCardBlock card={snapshot.execution_card} /> : null}
+      {snapshot ? <EventRiskBlock card={snapshot.execution_card.event_risk_flag} /> : null}
 
       {snapshot ? (
         <Row gutter={[16, 16]}>

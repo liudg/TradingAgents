@@ -285,10 +285,13 @@ describe("MarketMonitorPage", () => {
 
     expect(screen.getAllByText("黄绿灯-Swing").length).toBeGreaterThan(0);
     expect(screen.getByText("执行动作卡")).toBeInTheDocument();
+    expect(screen.getByText("事件风险")).toBeInTheDocument();
+    expect(screen.queryByText("因子拆解")).not.toBeInTheDocument();
     expect(screen.getByText("市场手法与风格有效性卡")).toBeInTheDocument();
     expect(screen.getByText("统一事件事实表")).toBeInTheDocument();
     expect(screen.getByText("生成市场监控")).toBeInTheDocument();
     expect(screen.getByText("查看本次运行详情")).toBeInTheDocument();
+    expect(screen.queryByText(/^刷新$/)).not.toBeInTheDocument();
     expect(screen.getByText("Prompt market-monitor-scorecard-2026-04-v2.3.1")).toBeInTheDocument();
     expect(screen.getByText("Model test-model")).toBeInTheDocument();
     expect(screen.getAllByText("广度因子使用 ETF 代理池近似").length).toBeGreaterThan(0);
@@ -314,6 +317,7 @@ describe("MarketMonitorPage", () => {
 
     expect(screen.getByText("市场监控正在后台生成")).toBeInTheDocument();
     expect(screen.getByText("查看运行详情")).toBeInTheDocument();
+    expect(screen.queryByText(/^刷新$/)).not.toBeInTheDocument();
   });
 
   it("creates a background snapshot run and navigates to detail", async () => {

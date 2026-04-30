@@ -52,6 +52,9 @@ describe("MarketMonitorCreatePage", () => {
     expect(screen.getByText("新建市场监控运行")).toBeInTheDocument();
     expect(screen.getByText("运行会在后台执行")).toBeInTheDocument();
     expect(screen.getByText("创建运行")).toBeInTheDocument();
+    expect(screen.queryByText("LLM Provider")).not.toBeInTheDocument();
+    expect(screen.queryByText("模型")).not.toBeInTheDocument();
+    expect(screen.queryByText("推理强度")).not.toBeInTheDocument();
   });
 
   it("submits snapshot payload and navigates to detail", async () => {

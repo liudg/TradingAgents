@@ -19,7 +19,6 @@ import {
   MarketMonitorExecutionCard,
   MarketMonitorEventRiskFlag,
   MarketMonitorFactSheet,
-  MarketMonitorFactorBreakdown,
   MarketMonitorHistoryDailyArtifactItem,
   MarketMonitorHistoryPoint,
   MarketMonitorInputDataStatus,
@@ -89,33 +88,6 @@ function renderReasoningBlock(card: { reasoning_summary?: string | null; key_dri
   );
 }
 
-function FactorBreakdownList(props: { factors: MarketMonitorFactorBreakdown[] }) {
-  return (
-    <List
-      size="small"
-      header="因子拆解"
-      dataSource={props.factors}
-      locale={{ emptyText: "暂无因子" }}
-      renderItem={(factor) => (
-        <List.Item>
-          <Space direction="vertical" size={2} style={{ width: "100%" }}>
-            <Space wrap>
-              <Typography.Text strong>{factor.factor}</Typography.Text>
-              <Tag>分 {factor.score.toFixed(1)}</Tag>
-              <Tag>权重 {(factor.weight * 100).toFixed(0)}%</Tag>
-              <Tag>{factor.polarity}</Tag>
-              <Tag color={factor.data_status === "available" ? "success" : "warning"}>{factor.data_status}</Tag>
-            </Space>
-            <Typography.Text type="secondary">
-              原始值 {String(factor.raw_value ?? "-")}{factor.raw_value_unit ? ` ${factor.raw_value_unit}` : ""}；{factor.reason}
-            </Typography.Text>
-          </Space>
-        </List.Item>
-      )}
-    />
-  );
-}
-
 export function ScoreCardBlock(props: { title: string; helpKey: MarketMonitorCardHelpKey; card: MarketMonitorScoreCard | MarketMonitorSystemRiskCard }) {
   return (
     <Card className="section-card market-assessment-card" title={<CardTitleWithHelp title={props.title} helpKey={props.helpKey} />}>
@@ -140,7 +112,6 @@ export function ScoreCardBlock(props: { title: string; helpKey: MarketMonitorCar
             {props.card.event_triggers.map((trigger) => <Tag key={`${trigger.trigger_type}-${trigger.event}`} color="warning">{trigger.event} {trigger.score_impact}</Tag>)}
           </Space>
         ) : null}
-        <FactorBreakdownList factors={props.card.factor_breakdown} />
         {renderReasoningBlock(props.card)}
       </Space>
     </Card>
@@ -173,7 +144,6 @@ export function ExecutionCardBlock(props: { card: MarketMonitorExecutionCard }) 
           <Tag>已观察 {props.card.signal_confirmation.current_regime_observations} 次</Tag>
           <Tag>放宽解锁还需 {props.card.signal_confirmation.risk_loosening_unlock_in_observations} 次</Tag>
         </Space>
-        <EventRiskBlock card={props.card.event_risk_flag} />
         {renderReasoningBlock(props.card)}
       </Space>
     </Card>
@@ -202,7 +172,6 @@ export function StyleCardBlock(props: { card: MarketMonitorStyleEffectiveness })
         <Typography.Text strong>资产风格层</Typography.Text>
         <Space wrap><Tag color="success">偏好 {props.card.asset_layer.preferred_assets.join("、") || "无"}</Tag><Tag color="warning">回避 {props.card.asset_layer.avoid_assets.join("、") || "无"}</Tag></Space>
         <List size="small" dataSource={assetItems} renderItem={({ name, item }) => <List.Item>{name}：{item.score.toFixed(1)}（5日 {item.delta_5d >= 0 ? "+" : ""}{item.delta_5d.toFixed(1)}）</List.Item>} />
-        <FactorBreakdownList factors={props.card.asset_layer.factor_breakdown} />
         {renderReasoningBlock(props.card)}
       </Space>
     </Card>
@@ -225,7 +194,6 @@ export function PanicCardBlock(props: { card: MarketMonitorPanicCard }) {
         <Space wrap>{boolTag("先手仓", props.card.early_entry_allowed)}<Tag>仓位上限 {props.card.max_position_hint}</Tag><Tag>止损 {props.card.stop_loss}</Tag><Tag>已保持 {props.card.refreshes_held} 次刷新</Tag></Space>
         <Typography.Text type="secondary">盈利规则：{props.card.profit_rule}</Typography.Text>
         {props.card.system_risk_override ? <Alert type="warning" showIcon message={props.card.system_risk_override} /> : null}
-        <FactorBreakdownList factors={props.card.factor_breakdown} />
         {renderReasoningBlock(props.card)}
       </Space>
     </Card>
