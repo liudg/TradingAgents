@@ -79,8 +79,15 @@ For CLI, Web UI, and any other user-facing copy, default to Simplified Chinese s
 Read and write project text files explicitly as UTF-8 whenever the tool allows specifying an encoding. On Windows, remember that terminal output may still use `GBK`/`CP936`, so any file inspection commands should prefer UTF-8-aware reads or switch the console to UTF-8 before judging whether content is actually garbled. Do not treat terminal mojibake alone as evidence that the file itself is mis-encoded.
 
 ## Testing Guidelines
-Tests are written with `unittest` and named `tests/test_*.py`. Always run them with `.venv\Scripts\python.exe` so dependencies and interpreter behavior match the project environment. Keep test classes descriptive (`ModelValidationTests`) and test methods behavior-focused (`test_unknown_model_emits_warning_for_strict_provider`). Add regression tests for bug fixes in the package area you modify, especially model validation, ticker normalization, and API-key handling.
+Tests are written with `unittest` and named `tests/test_*.py`. Always run them with `.venv\Scripts\python.exe` so dependencies and interpreter behavior match the project environment. Some tests also rely on pytest markers, fixtures, or assertions, so keep pytest support intact even when running the suite through `unittest`. Keep test classes descriptive (`ModelValidationTests`) and test methods behavior-focused (`test_unknown_model_emits_warning_for_strict_provider`). Add regression tests for bug fixes in the package area you modify, especially model validation, ticker normalization, API-key handling, and market monitor inference flows.
 For the React/Vite frontend in `web-ui/`, run `npm run test` for component and config regressions when touching that surface.
+For targeted market monitor regressions, you can also run:
+```bash
+.venv\Scripts\python.exe -m unittest tests.test_market_monitor_inference
+.venv\Scripts\python.exe -m unittest tests.test_market_monitor_execution_inference
+.venv\Scripts\python.exe -m unittest tests.test_structured_agents
+.venv\Scripts\python.exe -m unittest tests.test_checkpoint_resume
+```
 
 ## Commit & Pull Request Guidelines
 Recent history follows Conventional Commit prefixes such as `feat:`, `fix:`, `refactor:`, and `chore:`, sometimes with scopes like `fix(llm_clients): ...`. Use concise, imperative commit subjects and reference issue/PR numbers when relevant. Pull requests should describe the behavior change, list test commands run, call out config or API-key implications, and include CLI screenshots when UI output changes.
