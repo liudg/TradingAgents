@@ -150,12 +150,14 @@ class MarketMonitorInferenceRunner:
         parsed_ok = False
         error = None
         used_fallback = False
+        token_usage: dict[str, int] = {}
         try:
             response = self.llm.invoke([
                 ("system", system_prompt),
                 ("human", user_prompt),
             ])
             raw_response = response.content if hasattr(response, "content") else str(response)
+            token_usage = self._extract_token_usage(response)
             payload = self._extract_json_payload(raw_response)
             parsed = parser(payload)
             parsed_ok = True
@@ -174,9 +176,41 @@ class MarketMonitorInferenceRunner:
             raw_response=raw_response,
             parsed_ok=parsed_ok,
             latency_ms=latency_ms,
+            token_usage=token_usage,
             error=error,
         )
         return InferenceResult(payload=parsed, trace=trace, used_fallback=used_fallback)
+
+    @staticmethod
+    def _extract_token_usage(response: Any) -> dict[str, int]:
+        sources: list[Any] = []
+        for attr in ("usage_metadata", "usage"):
+            value = getattr(response, attr, None)
+            if isinstance(value, dict):
+                sources.append(value)
+        response_metadata = getattr(response, "response_metadata", None)
+        if isinstance(response_metadata, dict):
+            for key in ("token_usage", "usage"):
+                value = response_metadata.get(key)
+                if isinstance(value, dict):
+                    sources.append(value)
+        for source in sources:
+            usage = MarketMonitorInferenceRunner._normalize_token_usage(source)
+            if usage:
+                return usage
+        return {}
+
+    @staticmethod
+    def _normalize_token_usage(payload: dict[str, Any]) -> dict[str, int]:
+        usage: dict[str, int] = {}
+        for key, value in payload.items():
+            if isinstance(value, bool):
+                continue
+            if isinstance(value, int):
+                usage[key] = value
+            elif isinstance(value, float) and value.is_integer():
+                usage[key] = int(value)
+        return usage
 
     @staticmethod
     def _extract_json_payload(content: str | None) -> dict[str, Any]:

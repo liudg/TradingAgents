@@ -4,17 +4,21 @@ import {
   Card,
   Collapse,
   Descriptions,
+  Input,
   List,
   Popover,
   Progress,
+  Select,
   Space,
   Tag,
   Typography,
 } from "antd";
 import { ExclamationCircleOutlined } from "@ant-design/icons";
-import { type ReactNode } from "react";
+import { type ReactNode, useMemo, useState } from "react";
 
+import { fetchMarketMonitorArtifact } from "../api/client";
 import {
+  MarketMonitorArtifactPayload,
   MarketMonitorEventFact,
   MarketMonitorExecutionCard,
   MarketMonitorEventRiskFlag,
@@ -72,6 +76,27 @@ function boolTag(label: string, value: boolean) {
 function confidenceText(value?: number | null) {
   if (value === undefined || value === null) return "-";
   return `${Math.round(value * 100)}%`;
+}
+
+function formatUnknownValue(value: unknown): string {
+  if (value === null || value === undefined) return "-";
+  if (typeof value === "number") return Number.isFinite(value) ? String(value) : "-";
+  if (typeof value === "string" || typeof value === "boolean") return String(value);
+  return JSON.stringify(value, null, 2);
+}
+
+function metricEntries(value: Record<string, unknown> | undefined) {
+  return Object.entries(value || {}).map(([key, item]) => ({ key, value: item }));
+}
+
+function downloadJson(filename: string, payload: MarketMonitorArtifactPayload) {
+  const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = `${filename}.json`;
+  anchor.click();
+  URL.revokeObjectURL(url);
 }
 
 function renderReasoningBlock(card: { reasoning_summary?: string | null; key_drivers?: string[]; risks?: string[]; confidence?: number | null }) {
@@ -257,39 +282,119 @@ export function DataStatusBlock(props: { inputDataStatus: MarketMonitorInputData
   );
 }
 
+function HistoryTrendChart(props: { points: MarketMonitorHistoryPoint[] }) {
+  const series = [
+    { key: "long_term_score", label: "长线", color: "#1677ff" },
+    { key: "short_term_score", label: "短线", color: "#52c41a" },
+    { key: "system_risk_score", label: "系统风险", color: "#fa8c16" },
+    { key: "panic_reversal_score", label: "恐慌反转", color: "#722ed1" },
+  ] as const;
+  const width = 640;
+  const height = 180;
+  const padding = 24;
+  const sorted = [...props.points].sort((a, b) => a.trade_date.localeCompare(b.trade_date));
+  if (sorted.length < 2) {
+    return <Alert type="info" showIcon message="历史点不足，暂无法绘制趋势图" />;
+  }
+  const x = (index: number) => padding + (index / Math.max(1, sorted.length - 1)) * (width - padding * 2);
+  const y = (score: number) => height - padding - (score / 100) * (height - padding * 2);
+  return (
+    <Space direction="vertical" size={8} style={{ width: "100%" }}>
+      <svg role="img" aria-label="市场监控分数趋势图" viewBox={`0 0 ${width} ${height}`} style={{ width: "100%", maxWidth: width, height }}>
+        {[0, 25, 50, 75, 100].map((tick) => (
+          <g key={tick}>
+            <line x1={padding} x2={width - padding} y1={y(tick)} y2={y(tick)} stroke="#f0f0f0" />
+            <text x={4} y={y(tick) + 4} fontSize="10" fill="#8c8c8c">{tick}</text>
+          </g>
+        ))}
+        {series.map((item) => (
+          <polyline
+            key={item.key}
+            fill="none"
+            stroke={item.color}
+            strokeWidth="2"
+            points={sorted.map((point, index) => `${x(index)},${y(point[item.key])}`).join(" ")}
+          />
+        ))}
+      </svg>
+      <Space wrap>{series.map((item) => <Tag key={item.key} color={item.color}>{item.label}</Tag>)}</Space>
+    </Space>
+  );
+}
+
 export function HistoryBlock(props: { points: MarketMonitorHistoryPoint[] }) {
   return (
     <Card className="page-card" title="历史趋势回看">
-      <List size="small" dataSource={[...props.points].reverse()} locale={{ emptyText: "暂无历史数据" }} renderItem={(point) => (
-        <List.Item>
-          <Space wrap style={{ width: "100%", justifyContent: "space-between" }}>
-            <Typography.Text strong>{point.trade_date}</Typography.Text>
-            <Space wrap>
-              <Tag>长线 {point.long_term_score.toFixed(1)}</Tag>
-              <Tag>短线 {point.short_term_score.toFixed(1)}</Tag>
-              <Tag>风险 {point.system_risk_score.toFixed(1)}</Tag>
-              <Tag>恐慌反转 {point.panic_reversal_score.toFixed(1)}</Tag>
-              <Tag>{point.panic_state}</Tag>
-              <Tag color="blue">{point.regime_label}</Tag>
+      <Space direction="vertical" size={16} style={{ width: "100%" }}>
+        <HistoryTrendChart points={props.points} />
+        <List size="small" dataSource={[...props.points].reverse()} locale={{ emptyText: "暂无历史数据" }} renderItem={(point) => (
+          <List.Item>
+            <Space wrap style={{ width: "100%", justifyContent: "space-between" }}>
+              <Typography.Text strong>{point.trade_date}</Typography.Text>
+              <Space wrap>
+                <Tag>长线 {point.long_term_score.toFixed(1)}</Tag>
+                <Tag>短线 {point.short_term_score.toFixed(1)}</Tag>
+                <Tag>风险 {point.system_risk_score.toFixed(1)}</Tag>
+                <Tag>恐慌反转 {point.panic_reversal_score.toFixed(1)}</Tag>
+                <Tag>{point.panic_state}</Tag>
+                <Tag color="blue">{point.regime_label}</Tag>
+              </Space>
             </Space>
-          </Space>
-        </List.Item>
-      )} />
+          </List.Item>
+        )} />
+      </Space>
     </Card>
   );
 }
 
-export function HistoryArtifactsBlock(props: { items: MarketMonitorHistoryDailyArtifactItem[] }) {
+export function HistoryArtifactsBlock(props: { runId: string; items: MarketMonitorHistoryDailyArtifactItem[] }) {
+  const [selectedName, setSelectedName] = useState<string | null>(null);
+  const [payload, setPayload] = useState<MarketMonitorArtifactPayload | null>(null);
+  const [loadingName, setLoadingName] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  const loadArtifact = async (artifactName: string) => {
+    setLoadingName(artifactName);
+    setError(null);
+    try {
+      const artifactPayload = await fetchMarketMonitorArtifact(props.runId, artifactName);
+      setSelectedName(artifactName);
+      setPayload(artifactPayload);
+      return artifactPayload;
+    } catch (artifactError) {
+      setError(artifactError instanceof Error ? artifactError.message : String(artifactError));
+      return null;
+    } finally {
+      setLoadingName(null);
+    }
+  };
+
+  const downloadArtifact = async (artifactName: string) => {
+    const artifactPayload = selectedName === artifactName && payload ? payload : await loadArtifact(artifactName);
+    if (artifactPayload) downloadJson(artifactName, artifactPayload);
+  };
+
   return (
     <Card className="page-card" title="History 日级产物">
-      <List size="small" dataSource={props.items} locale={{ emptyText: "暂无日级产物" }} renderItem={(item) => (
-        <List.Item>
-          <Space wrap style={{ width: "100%", justifyContent: "space-between" }}>
-            <Typography.Text strong>{item.tradeDate}</Typography.Text>
-            <Space wrap><Tag color={item.artifactType === "snapshot" ? "blue" : "purple"}>{item.artifactType === "snapshot" ? "snapshot" : "fact_sheet"}</Tag><Typography.Text copyable>{item.artifactName}</Typography.Text></Space>
-          </Space>
-        </List.Item>
-      )} />
+      <Space direction="vertical" size={12} style={{ width: "100%" }}>
+        {error ? <Alert type="error" showIcon message="产物加载失败" description={error} /> : null}
+        <List size="small" dataSource={props.items} locale={{ emptyText: "暂无日级产物" }} renderItem={(item) => (
+          <List.Item>
+            <Space wrap style={{ width: "100%", justifyContent: "space-between" }}>
+              <Typography.Text strong>{item.tradeDate}</Typography.Text>
+              <Space wrap>
+                <Tag color={item.artifactType === "snapshot" ? "blue" : "purple"}>{item.artifactType === "snapshot" ? "snapshot" : "fact_sheet"}</Tag>
+                <Typography.Text copyable>{item.artifactName}</Typography.Text>
+                <Button size="small" loading={loadingName === item.artifactName} onClick={() => loadArtifact(item.artifactName)}>查看</Button>
+                <Button size="small" onClick={() => downloadArtifact(item.artifactName)}>下载</Button>
+              </Space>
+            </Space>
+          </List.Item>
+        )} />
+        {selectedName && payload ? (
+          <Collapse items={[{ key: selectedName, label: `产物内容：${selectedName}`, children: <pre style={{ whiteSpace: "pre-wrap", margin: 0 }}>{JSON.stringify(payload, null, 2)}</pre> }]} />
+        ) : null}
+      </Space>
     </Card>
   );
 }
@@ -310,32 +415,93 @@ export function StageTimelineBlock(props: { stages: MarketMonitorStageResult[] }
 }
 
 export function FactSheetBlock(props: { factSheet?: MarketMonitorFactSheet | null }) {
-  if (!props.factSheet) return null;
+  const factSheet = props.factSheet;
+  if (!factSheet) return null;
+  const symbols = factSheet.local_facts.symbols && typeof factSheet.local_facts.symbols === "object"
+    ? metricEntries(factSheet.local_facts.symbols as Record<string, unknown>)
+    : [];
+  const marketProxies = factSheet.local_facts.market_proxies && typeof factSheet.local_facts.market_proxies === "object"
+    ? metricEntries(factSheet.local_facts.market_proxies as Record<string, unknown>)
+    : [];
   return (
     <Card className="page-card" title="Fact Sheet">
-      <Descriptions bordered size="small" column={1}>
-        <Descriptions.Item label="美东交易日">{props.factSheet.as_of_date}</Descriptions.Item>
-        <Descriptions.Item label="生成时间">{props.factSheet.generated_at}</Descriptions.Item>
-        <Descriptions.Item label="Open gaps">{props.factSheet.open_gaps.join("、") || "无"}</Descriptions.Item>
-        <Descriptions.Item label="Notes">{props.factSheet.notes.join("、") || "无"}</Descriptions.Item>
-      </Descriptions>
-      <Collapse style={{ marginTop: 16 }} items={[{ key: "event_fact_sheet", label: "Event fact sheet", children: <pre style={{ whiteSpace: "pre-wrap", margin: 0 }}>{JSON.stringify(props.factSheet.event_fact_sheet, null, 2)}</pre> }, { key: "derived_metrics", label: "Derived metrics", children: <pre style={{ whiteSpace: "pre-wrap", margin: 0 }}>{JSON.stringify(props.factSheet.derived_metrics, null, 2)}</pre> }, { key: "local_facts", label: "Local facts", children: <pre style={{ whiteSpace: "pre-wrap", margin: 0 }}>{JSON.stringify(props.factSheet.local_facts, null, 2)}</pre> }]} />
+      <Space direction="vertical" size={16} style={{ width: "100%" }}>
+        <Descriptions bordered size="small" column={1}>
+          <Descriptions.Item label="美东交易日">{factSheet.as_of_date}</Descriptions.Item>
+          <Descriptions.Item label="生成时间">{factSheet.generated_at}</Descriptions.Item>
+          <Descriptions.Item label="Open gaps">{factSheet.open_gaps.join("、") || "无"}</Descriptions.Item>
+          <Descriptions.Item label="Notes">{factSheet.notes.join("、") || "无"}</Descriptions.Item>
+        </Descriptions>
+        <Collapse items={[
+          {
+            key: "event_fact_sheet",
+            label: `Event fact sheet（${factSheet.event_fact_sheet.length}）`,
+            children: <EventFactSheetBlock events={factSheet.event_fact_sheet} />,
+          },
+          {
+            key: "local_facts",
+            label: "Local facts",
+            children: (
+              <Space direction="vertical" size={12} style={{ width: "100%" }}>
+                <List size="small" header="Symbols" dataSource={symbols} locale={{ emptyText: "无" }} renderItem={(item) => <List.Item><Typography.Text strong>{item.key}</Typography.Text><Typography.Text>{formatUnknownValue(item.value)}</Typography.Text></List.Item>} />
+                <List size="small" header="Market proxies" dataSource={marketProxies} locale={{ emptyText: "无" }} renderItem={(item) => <List.Item><Typography.Text strong>{item.key}</Typography.Text><Typography.Text>{formatUnknownValue(item.value)}</Typography.Text></List.Item>} />
+              </Space>
+            ),
+          },
+          {
+            key: "derived_metrics",
+            label: "Derived metrics",
+            children: <List size="small" dataSource={metricEntries(factSheet.derived_metrics)} locale={{ emptyText: "无" }} renderItem={(item) => <List.Item><Typography.Text strong>{item.key}</Typography.Text><Typography.Text>{formatUnknownValue(item.value)}</Typography.Text></List.Item>} />,
+          },
+        ]} />
+      </Space>
     </Card>
   );
 }
 
 export function PromptTraceBlock(props: { traces: MarketMonitorPromptTrace[] }) {
+  const [query, setQuery] = useState("");
+  const [cardType, setCardType] = useState<string>("all");
+  const [status, setStatus] = useState<string>("all");
+  const [model, setModel] = useState<string>("all");
+  const [provider, setProvider] = useState<string>("all");
+  const cardOptions = useMemo(() => Array.from(new Set(props.traces.map((trace) => trace.card_type || "unknown"))).sort(), [props.traces]);
+  const modelOptions = useMemo(() => Array.from(new Set(props.traces.map((trace) => trace.model || "unknown"))).sort(), [props.traces]);
+  const providerOptions = useMemo(() => Array.from(new Set(props.traces.map((trace) => trace.provider || "unknown"))).sort(), [props.traces]);
+  const filteredTraces = useMemo(() => {
+    const normalizedQuery = query.trim().toLowerCase();
+    return props.traces.filter((trace) => {
+      if (cardType !== "all" && (trace.card_type || "unknown") !== cardType) return false;
+      if (status === "parsed" && !trace.parsed_ok) return false;
+      if (status === "fallback" && trace.parsed_ok) return false;
+      if (model !== "all" && (trace.model || "unknown") !== model) return false;
+      if (provider !== "all" && (trace.provider || "unknown") !== provider) return false;
+      if (!normalizedQuery) return true;
+      return [trace.stage, trace.card_type, trace.model, trace.provider, trace.input_summary, trace.error]
+        .filter(Boolean)
+        .some((value) => String(value).toLowerCase().includes(normalizedQuery));
+    });
+  }, [props.traces, query, cardType, status, model, provider]);
   return (
-    <Card className="page-card" title="Prompt Traces">
-      <Collapse items={props.traces.map((trace, index) => ({ key: `${trace.stage}-${trace.card_type || index}`, label: `${trace.stage}${trace.card_type ? ` / ${trace.card_type}` : ""}`, children: (
-        <Space direction="vertical" size={8} style={{ width: "100%" }}>
-          <Space wrap><Tag>{trace.model || "unknown model"}</Tag><Tag color={trace.parsed_ok ? "success" : "error"}>{trace.parsed_ok ? "parsed" : "fallback"}</Tag>{trace.provider ? <Tag>{trace.provider}</Tag> : null}{trace.latency_ms ? <Tag>{trace.latency_ms} ms</Tag> : null}</Space>
-          {trace.input_summary ? <Typography.Text>{trace.input_summary}</Typography.Text> : null}
-          {trace.error ? <Alert type="error" showIcon message={trace.error} /> : null}
-          {trace.prompt_text ? <pre style={{ whiteSpace: "pre-wrap", margin: 0 }}>{trace.prompt_text}</pre> : null}
-          {trace.raw_response ? <pre style={{ whiteSpace: "pre-wrap", margin: 0 }}>{trace.raw_response}</pre> : null}
+    <Card id="prompt-traces" className="page-card" title={`Prompt Traces（${filteredTraces.length}/${props.traces.length}）`}>
+      <Space direction="vertical" size={12} style={{ width: "100%" }}>
+        <Space wrap>
+          <Input.Search allowClear placeholder="搜索 card/status/model/provider" style={{ width: 260 }} value={query} onChange={(event) => setQuery(event.target.value)} />
+          <Select value={cardType} style={{ width: 160 }} onChange={setCardType} options={[{ label: "全部卡片", value: "all" }, ...cardOptions.map((value) => ({ label: value, value }))]} />
+          <Select value={status} style={{ width: 140 }} onChange={setStatus} options={[{ label: "全部状态", value: "all" }, { label: "parsed", value: "parsed" }, { label: "fallback", value: "fallback" }]} />
+          <Select value={model} style={{ width: 180 }} onChange={setModel} options={[{ label: "全部模型", value: "all" }, ...modelOptions.map((value) => ({ label: value, value }))]} />
+          <Select value={provider} style={{ width: 160 }} onChange={setProvider} options={[{ label: "全部 Provider", value: "all" }, ...providerOptions.map((value) => ({ label: value, value }))]} />
         </Space>
-      ) }))} />
+        <Collapse items={filteredTraces.map((trace, index) => ({ key: `${trace.stage}-${trace.card_type || index}`, label: `${trace.stage}${trace.card_type ? ` / ${trace.card_type}` : ""}`, children: (
+          <Space direction="vertical" size={8} style={{ width: "100%" }}>
+            <Space wrap><Tag>{trace.model || "unknown model"}</Tag><Tag color={trace.parsed_ok ? "success" : "error"}>{trace.parsed_ok ? "parsed" : "fallback"}</Tag>{trace.provider ? <Tag>{trace.provider}</Tag> : null}{trace.latency_ms ? <Tag>{trace.latency_ms} ms</Tag> : null}{Object.keys(trace.token_usage || {}).length ? <Tag color="purple">tokens {Object.values(trace.token_usage).reduce((sum, value) => sum + value, 0)}</Tag> : null}</Space>
+            {trace.input_summary ? <Typography.Text>{trace.input_summary}</Typography.Text> : null}
+            {trace.error ? <Alert type="error" showIcon message={trace.error} /> : null}
+            {trace.prompt_text ? <pre style={{ whiteSpace: "pre-wrap", margin: 0 }}>{trace.prompt_text}</pre> : null}
+            {trace.raw_response ? <pre style={{ whiteSpace: "pre-wrap", margin: 0 }}>{trace.raw_response}</pre> : null}
+          </Space>
+        ) }))} />
+      </Space>
     </Card>
   );
 }

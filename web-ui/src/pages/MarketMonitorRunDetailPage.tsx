@@ -234,7 +234,7 @@ export function MarketMonitorRunDetailPage() {
 
       {history ? <HistoryBlock points={history.points} /> : null}
 
-      {historyArtifacts.length ? <HistoryArtifactsBlock items={historyArtifacts} /> : null}
+      {historyArtifacts.length ? <HistoryArtifactsBlock runId={runId} items={historyArtifacts} /> : null}
 
       <Card
         className="page-card"

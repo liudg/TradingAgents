@@ -1,5 +1,6 @@
 import json
 import unittest
+from typing import Any
 
 from tests.market_monitor_v231_fixtures import (
     fixture_event_risk_flag,
@@ -15,16 +16,19 @@ from unittest.mock import patch
 
 
 class _FakeResponse:
-    def __init__(self, content: str) -> None:
+    def __init__(self, content: str, **kwargs: Any) -> None:
         self.content = content
+        for key, value in kwargs.items():
+            setattr(self, key, value)
 
 
 class _FakeLlm:
-    def __init__(self, content: str) -> None:
+    def __init__(self, content: str, **response_kwargs: Any) -> None:
         self._content = content
+        self._response_kwargs = response_kwargs
 
     def invoke(self, messages):
-        return _FakeResponse(self._content)
+        return _FakeResponse(self._content, **self._response_kwargs)
 
 
 class MarketMonitorInferenceTests(unittest.TestCase):
@@ -61,6 +65,78 @@ class MarketMonitorInferenceTests(unittest.TestCase):
         self.assertFalse(result.used_fallback)
         self.assertTrue(result.trace.parsed_ok)
         self.assertEqual(result.trace.card_type, "long_term")
+
+    def test_trace_records_supported_token_usage_metadata(self) -> None:
+        deterministic = fixture_score_card(deterministic_score=67.5, score=67.5)
+        content = deterministic.model_copy(update={"reasoning_summary": "保留确定性结构，仅补充解释。"}).model_dump_json()
+        with patch(
+            "tradingagents.web.market_monitor.inference.base.create_llm_client",
+            return_value=type(
+                "_FakeClient",
+                (),
+                {
+                    "get_llm": lambda self: _FakeLlm(
+                        content,
+                        usage_metadata={"input_tokens": 120, "output_tokens": 35, "total_tokens": 155},
+                    )
+                },
+            )(),
+        ):
+            service = MarketMonitorCardInferenceService()
+            result = service.infer_long_term(
+                fixture_fact_sheet(),
+                deterministic,
+                fallback=lambda: deterministic,
+            )
+
+        self.assertTrue(result.trace.parsed_ok)
+        self.assertEqual(
+            result.trace.token_usage,
+            {"input_tokens": 120, "output_tokens": 35, "total_tokens": 155},
+        )
+
+    def test_trace_records_response_metadata_token_usage(self) -> None:
+        deterministic = fixture_score_card(deterministic_score=67.5, score=67.5)
+        content = deterministic.model_dump_json()
+        with patch(
+            "tradingagents.web.market_monitor.inference.base.create_llm_client",
+            return_value=type(
+                "_FakeClient",
+                (),
+                {
+                    "get_llm": lambda self: _FakeLlm(
+                        content,
+                        response_metadata={"token_usage": {"prompt_tokens": 90, "completion_tokens": 20, "total_tokens": 110}},
+                    )
+                },
+            )(),
+        ):
+            service = MarketMonitorCardInferenceService()
+            result = service.infer_long_term(
+                fixture_fact_sheet(),
+                deterministic,
+                fallback=lambda: deterministic,
+            )
+
+        self.assertFalse(result.used_fallback)
+        self.assertEqual(result.trace.token_usage["prompt_tokens"], 90)
+        self.assertEqual(result.trace.token_usage["completion_tokens"], 20)
+
+    def test_trace_keeps_empty_token_usage_when_not_supported(self) -> None:
+        deterministic = fixture_score_card(deterministic_score=67.5, score=67.5)
+        with patch(
+            "tradingagents.web.market_monitor.inference.base.create_llm_client",
+            return_value=type("_FakeClient", (), {"get_llm": lambda self: _FakeLlm(deterministic.model_dump_json())})(),
+        ):
+            service = MarketMonitorCardInferenceService()
+            result = service.infer_long_term(
+                fixture_fact_sheet(),
+                deterministic,
+                fallback=lambda: deterministic,
+            )
+
+        self.assertFalse(result.used_fallback)
+        self.assertEqual(result.trace.token_usage, {})
 
     def test_score_adjustment_accepts_adjustment_alias_and_derives_direction(self) -> None:
         deterministic = fixture_score_card(deterministic_score=67.5, score=67.5)
