@@ -62,10 +62,10 @@ def _parse_execution_card(payload: dict, baseline: MarketMonitorExecutionCard) -
 
 def _enforce_execution_card(card: MarketMonitorExecutionCard, baseline: MarketMonitorExecutionCard) -> MarketMonitorExecutionCard:
     risks = list(dict.fromkeys([*baseline.risks, *card.risks]))
-    key_drivers = card.key_drivers or baseline.key_drivers
     confidence = min(card.confidence, baseline.confidence)
     return card.model_copy(update={
         "regime_label": baseline.regime_label,
+        "decision_reasoning": card.decision_reasoning or baseline.decision_reasoning,
         "conflict_mode": baseline.conflict_mode,
         "total_exposure_range": baseline.total_exposure_range,
         "new_position_allowed": baseline.new_position_allowed,
@@ -82,5 +82,4 @@ def _enforce_execution_card(card: MarketMonitorExecutionCard, baseline: MarketMo
         "event_risk_flag": baseline.event_risk_flag,
         "confidence": confidence,
         "risks": risks,
-        "key_drivers": key_drivers,
     })

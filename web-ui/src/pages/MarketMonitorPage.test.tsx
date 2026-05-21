@@ -71,8 +71,8 @@ const factor: MarketMonitorFactorBreakdown = {
 
 function reasoning() {
   return {
-    reasoning_summary: "规则层分数为主，LLM 仅解释风险。",
-    key_drivers: ["ETF proxy 广度改善"],
+    score_reasoning: "规则层分数为主，LLM 仅解释风险。",
+    action_hint: "按执行卡权限控制仓位。",
     risks: ["广度因子使用 ETF 代理池近似"],
     evidence: [],
     confidence: 0.82,
@@ -139,6 +139,9 @@ function buildSnapshot(): MarketMonitorSnapshotResponse {
     },
     style_effectiveness: {
       ...reasoning(),
+      deterministic_score: 62.5,
+      score: 62.5,
+      score_adjustment: null,
       tactic_layer: {
         trend_breakout: { score: 52, delta_5d: 0.8, valid: false, factor_breakdown: [factor] },
         dip_buy: { score: 66, delta_5d: 3.4, valid: true, factor_breakdown: [factor] },
@@ -158,8 +161,11 @@ function buildSnapshot(): MarketMonitorSnapshotResponse {
       },
     },
     execution_card: {
-      ...reasoning(),
+      risks: ["广度因子使用 ETF 代理池近似"],
+      evidence: [],
+      confidence: 0.82,
       regime_label: "黄绿灯-Swing",
+      decision_reasoning: "长线中性、短线活跃且系统风险低。",
       conflict_mode: "长线中性+短线活跃+风险低",
       total_exposure_range: "50%-70%",
       new_position_allowed: true,
@@ -192,12 +198,14 @@ function buildSnapshot(): MarketMonitorSnapshotResponse {
     },
     panic_reversal_score: {
       ...reasoning(),
+      deterministic_score: 41.2,
       score: 41.2,
+      score_adjustment: null,
       zone: "观察期",
       state: "panic_watch",
       panic_extreme_score: 38.0,
       selling_exhaustion_score: 45.0,
-      intraday_reversal_score: 39.0,
+      reversal_confirmation_score: 39.0,
       factor_breakdown: [factor],
       action: "加入观察列表，等待确认。",
       system_risk_override: null,
@@ -284,18 +292,20 @@ describe("MarketMonitorPage", () => {
     renderPage();
 
     expect(screen.getAllByText("黄绿灯-Swing").length).toBeGreaterThan(0);
-    expect(screen.getByText("执行动作卡")).toBeInTheDocument();
-    expect(screen.getByText("事件风险")).toBeInTheDocument();
-    expect(screen.queryByText("因子拆解")).not.toBeInTheDocument();
-    expect(screen.getByText("市场手法与风格有效性卡")).toBeInTheDocument();
-    expect(screen.getByText("统一事件事实表")).toBeInTheDocument();
+    expect(screen.getByText("执行结论")).toBeInTheDocument();
+    expect(screen.queryByText("关键评分")).not.toBeInTheDocument();
+    expect(screen.getByText("交易偏好与风险提示")).toBeInTheDocument();
+    expect(screen.queryByText("执行动作卡")).not.toBeInTheDocument();
+    expect(screen.queryByText("事件风险")).not.toBeInTheDocument();
+    expect(screen.queryByText("市场手法与风格有效性卡")).not.toBeInTheDocument();
+    expect(screen.queryByText("统一事件事实表")).not.toBeInTheDocument();
     expect(screen.getByText("生成市场监控")).toBeInTheDocument();
     expect(screen.getByText("查看本次运行详情")).toBeInTheDocument();
     expect(screen.queryByText(/^刷新$/)).not.toBeInTheDocument();
     expect(screen.getByText("美东交易日 2026-04-11")).toBeInTheDocument();
-    expect(screen.getByText("Prompt market-monitor-scorecard-2026-04-v2.3.1")).toBeInTheDocument();
-    expect(screen.getByText("Model test-model")).toBeInTheDocument();
-    expect(screen.getAllByText("广度因子使用 ETF 代理池近似").length).toBeGreaterThan(0);
+    expect(screen.queryByText("Prompt market-monitor-scorecard-2026-04-v2.3.1")).not.toBeInTheDocument();
+    expect(screen.queryByText("Model test-model")).not.toBeInTheDocument();
+    expect(screen.getByText(/风险提示：广度因子使用 ETF 代理池近似/)).toBeInTheDocument();
     expect(screen.getByText(/event_fact_sheet: 当前刷新周期未注入联网搜索事件事实/)).toBeInTheDocument();
   });
 

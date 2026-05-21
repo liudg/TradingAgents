@@ -165,6 +165,8 @@ def _parse_style_card(
 ) -> MarketMonitorStyleEffectiveness:
     candidate = deterministic_card.model_dump(mode="json")
     candidate.update(normalize_reasoning_updates(payload))
+    if "score_adjustment" in payload:
+        candidate["score_adjustment"] = _normalize_score_adjustment(payload.get("score_adjustment"))
     card = MarketMonitorStyleEffectiveness.model_validate(candidate)
     return _enforce_style_card(card, deterministic_card)
 
@@ -183,6 +185,8 @@ def _normalize_score_adjustment(raw: Any) -> dict[str, Any] | None:
         candidate["direction"] = "up" if value > 0 else "down" if value < 0 else "flat"
     if isinstance(candidate.get("source_event_ids"), str):
         candidate["source_event_ids"] = [candidate["source_event_ids"]]
+    if isinstance(candidate.get("source_factors"), str):
+        candidate["source_factors"] = [candidate["source_factors"]]
     try:
         return MarketMonitorScoreAdjustment.model_validate(candidate).model_dump(mode="json")
     except ValueError:
@@ -220,20 +224,33 @@ def _enforce_system_risk_card(
 
 
 def _enforce_style_card(card: MarketMonitorStyleEffectiveness, deterministic_card: MarketMonitorStyleEffectiveness) -> MarketMonitorStyleEffectiveness:
+    adjustment = _bounded_adjustment(card.score_adjustment, None)
+    score = deterministic_card.deterministic_score
+    if adjustment is not None:
+        score = bounded_score(score + adjustment.value)
     return card.model_copy(update={
+        "deterministic_score": deterministic_card.deterministic_score,
+        "score": round(score, 1),
+        "score_adjustment": adjustment,
         "tactic_layer": deterministic_card.tactic_layer,
         "asset_layer": deterministic_card.asset_layer,
     })
 
 
 def _enforce_panic_card(card: MarketMonitorPanicCard, deterministic_card: MarketMonitorPanicCard) -> MarketMonitorPanicCard:
+    adjustment = _bounded_adjustment(card.score_adjustment, None)
+    score = deterministic_card.deterministic_score
+    if adjustment is not None:
+        score = bounded_score(score + adjustment.value)
     return card.model_copy(update={
-        "score": deterministic_card.score,
+        "deterministic_score": deterministic_card.deterministic_score,
+        "score": round(score, 1),
+        "score_adjustment": adjustment,
         "zone": deterministic_card.zone,
         "state": deterministic_card.state,
         "panic_extreme_score": deterministic_card.panic_extreme_score,
         "selling_exhaustion_score": deterministic_card.selling_exhaustion_score,
-        "intraday_reversal_score": deterministic_card.intraday_reversal_score,
+        "reversal_confirmation_score": deterministic_card.reversal_confirmation_score,
         "factor_breakdown": deterministic_card.factor_breakdown,
         "early_entry_allowed": deterministic_card.early_entry_allowed,
         "max_position_hint": deterministic_card.max_position_hint,
@@ -242,26 +259,30 @@ def _enforce_panic_card(card: MarketMonitorPanicCard, deterministic_card: Market
 
 def _bounded_adjustment(
     adjustment: MarketMonitorScoreAdjustment | None,
-    fact_sheet: MarketMonitorFactSheet,
+    fact_sheet: MarketMonitorFactSheet | None,
 ) -> MarketMonitorScoreAdjustment | None:
     if adjustment is None:
         return None
     value = max(-5.0, min(5.0, float(adjustment.value)))
-    if value == 0:
-        return None
-    if not adjustment.reason.strip() or not adjustment.source_event_ids:
-        return None
-    events_by_id = {event.event_id: event for event in fact_sheet.event_fact_sheet}
-    source_events = [events_by_id.get(event_id) for event_id in adjustment.source_event_ids]
-    if any(event is None for event in source_events):
-        return None
-    valid_events = [event for event in source_events if event is not None and event.expires_at > fact_sheet.generated_at]
-    if not valid_events:
+    if value == 0 or not adjustment.reason.strip():
         return None
     if _direction_conflicts(value, adjustment.direction):
         return None
-    earliest_expiry = min(event.expires_at for event in valid_events)
-    expires_at = _min_datetime(adjustment.expires_at, earliest_expiry) if adjustment.expires_at else earliest_expiry
+    expires_at = adjustment.expires_at
+    if adjustment.source_event_ids:
+        if fact_sheet is None:
+            return None
+        events_by_id = {event.event_id: event for event in fact_sheet.event_fact_sheet}
+        source_events = [events_by_id.get(event_id) for event_id in adjustment.source_event_ids]
+        if any(event is None for event in source_events):
+            return None
+        valid_events = [event for event in source_events if event is not None and event.expires_at > fact_sheet.generated_at]
+        if not valid_events:
+            return None
+        earliest_expiry = min(event.expires_at for event in valid_events)
+        expires_at = _min_datetime(expires_at, earliest_expiry) if expires_at else earliest_expiry
+    elif not adjustment.source_factors:
+        return None
     confidence = max(0.0, min(1.0, float(adjustment.confidence)))
     return adjustment.model_copy(update={
         "value": round(value, 1),

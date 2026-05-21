@@ -37,7 +37,7 @@ class MarketMonitorInferenceTests(unittest.TestCase):
         llm_payload = deterministic.model_copy(
             update={
                 "score": 92.0,
-                "reasoning_summary": "趋势与广度同时改善。",
+                "score_reasoning": "趋势与广度同时改善。",
                 "score_adjustment": MarketMonitorScoreAdjustment(
                     value=12.0,
                     direction="up",
@@ -68,7 +68,7 @@ class MarketMonitorInferenceTests(unittest.TestCase):
 
     def test_trace_records_supported_token_usage_metadata(self) -> None:
         deterministic = fixture_score_card(deterministic_score=67.5, score=67.5)
-        content = deterministic.model_copy(update={"reasoning_summary": "保留确定性结构，仅补充解释。"}).model_dump_json()
+        content = deterministic.model_copy(update={"score_reasoning": "保留确定性结构，仅补充解释。"}).model_dump_json()
         with patch(
             "tradingagents.web.market_monitor.inference.base.create_llm_client",
             return_value=type(
@@ -261,7 +261,7 @@ class MarketMonitorInferenceTests(unittest.TestCase):
 
     def test_short_term_inference_parses_json(self) -> None:
         deterministic = fixture_score_card(deterministic_score=61.3, score=61.3, zone="可做区", recommended_exposure=None)
-        content = deterministic.model_copy(update={"reasoning_summary": "行业动量扩散改善，波动尚可承受。"}).model_dump_json()
+        content = deterministic.model_copy(update={"score_reasoning": "行业动量扩散改善，波动尚可承受。"}).model_dump_json()
         with patch(
             "tradingagents.web.market_monitor.inference.base.create_llm_client",
             return_value=type("_FakeClient", (), {"get_llm": lambda self: _FakeLlm(content)})(),
@@ -283,7 +283,7 @@ class MarketMonitorInferenceTests(unittest.TestCase):
             update={
                 "tactic_layer": deterministic.tactic_layer.model_copy(update={"top_tactic": "趋势突破"}),
                 "asset_layer": deterministic.asset_layer.model_copy(update={"preferred_assets": ["大盘科技"]}),
-                "reasoning_summary": "LLM 只能解释风格，不能改写规则层。",
+                "score_reasoning": "LLM 只能解释风格，不能改写规则层。",
             }
         )
         with patch(
@@ -299,7 +299,7 @@ class MarketMonitorInferenceTests(unittest.TestCase):
 
         self.assertEqual(result.payload.tactic_layer.top_tactic, "回调低吸")
         self.assertEqual(result.payload.asset_layer.preferred_assets, ["防御板块", "能源/周期"])
-        self.assertEqual(result.payload.reasoning_summary, "LLM 只能解释风格，不能改写规则层。")
+        self.assertEqual(result.payload.score_reasoning, "LLM 只能解释风格，不能改写规则层。")
         self.assertEqual(result.trace.card_type, "style")
 
     def test_style_inference_accepts_object_risks(self) -> None:

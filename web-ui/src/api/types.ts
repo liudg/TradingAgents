@@ -281,6 +281,7 @@ export interface MarketMonitorScoreAdjustment {
   direction: string;
   reason: string;
   source_event_ids: string[];
+  source_factors: string[];
   confidence: number;
   expires_at?: string | null;
 }
@@ -311,8 +312,6 @@ export interface MarketMonitorEventTrigger {
 }
 
 export interface MarketMonitorReasoningFields {
-  reasoning_summary?: string | null;
-  key_drivers: string[];
   risks: string[];
   evidence: MarketMonitorEvidenceRef[];
   confidence: number;
@@ -328,6 +327,8 @@ export interface MarketMonitorScoreCard extends MarketMonitorReasoningFields {
   recommended_exposure?: string | null;
   factor_breakdown: MarketMonitorFactorBreakdown[];
   score_adjustment?: MarketMonitorScoreAdjustment | null;
+  score_reasoning?: string | null;
+  action_hint?: string | null;
 }
 
 export interface MarketMonitorSystemRiskCard extends MarketMonitorScoreCard {
@@ -345,6 +346,11 @@ export interface MarketMonitorLayerMetric {
 }
 
 export interface MarketMonitorStyleEffectiveness extends MarketMonitorReasoningFields {
+  deterministic_score: number;
+  score: number;
+  score_adjustment?: MarketMonitorScoreAdjustment | null;
+  score_reasoning?: string | null;
+  action_hint?: string | null;
   tactic_layer: {
     trend_breakout: MarketMonitorLayerMetric;
     dip_buy: MarketMonitorLayerMetric;
@@ -386,6 +392,7 @@ export interface MarketMonitorEventRiskFlag {
 
 export interface MarketMonitorExecutionCard extends MarketMonitorReasoningFields {
   regime_label: string;
+  decision_reasoning?: string | null;
   conflict_mode: string;
   total_exposure_range: string;
   new_position_allowed: boolean;
@@ -407,12 +414,16 @@ export interface MarketMonitorExecutionCard extends MarketMonitorReasoningFields
 }
 
 export interface MarketMonitorPanicCard extends MarketMonitorReasoningFields {
+  deterministic_score: number;
   score: number;
+  score_adjustment?: MarketMonitorScoreAdjustment | null;
+  score_reasoning?: string | null;
+  action_hint?: string | null;
   zone: string;
   state: string;
   panic_extreme_score: number;
   selling_exhaustion_score: number;
-  intraday_reversal_score: number;
+  reversal_confirmation_score: number;
   factor_breakdown: MarketMonitorFactorBreakdown[];
   action: string;
   system_risk_override?: string | null;

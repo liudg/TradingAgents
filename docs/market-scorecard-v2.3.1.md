@@ -1,23 +1,21 @@
 # 美股市场评分卡 V2.3.1
 
-> 本版为 **可回测、可审计、可实现化修订版**。
-> 目标不是追求最理想的数据完备度，而是在当前约束下形成稳定、可落地、可持续校准的市场监控评分协议。
+> 本文档定义一套 **可回测、可审计、可实现** 的美股市场监控评分协议。
+> 目标不是追求最理想的数据完备度，而是在当前数据约束下形成稳定、可落地、可持续校准的评分与执行框架。
 
 当前约束：
 - 本地结构化市场数据源：**yfinance**
 - 评分方式：**每张评分卡单独请求 LLM**
 - 信息不足时：**允许评分流程按需联网搜索补充事件与叙事，但搜索结果必须先规范化为统一的 `event_fact_sheet`，再进入评分卡与执行卡**
-- 最终由执行卡汇总所有评分卡结论
+- 最终由执行卡按固定优先级汇总所有评分卡结论
 - 系统结论以**刷新当刻可获取的数据**为准，不依赖“事件后 30 分钟观察”或“次日延续确认”之类未来信息
 
-V2.3.1 修复重点：
-- 将“LLM 自由裁决”收紧为“确定性因子计算 + LLM 解释、冲突处理和置信度调整”
-- 统一所有分数方向与因子审计字段
-- 明确 yfinance 日线 / 盘中数据边界
-- 将搜索治理升级为结构化 `event_fact_sheet`
-- 重写系统风险与 panic 状态机，避免“恐慌充分”被误判为“反转确认”
-- 扩展完整输出结构，支持后续回测、复盘和 prompt 审计
-- 修正数据新鲜度、百分比单位、执行阈值和 panic 分区的歧义
+设计原则：
+- 本地结构化数据优先，LLM 不得编造或覆盖价格、成交量、波动率、均线、百分位等指标。
+- 评分采用混合机制：确定性层提供可审计的量化基准分，LLM 基于 yfinance 数据、量化基准分与联网搜索事实给出最终评分、解释和操作建议。
+- 所有搜索结果进入统一 `event_fact_sheet`，评分卡与执行卡只消费同一事实表。
+- 所有分数方向、数据模式、百分比单位、阈值区间、事件调整和因子审计字段必须显式可追踪。
+- 系统风险与 panic 模块相互独立：恐慌充分不等于反转确认，panic 仓位不等于趋势仓恢复。
 
 ---
 
@@ -25,7 +23,7 @@ V2.3.1 修复重点：
 
 ### 0.1 目标架构
 
-代码实现应采用 **“本地数据优先 + 确定性因子计算 + 统一事件事实表 + 单卡独立 LLM 裁决”** 的架构。
+代码实现应采用 **“本地数据优先 + 可审计量化基准 + 统一事件事实表 + 单卡独立 LLM 评分裁决”** 的架构。
 
 完整流程如下：
 
@@ -35,13 +33,15 @@ V2.3.1 修复重点：
    - 计算基础派生指标：收益率、均线、区间位置、ATR、相对强弱、成交量变化、波动变化
    - 记录 `input_data_status` 与 `missing_data`
 
-2. **deterministic_factor_layer**
+2. **quantitative_baseline_layer**
    - 由代码 / 规则层确定性计算：
      - `factor_values`
      - `factor_scores`
+     - `deterministic_score`
      - `factor_breakdown`
      - `missing_flags`
    - 因子计算应尽量可复现、可回测、可单元测试
+   - `deterministic_score` 是 LLM 评分的量化锚点，不是必须照抄的最终分
    - LLM 不应替代本地价格、成交量、波动率、均线、百分位等结构化计算
 
 3. **event_fact_sheet**
@@ -55,14 +55,15 @@ V2.3.1 修复重点：
    - 每张评分卡单独请求一次 LLM
    - 每次请求输入包括：
      - 该卡相关的本地结构化市场数据
-     - 确定性因子计算结果
+     - 量化基准层输出的 `factor_values`、`factor_scores`、`deterministic_score` 与 `factor_breakdown`
      - 本文档定义的评分方向、冲突规则与输出结构
      - 当前已知的 `event_fact_sheet`
    - LLM 负责：
-     - 解释分数
+     - 基于 yfinance 数据、量化基准分与搜索事实给出该卡最终 `score`
+     - 解释最终分数与基准分之间的差异
      - 标注风险与不确定性
      - 对事件、叙事、宏观日历提出补充搜索需求，或消费已经规范化的搜索事实
-     - 在规则允许范围内调整置信度与执行语气
+     - 给出置信度、风险提示和与该卡相关的操作含义
    - LLM 不得编造缺失市场数据。若数据不足，必须在 `missing_data`、`risks`、`confidence` 中说明。
 
 5. **execution_decision**
@@ -92,9 +93,9 @@ V2.3.1 修复重点：
 - 风险情绪与重大市场叙事
 - 明确的突发事件说明
 
-#### C. 可选增强数据（V2.3.1 不作为硬依赖）
+#### C. 增强数据边界（不作为硬依赖）
 
-这类数据若未来接入专门数据源可增强，但 V2.3.1 默认不要求：
+以下数据不进入 V2.3.1 的核心必需输入；如接入专门数据源，只能作为补充证据或非核心增强项：
 - 交易所级 breadth 原始数据
 - A/D 线、新高新低净差等市场内部统计
 - 股票级 RS 横截面
@@ -105,29 +106,33 @@ V2.3.1 修复重点：
 ### 0.3 本文档的定位
 
 - 本文档定义的是市场评分卡的**领域知识、评分方向、审计结构与输出协议**
-- 因子值与基础分数应优先由确定性代码计算，不应交给 LLM 自由生成
-- LLM 可以对事件、叙事和冲突状态做解释，但不得覆盖本地结构化指标
+- 因子值、因子分和量化基准分应优先由确定性代码计算，作为 LLM 最终评分的输入锚点
+- LLM 可以基于本地结构化数据、量化基准分、事件事实表和冲突规则给出最终 `score`
+- LLM 不得覆盖、补写或编造本地结构化指标；若最终分偏离量化基准分，必须留下可审计原因
 - 当某类理想数据当前不可得时，系统应优先使用 ETF / 指数 / 波动率 proxy，而不是编造事实
 - 若本地数据不足且联网搜索也无法稳定确认，LLM 应在 `missing_data`、`risks`、`confidence` 中明确说明不确定性
 - Prompt 设计应将本文档的核心规则编入 system instructions 或结构化 fact sheet 上下文
 
-### 0.3.1 LLM 裁决边界
+### 0.3.1 混合评分边界
 
-为保证可回测和可审计，LLM 与规则层的职责必须明确分离：
+为保证 LLM 能综合判断且结果仍可回测、可审计，LLM 与规则层的职责必须明确分离：
 
 | 项目 | 责任方 | 规则 |
 |---|---|---|
 | 原始行情、成交量、波动率、均线、百分位 | 确定性代码 | LLM 不得生成、补写或覆盖 |
-| `factor_breakdown.score` | 确定性代码 | LLM 不得直接改写 |
-| 卡片 `score` | 确定性代码为主 | 默认等于确定性合成分；若引入事件冲击，必须通过结构化 `event_triggers` 或 `score_adjustment` 审计字段体现 |
-| `confidence`、`risks`、`evidence`、解释文字 | LLM | 可根据数据缺口、事件冲突和叙事不确定性调整 |
+| `factor_values`、`factor_scores`、`factor_breakdown.score` | 确定性代码 | 作为 LLM 输入锚点；LLM 不得直接改写 |
+| `deterministic_score` | 确定性代码 | 表示量化基准分，用于审计 LLM 最终判断偏离幅度 |
+| 卡片最终 `score` | LLM | 基于 yfinance 数据、量化基准分、`event_fact_sheet`、冲突规则和缺失数据综合给出 |
+| `score_adjustment` | LLM | 当最终 `score` 偏离 `deterministic_score` 时必须输出，说明方向、幅度、依据、事件来源和置信度 |
+| `confidence`、`risks`、`evidence`、解释文字 | LLM | 根据数据缺口、事件冲突和叙事不确定性调整 |
 | 执行权限收紧 | 执行卡规则层 + LLM 解释 | 只能更保守，不能因为叙事乐观而越过系统风险 override |
 
-若某张评分卡允许 LLM 对 `score` 做事件型调整，必须满足：
-- 调整来源必须来自 `event_fact_sheet` 或本地确定性触发器。
-- 输出必须包含 `score_adjustment`，说明方向、幅度、依据、过期时间和置信度。
-- 默认单次 LLM 事件调整幅度不超过 `±5` 分；超过时必须由规则层白名单触发，例如危机级地缘事件或交易所异常。
-- 回测时必须能同时复现“未调整分数”和“调整后分数”。
+LLM 给出最终 `score` 时必须满足：
+- 最终分必须能追溯到本地结构化数据、量化基准分、`event_fact_sheet` 或明确的缺失数据判断。
+- 若 `score != deterministic_score`，必须输出 `score_adjustment`，说明方向、幅度、依据、过期时间和置信度。
+- `score_adjustment.source_event_ids` 只能引用 `event_fact_sheet` 中存在的事件；非事件型偏离必须说明来自哪些 `factor_breakdown` 或 `missing_flags`。
+- 偏离幅度必须与证据强度匹配；大幅偏离应降低 `confidence`，并在 `risks` 中说明模型判断风险。
+- 回测时必须能同时复现“量化基准分”和“LLM 最终分”。
 
 ### 0.4 搜索治理规则：`event_fact_sheet`
 
@@ -156,14 +161,14 @@ V2.3.1 修复重点：
 1. **本地结构化数据优先**：搜索结果不能覆盖本地价格、波动率、成交量和衍生指标。
 2. **搜索只补事件与叙事**：宏观日历、财报事件、政策/地缘、风险情绪和突发新闻可搜索补充。
 3. **搜索结论必须可溯源**：优先官方日历、交易所/公司公告和主流财经媒体；事实表必须保留 `source_name` 与 `source_url`，无法提供链接时必须在 `risks` 中说明。
-4. **搜索事实必须过期**：事件类事实必须写入 `expires_at`，避免旧事件污染后续刷新。
+4. **搜索事实必须过期**：事件类事实必须写入 `expires_at`，避免过期事件污染后续刷新。
 5. **冲突来源降置信度**：多来源冲突时不强行裁决事实，应降低 `confidence` 并写入 `risks`。
 6. **同周期事实去重**：同一事件在同一刷新周期内只能保留一个主事实；多来源证据应合并到同一 `event_id` 下，而不是生成多个互相竞争的事件。
 7. **执行卡只消费事实表**：执行卡不得重新搜索或私自修改事件事实，只能基于统一 `event_fact_sheet` 做权限收紧、置信度调整和风险说明。
 
-### 0.5 当前实现的额外特性（文档外）
+### 0.5 实现配套能力
 
-以下特性可实现，但不属于评分卡逻辑本身：
+以下能力服务于运行、审计和排障，但不参与评分卡分数合成：
 - Prompt 审计追踪
 - 运行阶段持久化与恢复
 - 并发限制与超时保护
@@ -215,9 +220,9 @@ yfinance 数据必须区分日线与盘中语义：
 ```
 
 执行矩阵中的文字标签也必须遵守同一规则。例如：
-- `强（[65,80)）` 不包含 80，80 进入 `强趋势（[80,100]）`。
-- `中性（[45,65)）` 不包含 65，65 进入 `强（[65,80)）`。
-- `高压（[70,80)）` 不包含 80，80 进入 `危机（[80,100]）`。
+- `进攻区（[65,80)）` 不包含 80，80 进入 `强趋势区（[80,100]）`。
+- `试仓区（[50,65)）` 不包含 65，65 进入 `进攻区（[65,80)）`。
+- `高压区（[70,80)）` 不包含 80，80 进入 `危机区（[80,100]）`。
 
 ### 1.4 两类因子，两种阈值策略
 
@@ -250,8 +255,8 @@ def benefit_score_slope_state(delta_1d, delta_5d):
     if delta_1d > 3  and delta_5d > 8:   return "加速改善"
     if delta_1d > 0  and delta_5d > 3:   return "缓慢改善"
     if abs(delta_1d) <= 2:               return "钝化震荡"
-    if delta_1d < 0  and delta_5d < -3:  return "缓慢恶化"
     if delta_1d < -3 and delta_5d < -8:  return "加速恶化"
+    if delta_1d < 0  and delta_5d < -3:  return "缓慢恶化"
     return "震荡"
 
 def risk_score_slope_state(delta_1d, delta_5d):
@@ -259,8 +264,8 @@ def risk_score_slope_state(delta_1d, delta_5d):
     if delta_1d > 3  and delta_5d > 8:   return "风险加速上升"
     if delta_1d > 0  and delta_5d > 3:   return "风险缓慢上升"
     if abs(delta_1d) <= 2:               return "风险钝化震荡"
-    if delta_1d < 0  and delta_5d < -3:  return "风险缓慢回落"
     if delta_1d < -3 and delta_5d < -8:  return "风险加速回落"
+    if delta_1d < 0  and delta_5d < -3:  return "风险缓慢回落"
     return "风险震荡"
 ```
 
@@ -294,7 +299,7 @@ def risk_score_slope_state(delta_1d, delta_5d):
 - `reason`：面向投研解释的简短说明
 - `data_status`：`available`、`missing`、`proxy_used`、`search_only`
 
-若卡片 `score` 不等于确定性合成分，必须额外输出：
+每张评分卡必须同时输出量化基准分、LLM 最终分、评分理由和操作含义：
 
 ```json
 {
@@ -305,23 +310,31 @@ def risk_score_slope_state(delta_1d, delta_5d):
     "direction": "risk_up",
     "reason": "CPI 次日盘前公布，隔夜事件风险上升。",
     "source_event_ids": ["2026-04-10-cpi-release"],
+    "source_factors": ["event_risk"],
     "confidence": 0.84,
     "expires_at": "2026-04-10T10:30:00-04:00"
-  }
+  },
+  "score_reasoning": "量化基准显示风险偏高，叠加次日 CPI 事件，最终风险评分高于基准分。",
+  "action_hint": "降低新开仓权限，收紧隔夜风险。"
 }
 ```
 
-若没有调整，`deterministic_score` 应等于 `score`，`score_adjustment` 可为 `null`。
+字段约定：
+- `deterministic_score`：规则层基于 yfinance 数据和 proxy 因子计算的量化基准分。
+- `score`：LLM 基于量化基准、结构化事件事实、缺失数据和冲突规则给出的最终分。
+- `score_adjustment`：当 `score != deterministic_score` 时必填；当 LLM 认为量化基准分已经充分表达当前状态时可为 `null`。
+- `score_reasoning`：LLM 对最终分的简短解释，必须说明主要驱动因素。
+- `action_hint`：该卡对执行卡的操作含义，不直接替代最终执行卡裁决。
 
 ### 1.7 Proxy 使用原则
 
-V2.3.1 统一采用以下 proxy 原则：
+本协议统一采用以下 proxy 原则：
 
 1. breadth 用 ETF proxy 表达，不要求交易所级原始 breadth feed。
 2. 行业赚钱效应与风格偏好以行业 ETF / 风格 ETF 表达。
 3. 股票横截面统计不足时，用指数 / ETF / 风格相对强弱替代。
 4. 不使用 PCR 百分位或市场级 Put-Call Ratio 双路径作为核心硬依赖。
-5. panic 模块以指数 / ETF / 波动率为主，宽市场横截面数据只作未来增强项。
+5. panic 模块以指数 / ETF / 波动率为主，宽市场横截面数据只作非核心增强项。
 
 ---
 
@@ -384,7 +397,7 @@ V2.3.1 统一采用以下 proxy 原则：
 
 ### 3.1 因子量化映射
 
-短线环境分越高，代表未来 1-5 个刷新周期内更适合主动交易。
+短线环境分越高，代表接下来 1-5 个刷新周期内更适合主动交易。
 
 **热点延续性（权重 30%）**
 
@@ -466,9 +479,9 @@ V2.3.1 统一采用以下 proxy 原则：
 | ARKK/SPY 5日相对表现 | 慢变量 | 高 Beta 风险偏好代理 | ARKK 相对弱，风险更高 | 20% |
 | 跨资产同步下跌压力 | 慢变量 | SPY / QQQ / IWM / JNK 近5日共同走弱程度 | 同步走弱越强，风险越高 | 25% |
 
-### 4.3 可选增强代理
+### 4.3 补充代理边界
 
-若未来接入更完整数据，可加入但不作为当前硬依赖：
+以下代理可作为补充观察项，但不作为当前硬依赖：
 
 | 代理 | 作用 |
 |---|---|
@@ -515,8 +528,8 @@ V2.3.1 统一采用以下 proxy 原则：
 
 ## 5. 市场手法与风格有效性卡
 
-> 原“风格有效性卡”在 V2.3.1 中降调为“市场手法与风格有效性卡”。
-> ETF proxy 能判断市场环境更支持哪类手法，但不能直接代表个股交易胜率。
+> 市场手法与风格有效性卡用于判断当前市场环境更支持哪类交易手法和资产风格。
+> ETF proxy 只能表达市场环境偏好，不能直接代表个股交易胜率。
 
 ### 5.1 第一层：策略手法有效性
 
@@ -548,6 +561,19 @@ V2.3.1 统一采用以下 proxy 原则：
 
 ```json
 "style_effectiveness": {
+  "deterministic_score": 62.0,
+  "score": 66.0,
+  "score_adjustment": {
+    "value": 4.0,
+    "direction": "style_preference_clearer",
+    "reason": "量化层显示能源与防御板块相对强，风格偏好更集中。",
+    "source_event_ids": [],
+    "source_factors": ["sector_relative_strength", "tactic_effectiveness"],
+    "confidence": 0.72,
+    "expires_at": null
+  },
+  "score_reasoning": "量化层显示趋势突破偏弱、低吸和超跌反弹更有效，行业 ETF 相对强弱进一步支持防御和能源周期方向。",
+  "action_hint": "执行卡应优先考虑低吸或超跌反弹手法，避免趋势突破追高。",
   "tactic_layer": {
     "trend_breakout": {
       "score": 28,
@@ -610,21 +636,23 @@ V2.3.1 统一采用以下 proxy 原则：
 
 ### 6.2 长线/短线冲突处理矩阵
 
+本矩阵复用第 2、3、4 章定义的分区，避免执行层另起一套阈值。系统风险 override 优先于长线和短线组合判断。
+
 | 长线 | 短线 | 系统风险 | Regime | 核心规则 |
 |---|---|---|---|---|
-| 强趋势（[80,100]） | 活跃（[65,100]） | 低（[0,25)） | 绿灯 | 允许 80%-100% 总仓，追高和隔夜允许 |
-| 强（[65,80)） | 强（[55,100]） | 低（[0,35)） | 黄绿灯 | 进攻但不默认满仓，建议 60%-80% |
-| 强（[65,80)） | 强（[55,100]） | 中（[35,60)） | 黄灯 | 进攻但控单票上限，减杠杆 |
-| 强（[65,80)） | 弱（[25,45)） | 任意 | 黄灯-等待 | 趋势仓可保留，禁追高，只允许低吸 |
-| 强（[65,80)） | 极差（[0,25)） | 任意 | 橙灯 | 趋势仓降风险，禁所有新开仓，等 panic 或短线修复 |
-| 中性（[45,65)） | 强（[60,100]） | 低（[0,35)） | 黄绿灯-Swing | 允许积极 swing，不建趋势重仓 |
-| 中性（[45,65)） | 中性（[45,55)） | 正常（[0,50)） | 黄灯 | 低频操作，低吸+确认突破，不提高频率 |
-| 中性（[45,65)） | 弱（[0,45)） | 任意 | 橙灯 | 控仓，防守为主 |
-| 弱（[0,45)） | 强（[55,100]） | 低（[0,35)） | 黄灯-短线 | 只允许短线博弈仓，不建趋势仓 |
-| 弱（[0,45)） | 弱（[0,45)） | 任意 | 红灯 | 净值保护，禁一切新开仓 |
 | 任意 | 任意 | 高压预警（[60,70)） | 橙灯 | 禁止杠杆，降低新开仓权限，优先保护净值 |
 | 任意 | 任意 | 高压（[70,80)） | 红灯-高压 | 只允许对冲或极低风险仓位 |
 | 任意 | 任意 | 危机（[80,100]） | 红灯-危机 | 危机模式，只保留对冲或极低风险仓位 |
+| 强趋势区（[80,100]） | 活跃区/高胜率区（[65,100]） | 低压区/正常区（[0,45)） | 绿灯 | 允许 80%-100% 总仓，追高和隔夜允许 |
+| 进攻区（[65,80)） | 可做区/活跃区/高胜率区（[50,100]） | 低压区（[0,20)） | 黄绿灯 | 进攻但不默认满仓，建议 60%-80% |
+| 进攻区（[65,80)） | 可做区/活跃区/高胜率区（[50,100]） | 正常区/压力区（[20,60)） | 黄灯 | 进攻但控单票上限，减杠杆 |
+| 进攻区/强趋势区（[65,100]） | 观察区（[35,50)） | 非高压区（[0,60)） | 黄灯-等待 | 趋势仓可保留，禁追高，只允许低吸 |
+| 进攻区/强趋势区（[65,100]） | 极差区/弱势区（[0,35)） | 任意 | 橙灯 | 趋势仓降风险，禁所有新开仓，等 panic 或短线修复 |
+| 试仓区（[50,65)） | 活跃区/高胜率区（[65,100]） | 低压区/正常区（[0,45)） | 黄绿灯-Swing | 允许积极 swing，不建趋势重仓 |
+| 试仓区（[50,65)） | 观察区/可做区（[35,65)） | 低压区/正常区（[0,45)） | 黄灯 | 低频操作，低吸+确认突破，不提高频率 |
+| 试仓区（[50,65)） | 极差区/弱势区（[0,35)） | 任意 | 橙灯 | 控仓，防守为主 |
+| 防守区/谨慎区（[0,50)） | 可做区/活跃区/高胜率区（[50,100]） | 低压区/正常区（[0,45)） | 黄灯-短线 | 只允许短线博弈仓，不建趋势仓 |
+| 防守区/谨慎区（[0,50)） | 极差区/弱势区/观察区（[0,50)） | 任意 | 红灯 | 净值保护，禁一切新开仓 |
 
 矩阵未覆盖情形：
 - 落入相邻更保守 regime。
@@ -667,6 +695,7 @@ V2.3.1 统一采用以下 proxy 原则：
 
 执行卡必须包含：
 - `regime_label`
+- `decision_reasoning`
 - `conflict_mode`
 - `total_exposure_range`
 - `new_position_allowed`
@@ -700,7 +729,7 @@ V2.3.1 统一采用以下 proxy 原则：
 无信号              panic_extreme_score < 35
 panic_watch         恐慌出现但不极端，进入观察，不执行
 capitulation_watch  恐慌极端，但尚未证明抛压衰竭，不执行反转仓
-panic_confirmed     恐慌充分 + 抛压衰竭或即时反弹确认，可执行反弹仓
+panic_confirmed     恐慌充分 + 抛压衰竭或反弹确认，可执行反弹仓
 ```
 
 状态不是简单线性升级。`panic_confirmed` 必须通过确认门槛进入；`capitulation_watch` 不能因为恐慌更强而自动升级为 `panic_confirmed`。
@@ -736,18 +765,18 @@ else:
 | 领跌资产止跌 | 事件型 | `IWM / ARKK / XLE / XLF` 中至少两项跌幅显著收敛 | 25% |
 | VIX 回落迹象 | 事件型 | 盘中模式下 VIX 脱离高位；日线模式下 VIX 收盘涨幅明显收敛 | 20% |
 
-### 7.5 第三段：即时反弹确认分
+### 7.5 第三段：反弹确认分
 
-反弹确认仅基于刷新当刻可见的指数 / ETF / 波动率行为，不依赖未来时点数据。
+反弹确认仅基于刷新当刻可见的指数 / ETF / 波动率行为，不依赖未来时点数据；字段统一命名为 `reversal_confirmation_score`，同时适用于日线和盘中模式。
 
 | 因子 | 类型 | 计算方法 | 权重 |
 |---|---|---|---|
 | 站回前一参考中位价 | 事件型 | `close > (prev_high + prev_low) / 2` | 35% |
 | 收在当前区间上半部 | 事件型 | `close > low + 0.5 * (high - low)` | 30% |
-| 高 Beta proxy basket 同步修复 | 事件型 | `ARKK / IWM` 表现明显优于刷新时低点 | 20% |
+| 高 Beta proxy basket 同步修复 | 事件型 | `ARKK / IWM` 相对当前或最近一根数据的区间低点明显修复 | 20% |
 | 短线环境不再恶化 | 内部衍生 | `short_term_score` 明显止跌或回升 | 15% |
 
-若 `data_mode = daily`，上述“刷新时低点”只能理解为当日或最近一根日线的 `low`，不得描述为盘中实时低点；若没有当日完整 OHLCV，则该因子应标记为 `missing` 或降权。
+若 `data_mode = daily`，上述“区间低点”只能理解为当日或最近一根日线的 `low`，不得描述为盘中实时低点；若没有当日完整 OHLCV，则该因子应标记为 `missing` 或降权。
 
 ### 7.6 最终合成与状态机
 
@@ -755,12 +784,12 @@ else:
 panic_reversal_score = (
     panic_extreme_score * 0.40 +
     selling_exhaustion_score * 0.30 +
-    intraday_reversal_score * 0.30
+    reversal_confirmation_score * 0.30
 )
 
 if panic_extreme_score < 35:
     state = "无信号"
-elif panic_reversal_score >= 50 and (selling_exhaustion_score >= 50 or intraday_reversal_score >= 60):
+elif panic_reversal_score >= 50 and (selling_exhaustion_score >= 50 or reversal_confirmation_score >= 60):
     state = "panic_confirmed"
 elif panic_extreme_score >= 80:
     state = "capitulation_watch"
@@ -770,7 +799,7 @@ else:
 
 关键约束：
 - `panic_extreme_score >= 80` 只能证明恐慌极端，不能单独证明反转。
-- 必须满足 `selling_exhaustion_score >= 50` 或 `intraday_reversal_score >= 60`，才可进入 `panic_confirmed`。
+- 必须满足 `selling_exhaustion_score >= 50` 或 `reversal_confirmation_score >= 60`，才可进入 `panic_confirmed`。
 - 若 `system_risk_score` 位于 `[80,100]`，即使 `panic_reversal_score >= 80`，反弹仓位上限也强制 `<=15%`。
 
 ### 7.7 分区与仓位
@@ -790,10 +819,10 @@ else:
 
 ```text
 即时试探规则：
-  若 state = panic_confirmed 且 intraday_reversal_score >= 60：
+  若 state = panic_confirmed 且 reversal_confirmation_score >= 60：
     -> 允许刷新当刻建立 5%-10% 先手仓
   若后续刷新仍保持确认：
-    -> 可把先手仓升级到一级试错或二级反弹仓位
+    -> 可把先手仓提高到一级试错或二级反弹仓位
   若后续刷新失去确认：
     -> 先手仓按更紧止损退出，不得硬扛
 
@@ -813,12 +842,24 @@ else:
 
 ```json
 "panic_reversal_score": {
+  "deterministic_score": 60.0,
   "score": 64.0,
+  "score_adjustment": {
+    "value": 4.0,
+    "direction": "reversal_opportunity_up",
+    "reason": "除已纳入系统风险的 CPI 事件外，未发现额外系统性恶化事件，且高 Beta proxy 修复证据改善。",
+    "source_event_ids": [],
+    "source_factors": ["selling_exhaustion_score", "reversal_confirmation_score"],
+    "confidence": 0.68,
+    "expires_at": null
+  },
+  "score_reasoning": "恐慌程度充分，抛压衰竭初现，但反弹确认仍不强，因此仅给一级试错。",
+  "action_hint": "仅允许独立 panic 反弹仓轻仓试探，不视为趋势仓恢复。",
   "zone": "一级试错",
   "state": "panic_confirmed",
   "panic_extreme_score": 80.0,
   "selling_exhaustion_score": 55.0,
-  "intraday_reversal_score": 42.0,
+  "reversal_confirmation_score": 42.0,
   "factor_breakdown": [],
   "action": "恐慌充分且抛压衰竭初现，可10%-15%轻仓试探",
   "system_risk_override": "系统风险位于[80,100]时，反弹仓上限强制<=15%",
@@ -883,8 +924,8 @@ else:
     "factor_breakdown": [
       {
         "factor": "spy_ma200_distance",
-        "raw_value": -0.018,
-        "raw_value_unit": "ratio",
+        "raw_value": -1.8,
+        "raw_value_unit": "pct",
         "percentile": null,
         "polarity": "higher_is_better",
         "score": 10.0,
@@ -894,6 +935,8 @@ else:
       }
     ],
     "score_adjustment": null,
+    "score_reasoning": "长线趋势与广度偏弱，且没有足够事件证据支持上调最终分。",
+    "action_hint": "总仓维持谨慎区间，不主动增加趋势仓。",
     "confidence": 0.82,
     "risks": [],
     "evidence": []
@@ -908,6 +951,8 @@ else:
     "slope_state": "加速恶化",
     "factor_breakdown": [],
     "score_adjustment": null,
+    "score_reasoning": "短线动量、突破友好度和波动环境均偏弱，LLM 未发现足以改善短线窗口的搜索事实。",
+    "action_hint": "禁止追涨，短线只保留观察或极轻仓试错。",
     "confidence": 0.78,
     "risks": [],
     "evidence": []
@@ -941,6 +986,7 @@ else:
         "event": "CPI release",
         "severity": "high",
         "score_impact": "+5",
+        "source_event_ids": ["2026-04-10-cpi-release"],
         "confidence": 0.91,
         "expires_at": "2026-04-10T10:30:00-04:00"
       }
@@ -950,15 +996,31 @@ else:
       "direction": "risk_up",
       "reason": "CPI 次日盘前公布，指数级隔夜事件风险上升。",
       "source_event_ids": ["2026-04-10-cpi-release"],
+      "source_factors": ["macro_event", "overnight_event_risk"],
       "confidence": 0.91,
       "expires_at": "2026-04-10T10:30:00-04:00"
     },
+    "score_reasoning": "量化基准已进入高压预警附近，CPI 次日盘前公布进一步抬高指数级隔夜风险，最终分上调至高压区。",
+    "action_hint": "执行卡必须触发系统风险 override，禁止杠杆并收紧新开仓和隔夜权限。",
     "confidence": 0.84,
     "risks": [],
     "evidence": []
   },
 
   "style_effectiveness": {
+    "deterministic_score": 62.0,
+    "score": 66.0,
+    "score_adjustment": {
+      "value": 4.0,
+      "direction": "style_preference_clearer",
+      "reason": "量化层显示防御和能源方向相对强，风格偏好更集中。",
+      "source_event_ids": [],
+      "source_factors": ["sector_relative_strength", "tactic_effectiveness"],
+      "confidence": 0.76,
+      "expires_at": null
+    },
+    "score_reasoning": "量化层显示趋势突破偏弱、超跌反弹更有效，LLM 结合风格轮动叙事后上调风格有效性最终分。",
+    "action_hint": "优先考虑超跌反弹或低吸手法，避免趋势突破追高。",
     "tactic_layer": {
       "trend_breakout": { "score": 22, "valid": false, "delta_5d": -21, "factor_breakdown": [] },
       "dip_buy": { "score": 63, "valid": true, "delta_5d": 10, "factor_breakdown": [] },
@@ -982,9 +1044,10 @@ else:
   },
 
   "execution_card": {
-    "regime_label": "红灯",
-    "conflict_mode": "长弱短弱+系统风险高压，系统风险 override 生效",
-    "total_exposure_range": "0%-20%",
+    "regime_label": "红灯-高压",
+    "decision_reasoning": "长线与短线评分均弱，系统风险最终分进入高压区；执行卡按系统风险 override 优先级进入红灯-高压。",
+    "conflict_mode": "系统风险位于高压区，系统风险 override 生效",
+    "total_exposure_range": "0%-10%（仅极低风险仓位或对冲）",
     "new_position_allowed": false,
     "chase_breakout_allowed": false,
     "dip_buy_allowed": false,
@@ -992,8 +1055,8 @@ else:
     "leverage_allowed": false,
     "single_position_cap": "5%",
     "daily_risk_budget": "0.25R",
-    "tactic_preference": "无（红灯禁止进攻）",
-    "preferred_assets": ["现金", "防御ETF对冲"],
+    "tactic_preference": "无（红灯-高压禁止进攻）",
+    "preferred_assets": ["现金", "对冲工具"],
     "avoid_assets": ["小盘高弹性", "高Beta追涨"],
     "signal_confirmation": {
       "current_regime_observations": 1,
@@ -1023,12 +1086,24 @@ else:
   },
 
   "panic_reversal_score": {
+    "deterministic_score": 60.0,
     "score": 64.0,
+    "score_adjustment": {
+      "value": 4.0,
+      "direction": "reversal_opportunity_up",
+      "reason": "除已纳入系统风险的 CPI 事件外，未发现额外系统性恶化事件，且高 Beta proxy 修复证据改善。",
+      "source_event_ids": [],
+      "source_factors": ["selling_exhaustion_score", "reversal_confirmation_score"],
+      "confidence": 0.68,
+      "expires_at": null
+    },
+    "score_reasoning": "恐慌程度充分，抛压衰竭初现，但反弹确认仍不强，因此仅给一级试错。",
+    "action_hint": "仅允许独立 panic 反弹仓轻仓试探，不视为趋势仓恢复。",
     "zone": "一级试错",
     "state": "panic_confirmed",
     "panic_extreme_score": 80.0,
     "selling_exhaustion_score": 55.0,
-    "intraday_reversal_score": 42.0,
+    "reversal_confirmation_score": 42.0,
     "factor_breakdown": [],
     "action": "恐慌充分且抛压衰竭初现，可10%-15%轻仓试探",
     "system_risk_override": "系统风险位于[80,100]时，反弹仓上限强制<=15%",
@@ -1076,6 +1151,11 @@ panic 模块必须单独评估，不能和趋势仓表现混在一起：
 - `scorecard_version`
 - `prompt_version`
 - `model_name`
+- `deterministic_score`
+- `score`
+- `score_adjustment`
+- `score_reasoning`
+- `action_hint`
 - `factor_breakdown`
 - `event_fact_sheet`
 - `missing_data`
@@ -1086,11 +1166,13 @@ panic 模块必须单独评估，不能和趋势仓表现混在一起：
 - 哪些因子方向判断错误？
 - 哪些事件事实过期或置信度过高？
 - 哪些搜索结果污染了本地结构化判断？
+- 哪些 `score_adjustment` 缺少证据、幅度过大或方向错误？
+- 哪些操作建议没有被最终执行卡正确吸收？
 - 哪些阈值需要回测校准？
 - LLM 是否越权编造或覆盖了本地指标？
 
-### 9.4 版本升级原则
+### 9.4 版本维护原则
 
-- 小幅阈值校准可升级 patch 版本，例如 V2.3.1。
-- 输出结构字段变更应升级 minor 版本，例如 V2.4。
-- 分数方向、状态机、执行优先级改变应升级 major 或明确迁移说明。
+- 小幅阈值校准对应 patch 版本变更。
+- 输出结构字段变更对应 minor 版本变更。
+- 分数方向、状态机、执行优先级改变对应 major 版本变更，并应明确迁移说明。

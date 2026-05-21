@@ -158,6 +158,7 @@ class MarketMonitorScoreAdjustment(BaseModel):
     direction: str
     reason: str
     source_event_ids: list[str] = Field(default_factory=list)
+    source_factors: list[str] = Field(default_factory=list)
     confidence: float = Field(..., ge=0, le=1)
     expires_at: datetime | None = None
 
@@ -188,8 +189,6 @@ class MarketMonitorEventTrigger(BaseModel):
 
 
 class MarketMonitorReasoningFields(BaseModel):
-    reasoning_summary: str | None = None
-    key_drivers: list[str] = Field(default_factory=list)
     risks: list[str] = Field(default_factory=list)
     evidence: list[MarketMonitorEvidenceRef] = Field(default_factory=list)
     confidence: float = Field(default=0.0, ge=0, le=1)
@@ -205,6 +204,8 @@ class MarketMonitorScoreCard(MarketMonitorReasoningFields):
     recommended_exposure: str | None = None
     factor_breakdown: list[MarketMonitorFactorBreakdown] = Field(default_factory=list)
     score_adjustment: MarketMonitorScoreAdjustment | None = None
+    score_reasoning: str | None = None
+    action_hint: str | None = None
 
 
 class MarketMonitorSystemRiskCard(MarketMonitorScoreCard):
@@ -241,6 +242,11 @@ class MarketMonitorStyleAssetLayer(BaseModel):
 
 
 class MarketMonitorStyleEffectiveness(MarketMonitorReasoningFields):
+    deterministic_score: float = Field(..., ge=0, le=100)
+    score: float = Field(..., ge=0, le=100)
+    score_adjustment: MarketMonitorScoreAdjustment | None = None
+    score_reasoning: str | None = None
+    action_hint: str | None = None
     tactic_layer: MarketMonitorStyleTacticLayer
     asset_layer: MarketMonitorStyleAssetLayer
 
@@ -277,6 +283,7 @@ class MarketMonitorSignalConfirmation(BaseModel):
 
 class MarketMonitorExecutionCard(MarketMonitorReasoningFields):
     regime_label: str
+    decision_reasoning: str | None = None
     conflict_mode: str
     total_exposure_range: str
     new_position_allowed: bool
@@ -294,12 +301,16 @@ class MarketMonitorExecutionCard(MarketMonitorReasoningFields):
 
 
 class MarketMonitorPanicCard(MarketMonitorReasoningFields):
+    deterministic_score: float = Field(..., ge=0, le=100)
     score: float = Field(..., ge=0, le=100)
+    score_adjustment: MarketMonitorScoreAdjustment | None = None
+    score_reasoning: str | None = None
+    action_hint: str | None = None
     zone: str
     state: str
     panic_extreme_score: float = Field(..., ge=0, le=100)
     selling_exhaustion_score: float = Field(..., ge=0, le=100)
-    intraday_reversal_score: float = Field(..., ge=0, le=100)
+    reversal_confirmation_score: float = Field(..., ge=0, le=100)
     factor_breakdown: list[MarketMonitorFactorBreakdown] = Field(default_factory=list)
     action: str
     system_risk_override: str | None = None

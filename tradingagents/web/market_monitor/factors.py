@@ -428,8 +428,9 @@ def build_long_term_card(bundle: MarketMonitorInputBundle) -> MarketMonitorScore
         recommended_exposure=_long_term_exposure(score),
         factor_breakdown=factors,
         confidence=_confidence(bundle, factors),
-        key_drivers=_top_factor_reasons(factors),
         risks=_card_risks(bundle, factors),
+        score_reasoning=_factor_reasoning("长线环境", factors),
+        action_hint=f"总仓维持 {_long_term_exposure(score)} 区间。",
     )
 
 
@@ -471,8 +472,9 @@ def build_short_term_card(bundle: MarketMonitorInputBundle) -> MarketMonitorScor
         slope_state=benefit_score_slope_state(delta_1d, delta_5d),
         factor_breakdown=factors,
         confidence=_confidence(bundle, factors),
-        key_drivers=_top_factor_reasons(factors),
         risks=_card_risks(bundle, factors),
+        score_reasoning=_factor_reasoning("短线环境", factors),
+        action_hint=_short_term_action_hint(score),
     )
 
 
@@ -528,8 +530,9 @@ def build_system_risk_card(bundle: MarketMonitorInputBundle, event_fact_sheet: l
         risk_appetite_score=round(appetite, 1),
         event_triggers=event_triggers,
         confidence=_confidence(bundle, factors),
-        key_drivers=_top_factor_reasons(factors),
         risks=_card_risks(bundle, factors),
+        score_reasoning=_factor_reasoning("系统风险", factors),
+        action_hint=_system_risk_action_hint(score),
     )
 
 
@@ -560,7 +563,12 @@ def build_style_effectiveness(bundle: MarketMonitorInputBundle) -> MarketMonitor
     avoid_assets = [asset_names[key] for key, metric in asset_metrics.items() if metric.score < 45]
     all_factors = trend.factor_breakdown + dip.factor_breakdown + oversold.factor_breakdown
     all_factors += [factor for metric in asset_metrics.values() for factor in metric.factor_breakdown]
+    score = bounded_score((sum(tactic_pairs.values()) / len(tactic_pairs) + sum(metric.score for metric in asset_metrics.values()) / len(asset_metrics)) / 2)
     return MarketMonitorStyleEffectiveness(
+        deterministic_score=round(score, 1),
+        score=round(score, 1),
+        score_reasoning=_factor_reasoning("风格有效性", all_factors),
+        action_hint=f"优先考虑{max(tactic_pairs, key=tactic_pairs.get)}，回避{min(tactic_pairs, key=tactic_pairs.get)}。",
         tactic_layer=MarketMonitorStyleTacticLayer(
             trend_breakout=trend,
             dip_buy=dip,
@@ -579,7 +587,6 @@ def build_style_effectiveness(bundle: MarketMonitorInputBundle) -> MarketMonitor
             factor_breakdown=all_factors,
         ),
         confidence=_confidence(bundle, all_factors),
-        key_drivers=_top_factor_reasons(all_factors),
         risks=bundle.risks,
     )
 
@@ -610,11 +617,11 @@ def build_panic_card(
     above_prev_mid = 100.0 if spy_close is not None and prev_mid is not None and spy_close > prev_mid else 0.0
     upper_half = 100.0 if recovery > 50 else 0.0
     beta_repair = bounded_score(50 + ((percent_change(_column_series(arkk, "Close"), 1) + percent_change(_column_series(iwm, "Close"), 1)) / 2) * 10)
-    intraday_reversal = bounded_score(above_prev_mid * 0.35 + upper_half * 0.30 + beta_repair * 0.20 + 50 * 0.15)
-    score = bounded_score(panic_extreme * 0.40 + selling_exhaustion * 0.30 + intraday_reversal * 0.30)
+    reversal_confirmation = bounded_score(above_prev_mid * 0.35 + upper_half * 0.30 + beta_repair * 0.20 + 50 * 0.15)
+    score = bounded_score(panic_extreme * 0.40 + selling_exhaustion * 0.30 + reversal_confirmation * 0.30)
     if panic_extreme < 35:
         state = "无信号"
-    elif score >= 50 and (selling_exhaustion >= 50 or intraday_reversal >= 60):
+    elif score >= 50 and (selling_exhaustion >= 50 or reversal_confirmation >= 60):
         state = "panic_confirmed"
     elif panic_extreme >= 80:
         state = "capitulation_watch"
@@ -629,18 +636,21 @@ def build_panic_card(
     factors = [
         _audited_factor(bundle, ["SPY", "QQQ", "IWM", "DIA", "^VIX", "ARKK"], "panic_extreme_score", panic_extreme, "score", None, "higher_is_riskier", panic_extreme, 0.40, "恐慌程度只代表抛压强度，不等于反转确认。", intraday_proxy=False),
         _audited_factor(bundle, ["SPY", "IWM", "ARKK", "XLE", "XLF", "^VIX"], "selling_exhaustion_score", selling_exhaustion, "score", None, "higher_is_better", selling_exhaustion, 0.30, "抛压衰竭迹象越充分，反弹确认条件越好。", intraday_proxy=False),
-        _audited_factor(bundle, ["SPY", "IWM", "ARKK"], "intraday_reversal_score", intraday_reversal, "score", None, "higher_is_better", intraday_reversal, 0.30, reversal_reason, intraday_proxy=False),
+        _audited_factor(bundle, ["SPY", "IWM", "ARKK"], "reversal_confirmation_score", reversal_confirmation, "score", None, "higher_is_better", reversal_confirmation, 0.30, reversal_reason, intraday_proxy=False),
     ]
-    early_entry_allowed = state == "panic_confirmed" and intraday_reversal >= 60
+    early_entry_allowed = state == "panic_confirmed" and reversal_confirmation >= 60
     max_position_hint = _panic_position_hint(state, score, system_risk_score)
     refreshes_held = _panic_refreshes_held(state, previous_snapshots or [])
     return MarketMonitorPanicCard(
+        deterministic_score=round(score, 1),
         score=round(score, 1),
+        score_reasoning=_factor_reasoning("恐慌反转", factors),
+        action_hint=_panic_action(state, max_position_hint),
         zone=zone,
         state=state,
         panic_extreme_score=round(panic_extreme, 1),
         selling_exhaustion_score=round(selling_exhaustion, 1),
-        intraday_reversal_score=round(intraday_reversal, 1),
+        reversal_confirmation_score=round(reversal_confirmation, 1),
         factor_breakdown=factors,
         action=_panic_action(state, max_position_hint),
         system_risk_override="系统风险位于[80,100]时，反弹仓上限强制<=15%" if system_risk_score >= 80 else None,
@@ -652,7 +662,6 @@ def build_panic_card(
         max_position_hint=max_position_hint,
         confidence=_confidence(bundle, factors),
         risks=_card_risks(bundle, factors),
-        key_drivers=_top_factor_reasons(factors),
     )
 
 
@@ -822,6 +831,7 @@ def build_execution_card(
         risks.append("panic 仓位仅作为独立反弹策略仓，不代表趋势仓恢复。")
     return MarketMonitorExecutionCard(
         regime_label=execution_fields["regime_label"],
+        decision_reasoning=conflict_mode,
         conflict_mode=execution_fields["conflict_mode"],
         total_exposure_range=execution_fields["total_exposure_range"],
         new_position_allowed=execution_fields["new_position_allowed"],
@@ -838,7 +848,6 @@ def build_execution_card(
         event_risk_flag=event_risk,
         confidence=min(long_term.confidence, short_term.confidence, system_risk.confidence, style.confidence),
         risks=risks,
-        key_drivers=[conflict_mode],
     )
 
 
@@ -1208,6 +1217,35 @@ def _card_risks(bundle: MarketMonitorInputBundle, factors: list[MarketMonitorFac
 def _top_factor_reasons(factors: list[MarketMonitorFactorBreakdown]) -> list[str]:
     ranked = sorted(factors, key=lambda factor: factor.weight, reverse=True)
     return [factor.reason for factor in ranked[:3]]
+
+
+def _factor_reasoning(card_name: str, factors: list[MarketMonitorFactorBreakdown]) -> str:
+    reasons = _top_factor_reasons(factors)
+    return f"{card_name}量化基准主要由" + "；".join(reasons) + "。" if reasons else f"{card_name}缺少可用因子，按中性基准处理。"
+
+
+def _short_term_action_hint(score: float) -> str:
+    if score < 35:
+        return "禁止追涨，只保留观察或极轻仓试错。"
+    if score < 50:
+        return "可观察但不主动进攻。"
+    if score < 65:
+        return "允许低吸、突破和事件交易，但不提高频率。"
+    if score < 80:
+        return "允许提高交易频率，仍需执行风控。"
+    return "短线可积极进攻，仍需遵守执行卡权限。"
+
+
+def _system_risk_action_hint(score: float) -> str:
+    if score < 45:
+        return "允许常规风控下正常进攻。"
+    if score < 60:
+        return "缩仓、防追高并降低单票风险。"
+    if score < 70:
+        return "强制进入橙灯或更保守状态，禁止杠杆。"
+    if score < 80:
+        return "强制进入红灯-高压状态，只允许对冲或极低风险仓位。"
+    return "进入危机模式，只保留对冲或极低风险仓位。"
 
 
 def _rolling_score_delta(series: pd.Series, periods: int, multiplier: float = 1.0) -> float:

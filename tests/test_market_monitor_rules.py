@@ -313,7 +313,7 @@ class MarketMonitorRulesTests(unittest.TestCase):
             "energy_cyclical",
             "financials",
         }
-        expected_panic = {"panic_extreme_score", "selling_exhaustion_score", "intraday_reversal_score"}
+        expected_panic = {"panic_extreme_score", "selling_exhaustion_score", "reversal_confirmation_score"}
 
         for data_mode in ["daily", "intraday_delayed", "intraday_realtime"]:
             with self.subTest(data_mode=data_mode):
@@ -376,7 +376,7 @@ class MarketMonitorRulesTests(unittest.TestCase):
         )
 
         panic = build_panic_card(bundle, 30)
-        reversal = _factor_map(panic.factor_breakdown)["intraday_reversal_score"]
+        reversal = _factor_map(panic.factor_breakdown)["reversal_confirmation_score"]
 
         self.assertIn("盘中/实时模式", reversal.reason)
         self.assertNotIn("日线模式下", reversal.reason)

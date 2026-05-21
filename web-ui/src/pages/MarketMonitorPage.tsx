@@ -4,6 +4,7 @@ import {
   Button,
   Card,
   Col,
+  Progress,
   Row,
   Space,
   Tag,
@@ -16,16 +17,18 @@ import {
   useMarketMonitorRun,
   useMarketMonitorRuns,
 } from "../api/hooks";
-import {
-  DataStatusBlock,
-  EventFactSheetBlock,
-  EventRiskBlock,
-  ExecutionCardBlock,
-  PanicCardBlock,
-  ScoreCardBlock,
-  StyleCardBlock,
-} from "../components/MarketMonitorBlocks";
 import { extractErrorMessage, formatDateTime } from "../utils/format";
+
+function scoreColor(score: number) {
+  if (score >= 80) return "success";
+  if (score >= 60) return "processing";
+  if (score >= 40) return "warning";
+  return "error";
+}
+
+function permissionTag(label: string, enabled: boolean) {
+  return <Tag color={enabled ? "success" : "error"}>{label}{enabled ? "允许" : "禁止"}</Tag>;
+}
 
 export function MarketMonitorPage() {
   const navigate = useNavigate();
@@ -118,29 +121,19 @@ export function MarketMonitorPage() {
         <Space direction="vertical" size={12} style={{ width: "100%" }}>
           <Space wrap>
             <Tag color="blue">{snapshot.execution_card.regime_label}</Tag>
-            <Tag>{snapshot.execution_card.conflict_mode}</Tag>
             <Tag>更新时间 {formatDateTime(snapshot.timestamp)}</Tag>
             <Tag>美东交易日 {snapshot.as_of_date}</Tag>
-            <Tag>版本 {snapshot.scorecard_version}</Tag>
-            <Tag>Prompt {snapshot.prompt_version}</Tag>
-            <Tag>Model {snapshot.model_name || "-"}</Tag>
-            <Tag>数据模式 {snapshot.data_mode}</Tag>
-            <Tag>数据新鲜度 {snapshot.data_freshness}</Tag>
             <Tag color={snapshot.input_data_status.core_symbols_missing.length ? "warning" : "success"}>
               核心数据 {snapshot.input_data_status.core_symbols_available.length}/{snapshot.input_data_status.core_symbols_available.length + snapshot.input_data_status.core_symbols_missing.length}
             </Tag>
-            {snapshot.run_id ? <Tag>运行 {snapshot.run_id.slice(0, 8)}</Tag> : null}
           </Space>
-          <Typography.Text>{snapshot.execution_card.conflict_mode}</Typography.Text>
+          <Typography.Text>{snapshot.execution_card.decision_reasoning || snapshot.execution_card.conflict_mode}</Typography.Text>
           <Space wrap>
             <Button type="primary" loading={createRunMutation.isPending} onClick={startSnapshotRun}>生成市场监控</Button>
             <Button onClick={() => navigate("/monitor/create")}>新建运行</Button>
             {snapshot.run_id ? (
               <Button onClick={() => navigate(`/monitor/runs/${snapshot.run_id}`)}>查看本次运行详情</Button>
             ) : null}
-            {snapshot.run_id && snapshot.prompt_traces?.length ? (
-              <Button onClick={() => navigate(`/monitor/runs/${snapshot.run_id}#prompt-traces`)}>Prompt Trace {snapshot.prompt_traces.length}</Button>
-            ) : snapshot.prompt_traces?.length ? <Tag color="purple">Prompt Trace {snapshot.prompt_traces.length}</Tag> : null}
             <Button onClick={() => navigate("/monitor/history")}>查看历史记录</Button>
           </Space>
           {snapshot.missing_data.length ? (
@@ -154,40 +147,73 @@ export function MarketMonitorPage() {
         </Space>
       </Card>
 
-      <ExecutionCardBlock card={snapshot.execution_card} />
-      <EventRiskBlock card={snapshot.execution_card.event_risk_flag} />
+      <Card className="page-card" title="执行结论">
+        <Space direction="vertical" size={12} style={{ width: "100%" }}>
+          <Space wrap>
+            <Tag color="blue">{snapshot.execution_card.regime_label}</Tag>
+            <Tag>总仓位 {snapshot.execution_card.total_exposure_range}</Tag>
+            <Tag>单票上限 {snapshot.execution_card.single_position_cap}</Tag>
+            <Tag>风险预算 {snapshot.execution_card.daily_risk_budget}</Tag>
+          </Space>
+          <Typography.Text>{snapshot.execution_card.decision_reasoning || snapshot.execution_card.conflict_mode}</Typography.Text>
+          <Space wrap>
+            {permissionTag("新开仓", snapshot.execution_card.new_position_allowed)}
+            {permissionTag("追高", snapshot.execution_card.chase_breakout_allowed)}
+            {permissionTag("低吸", snapshot.execution_card.dip_buy_allowed)}
+            {permissionTag("隔夜", snapshot.execution_card.overnight_allowed)}
+            {permissionTag("杠杆", snapshot.execution_card.leverage_allowed)}
+          </Space>
+        </Space>
+      </Card>
 
       <Row gutter={[16, 16]}>
-        <Col xs={24} lg={8}>
-          <ScoreCardBlock title="长线环境卡" helpKey="long_term_card" card={snapshot.long_term_score} />
-        </Col>
-        <Col xs={24} lg={8}>
-          <ScoreCardBlock title="短线环境卡" helpKey="short_term_card" card={snapshot.short_term_score} />
-        </Col>
-        <Col xs={24} lg={8}>
-          <ScoreCardBlock title="系统风险卡" helpKey="system_risk_card" card={snapshot.system_risk_score} />
-        </Col>
+        {[{
+          title: "长线",
+          score: snapshot.long_term_score.score,
+          zone: snapshot.long_term_score.zone,
+          hint: snapshot.long_term_score.action_hint || snapshot.long_term_score.recommended_exposure || "-",
+        }, {
+          title: "短线",
+          score: snapshot.short_term_score.score,
+          zone: snapshot.short_term_score.zone,
+          hint: snapshot.short_term_score.action_hint || "-",
+        }, {
+          title: "系统风险",
+          score: snapshot.system_risk_score.score,
+          zone: snapshot.system_risk_score.zone,
+          hint: snapshot.system_risk_score.action_hint || "-",
+        }, {
+          title: "恐慌反转",
+          score: snapshot.panic_reversal_score.score,
+          zone: snapshot.panic_reversal_score.state,
+          hint: snapshot.panic_reversal_score.action_hint || snapshot.panic_reversal_score.action,
+        }].map((item) => (
+          <Col xs={24} md={12} xl={6} key={item.title}>
+            <Card className="section-card" title={item.title}>
+              <Space direction="vertical" size={8} style={{ width: "100%" }}>
+                <Space wrap><Tag color={scoreColor(item.score)}>分数 {item.score.toFixed(1)}</Tag><Tag>{item.zone}</Tag></Space>
+                <Progress percent={item.score} showInfo={false} />
+                <Typography.Text type="secondary">{item.hint}</Typography.Text>
+              </Space>
+            </Card>
+          </Col>
+        ))}
       </Row>
 
-      <Row gutter={[16, 16]}>
-        <Col xs={24} lg={12}>
-          <Space direction="vertical" size={16} style={{ width: "100%" }}>
-            <StyleCardBlock card={snapshot.style_effectiveness} />
-            <EventFactSheetBlock events={snapshot.event_fact_sheet} />
+      <Card className="page-card" title="交易偏好与风险提示">
+        <Space direction="vertical" size={12} style={{ width: "100%" }}>
+          <Space wrap>
+            <Tag color="success">手法 {snapshot.style_effectiveness.tactic_layer.top_tactic}</Tag>
+            <Tag color="warning">回避 {snapshot.style_effectiveness.tactic_layer.avoid_tactic}</Tag>
+            <Tag>偏好 {snapshot.execution_card.preferred_assets.join("、") || "无"}</Tag>
+            <Tag>回避 {snapshot.execution_card.avoid_assets.join("、") || "无"}</Tag>
+            <Tag color={snapshot.execution_card.event_risk_flag.index_level.active ? "warning" : "success"}>指数事件 {snapshot.execution_card.event_risk_flag.index_level.active ? "激活" : "未激活"}</Tag>
+            <Tag color={snapshot.missing_data.length ? "warning" : "success"}>缺失数据 {snapshot.missing_data.length}</Tag>
           </Space>
-        </Col>
-        <Col xs={24} lg={12}>
-          <Space direction="vertical" size={16} style={{ width: "100%" }}>
-            <PanicCardBlock card={snapshot.panic_reversal_score} />
-            <DataStatusBlock
-              inputDataStatus={snapshot.input_data_status}
-              missingData={snapshot.missing_data}
-              risks={snapshot.risks}
-              openGaps={snapshot.fact_sheet?.open_gaps || []}
-            />
-          </Space>
-        </Col>
-      </Row>
+          <Typography.Text>{snapshot.execution_card.event_risk_flag.index_level.action_modifier?.note || "当前无指数级事件修正。"}</Typography.Text>
+          {snapshot.risks.length ? <Typography.Text type="secondary">风险提示：{snapshot.risks.join("；")}</Typography.Text> : null}
+        </Space>
+      </Card>
     </Space>
   );
 }

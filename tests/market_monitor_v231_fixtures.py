@@ -122,8 +122,8 @@ def fixture_event_risk_flag(active: bool = True) -> MarketMonitorEventRiskFlag:
 
 def fixture_reasoning() -> dict:
     return {
-        "reasoning_summary": "规则层分数为主，LLM 仅解释风险。",
-        "key_drivers": ["ETF proxy 广度改善"],
+        "score_reasoning": "规则层分数为主，LLM 仅解释风险。",
+        "action_hint": "按执行卡权限控制仓位。",
         "risks": fixture_risks(),
         "evidence": fixture_evidence(),
         "confidence": 0.82,
@@ -174,6 +174,9 @@ def fixture_style_effectiveness() -> MarketMonitorStyleEffectiveness:
     factor = fixture_factor()
     return MarketMonitorStyleEffectiveness(
         **fixture_reasoning(),
+        deterministic_score=62.5,
+        score=62.5,
+        score_adjustment=None,
         tactic_layer=MarketMonitorStyleTacticLayer(
             trend_breakout=MarketMonitorLayerMetric(score=52, delta_5d=0.8, valid=False, factor_breakdown=[factor]),
             dip_buy=MarketMonitorLayerMetric(score=66, delta_5d=3.4, valid=True, factor_breakdown=[factor]),
@@ -196,8 +199,11 @@ def fixture_style_effectiveness() -> MarketMonitorStyleEffectiveness:
 
 def fixture_execution_card(active_event: bool = True) -> MarketMonitorExecutionCard:
     return MarketMonitorExecutionCard(
-        **fixture_reasoning(),
+        risks=fixture_risks(),
+        evidence=fixture_evidence(),
+        confidence=0.82,
         regime_label="黄绿灯-Swing",
+        decision_reasoning="长线中性、短线活跃且系统风险低。",
         conflict_mode="长线中性+短线活跃+风险低",
         total_exposure_range="50%-70%",
         new_position_allowed=True,
@@ -222,12 +228,14 @@ def fixture_execution_card(active_event: bool = True) -> MarketMonitorExecutionC
 def fixture_panic_card(state: str = "panic_watch", score: float = 41.2) -> MarketMonitorPanicCard:
     return MarketMonitorPanicCard(
         **fixture_reasoning(),
+        deterministic_score=score,
         score=score,
+        score_adjustment=None,
         zone="观察期",
         state=state,
         panic_extreme_score=38.0,
         selling_exhaustion_score=45.0,
-        intraday_reversal_score=39.0,
+        reversal_confirmation_score=39.0,
         factor_breakdown=[fixture_factor()],
         action="加入观察列表，等待确认。",
         system_risk_override=None,

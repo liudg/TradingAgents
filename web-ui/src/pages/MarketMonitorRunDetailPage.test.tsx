@@ -72,8 +72,8 @@ const factor: MarketMonitorFactorBreakdown = {
 
 function baseReasoning() {
   return {
-    reasoning_summary: "规则层分数为主，LLM 仅解释风险。",
-    key_drivers: ["ETF proxy 广度改善"],
+    score_reasoning: "规则层分数为主，LLM 仅解释风险。",
+    action_hint: "按执行卡权限控制仓位。",
     risks: ["广度因子使用 ETF 代理池近似"],
     evidence: [],
     confidence: 0.82,
@@ -166,6 +166,9 @@ function buildRunDetail(): HistoricalMarketMonitorRunDetail {
       },
       style_effectiveness: {
         ...baseReasoning(),
+        deterministic_score: 62.5,
+        score: 62.5,
+        score_adjustment: null,
         tactic_layer: {
           trend_breakout: { score: 52, delta_5d: 0.8, valid: false, factor_breakdown: [factor] },
           dip_buy: { score: 66, delta_5d: 3.4, valid: true, factor_breakdown: [factor] },
@@ -185,8 +188,11 @@ function buildRunDetail(): HistoricalMarketMonitorRunDetail {
         },
       },
       execution_card: {
-        ...baseReasoning(),
+        risks,
+        evidence: [],
+        confidence: 0.82,
         regime_label: "黄绿灯-Swing",
+        decision_reasoning: "长线中性、短线活跃且系统风险低。",
         conflict_mode: "长线中性+短线活跃+风险低",
         total_exposure_range: "50%-70%",
         new_position_allowed: true,
@@ -219,12 +225,14 @@ function buildRunDetail(): HistoricalMarketMonitorRunDetail {
       },
       panic_reversal_score: {
         ...baseReasoning(),
+        deterministic_score: 41.2,
         score: 41.2,
+        score_adjustment: null,
         zone: "观察期",
         state: "panic_watch",
         panic_extreme_score: 38,
         selling_exhaustion_score: 45,
-        intraday_reversal_score: 39,
+        reversal_confirmation_score: 39,
         factor_breakdown: [factor],
         action: "加入观察列表，等待确认。",
         system_risk_override: null,

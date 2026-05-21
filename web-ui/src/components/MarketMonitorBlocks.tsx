@@ -99,15 +99,16 @@ function downloadJson(filename: string, payload: MarketMonitorArtifactPayload) {
   URL.revokeObjectURL(url);
 }
 
-function renderReasoningBlock(card: { reasoning_summary?: string | null; key_drivers?: string[]; risks?: string[]; confidence?: number | null }) {
-  if (!card.reasoning_summary && !card.key_drivers?.length && !card.risks?.length && card.confidence === undefined) {
+function renderReasoningBlock(card: { score_reasoning?: string | null; action_hint?: string | null; decision_reasoning?: string | null; risks?: string[]; confidence?: number | null }) {
+  const reasoning = card.score_reasoning || card.decision_reasoning;
+  if (!reasoning && !card.action_hint && !card.risks?.length && card.confidence === undefined) {
     return null;
   }
   return (
     <Space direction="vertical" size={8} style={{ width: "100%" }}>
-      {card.reasoning_summary ? <Typography.Text>{card.reasoning_summary}</Typography.Text> : null}
+      {reasoning ? <Typography.Text>{reasoning}</Typography.Text> : null}
+      {card.action_hint ? <Typography.Text>操作含义：{card.action_hint}</Typography.Text> : null}
       {card.confidence !== undefined ? <Tag color="purple">置信度 {confidenceText(card.confidence)}</Tag> : null}
-      {card.key_drivers?.length ? <List size="small" header="关键驱动" dataSource={card.key_drivers} renderItem={(item) => <List.Item>{item}</List.Item>} /> : null}
       {card.risks?.length ? <List size="small" header="风险与缺口" dataSource={card.risks} renderItem={(item) => <List.Item>{item}</List.Item>} /> : null}
     </Space>
   );
@@ -191,6 +192,11 @@ export function StyleCardBlock(props: { card: MarketMonitorStyleEffectiveness })
   return (
     <Card className="page-card" title={<CardTitleWithHelp title="市场手法与风格有效性卡" helpKey="style_effectiveness_card" />}>
       <Space direction="vertical" size={12} style={{ width: "100%" }}>
+        <Space wrap>
+          <Tag color={scoreTagColor(props.card.score)}>最终分 {props.card.score.toFixed(1)}</Tag>
+          <Tag>基础分 {props.card.deterministic_score.toFixed(1)}</Tag>
+        </Space>
+        {props.card.score_adjustment ? <Alert type="info" showIcon message={`评分调整 ${props.card.score_adjustment.value}`} description={props.card.score_adjustment.reason} /> : null}
         <Typography.Text strong>策略手法层</Typography.Text>
         <Space wrap><Tag color="success">最佳手法 {props.card.tactic_layer.top_tactic}</Tag><Tag color="error">回避手法 {props.card.tactic_layer.avoid_tactic}</Tag></Space>
         <List size="small" dataSource={tacticItems} renderItem={({ name, item }) => <List.Item>{name}：{item.score.toFixed(1)}（5日 {item.delta_5d >= 0 ? "+" : ""}{item.delta_5d.toFixed(1)}）</List.Item>} />
@@ -211,9 +217,10 @@ export function PanicCardBlock(props: { card: MarketMonitorPanicCard }) {
           <Tag color={props.card.state === "panic_confirmed" ? "success" : props.card.state === "capitulation_watch" ? "warning" : "default"}>{props.card.state}</Tag>
           <Tag>{props.card.zone}</Tag>
           <Tag>反转分 {props.card.score.toFixed(1)}</Tag>
+          <Tag>基础分 {props.card.deterministic_score.toFixed(1)}</Tag>
           <Tag>极端恐慌 {props.card.panic_extreme_score.toFixed(1)}</Tag>
           <Tag>抛压衰竭 {props.card.selling_exhaustion_score.toFixed(1)}</Tag>
-          <Tag>反弹确认 {props.card.intraday_reversal_score.toFixed(1)}</Tag>
+          <Tag>反弹确认 {props.card.reversal_confirmation_score.toFixed(1)}</Tag>
         </Space>
         <Typography.Text>{props.card.action}</Typography.Text>
         <Space wrap>{boolTag("先手仓", props.card.early_entry_allowed)}<Tag>仓位上限 {props.card.max_position_hint}</Tag><Tag>止损 {props.card.stop_loss}</Tag><Tag>已保持 {props.card.refreshes_held} 次刷新</Tag></Space>

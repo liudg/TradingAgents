@@ -25,12 +25,13 @@ class InferenceResult(Generic[T]):
 
 def normalize_reasoning_updates(payload: dict[str, Any]) -> dict[str, Any]:
     updates: dict[str, Any] = {}
-    if isinstance(payload.get("reasoning_summary"), str):
-        updates["reasoning_summary"] = payload["reasoning_summary"]
-    for field in ("key_drivers", "risks"):
-        values = _normalize_string_list(payload.get(field))
-        if values is not None:
-            updates[field] = values
+    for field in ("score_reasoning", "action_hint", "decision_reasoning"):
+        value = payload.get(field)
+        if isinstance(value, str) and value.strip():
+            updates[field] = value.strip()
+    risks = _normalize_string_list(payload.get("risks"))
+    if risks is not None:
+        updates["risks"] = risks
     evidence = _normalize_evidence_refs(payload.get("evidence"))
     if evidence is not None:
         updates["evidence"] = evidence

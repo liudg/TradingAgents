@@ -51,7 +51,7 @@ def build_execution_prompt(
         "系统风险 override 最高优先级，system_risk_score 位于 [60,70)、[70,80)、[80,100] 时必须按规则收紧。"
         "panic 仓位独立于趋势仓和 swing 仓，不得把 panic_confirmed 解读为趋势仓恢复。"
         "事件风险只允许收紧执行权限；个股级事件不得污染指数 regime。"
-        "输出字段必须包含: regime_label, conflict_mode, total_exposure_range, new_position_allowed, chase_breakout_allowed, dip_buy_allowed, overnight_allowed, leverage_allowed, single_position_cap, daily_risk_budget, tactic_preference, preferred_assets, avoid_assets, signal_confirmation, event_risk_flag, reasoning_summary, key_drivers, risks, evidence, confidence。"
+        "输出字段必须包含: regime_label, decision_reasoning, conflict_mode, total_exposure_range, new_position_allowed, chase_breakout_allowed, dip_buy_allowed, overnight_allowed, leverage_allowed, single_position_cap, daily_risk_budget, tactic_preference, preferred_assets, avoid_assets, signal_confirmation, event_risk_flag, risks, evidence, confidence。"
     )
     payload: dict[str, Any] = {
         "decision_framework": {
