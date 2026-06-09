@@ -37,15 +37,15 @@ if (-not (Test-Path -LiteralPath $webNodeModules)) {
     }
 }
 
-if (Test-Path -LiteralPath $syncCliProxyScript) {
-    Write-Host "Syncing Codex token and restarting CLIProxyAPI"
-    & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $syncCliProxyScript
-    if ($LASTEXITCODE -ne 0) {
-        Write-Warning "sync_codex_to_cliproxy.ps1 exited with code $LASTEXITCODE. Continue starting Web API and Web UI."
-    }
-} else {
-    Write-Warning "Missing $syncCliProxyScript. Skipping CLIProxyAPI restart."
-}
+# if (Test-Path -LiteralPath $syncCliProxyScript) {
+#     Write-Host "Syncing Codex token and restarting CLIProxyAPI"
+#     & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $syncCliProxyScript
+#     if ($LASTEXITCODE -ne 0) {
+#         Write-Warning "sync_codex_to_cliproxy.ps1 exited with code $LASTEXITCODE. Continue starting Web API and Web UI."
+#     }
+# } else {
+#     Write-Warning "Missing $syncCliProxyScript. Skipping CLIProxyAPI restart."
+# }
 
 $apiArgs = @(
     "-NoExit",
