@@ -9,6 +9,7 @@ import yfinance as yf
 
 from tradingagents.dataflows import stockstats_utils, yfinance_news
 from tradingagents.dataflows.yfinance_proxy import configure_yfinance_proxy
+from tradingagents.graph.trading_graph import TradingAgentsGraph
 from tradingagents.web.backtest.manager import BacktestJobManager
 
 
@@ -113,6 +114,35 @@ class YFinanceProxyConfigTests(unittest.TestCase):
 
         get_yf_mock.assert_called_once_with()
         self.assertFalse(data.empty)
+
+    def test_fetch_returns_configures_proxy_and_retries_history(self):
+        stock_frame = pd.DataFrame({"Close": [100.0, 102.0, 104.0, 106.0]})
+        spy_frame = pd.DataFrame({"Close": [400.0, 402.0, 404.0, 406.0]})
+        yf_mock = MagicMock()
+
+        def make_ticker(symbol):
+            ticker = MagicMock()
+            ticker.history.return_value = spy_frame if symbol == "SPY" else stock_frame
+            return ticker
+
+        yf_mock.Ticker.side_effect = make_ticker
+
+        with patch("tradingagents.graph.trading_graph.get_yf", return_value=yf_mock) as get_yf_mock:
+            with patch(
+                "tradingagents.graph.trading_graph.yf_retry",
+                side_effect=lambda func: func(),
+            ) as retry_mock:
+                raw, alpha, days = TradingAgentsGraph._fetch_returns(
+                    MagicMock(spec=TradingAgentsGraph),
+                    "AAPL",
+                    "2024-01-02",
+                )
+
+        get_yf_mock.assert_called_once_with()
+        self.assertEqual(retry_mock.call_count, 2)
+        self.assertIsNotNone(raw)
+        self.assertIsNotNone(alpha)
+        self.assertEqual(days, 3)
 
 
 if __name__ == "__main__":

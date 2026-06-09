@@ -7,8 +7,6 @@ import json
 from datetime import datetime, timedelta
 from typing import Dict, Any, Tuple, List, Optional
 
-import yfinance as yf
-
 logger = logging.getLogger(__name__)
 
 from langgraph.prebuilt import ToolNode
@@ -18,7 +16,9 @@ from tradingagents.llm_clients import create_llm_client
 from tradingagents.agents import *
 from tradingagents.default_config import DEFAULT_CONFIG
 from tradingagents.agents.utils.memory import TradingMemoryLog
+from tradingagents.dataflows.stockstats_utils import yf_retry
 from tradingagents.dataflows.utils import safe_ticker_component
+from tradingagents.dataflows.yfinance_proxy import get_yf
 from tradingagents.agents.utils.agent_states import (
     AgentState,
     InvestDebateState,
@@ -207,8 +207,11 @@ class TradingAgentsGraph:
             end = start + timedelta(days=holding_days + 7)  # buffer for weekends/holidays
             end_str = end.strftime("%Y-%m-%d")
 
-            stock = yf.Ticker(ticker).history(start=trade_date, end=end_str)
-            spy = yf.Ticker("SPY").history(start=trade_date, end=end_str)
+            yf = get_yf()
+            stock_ticker = yf.Ticker(ticker)
+            spy_ticker = yf.Ticker("SPY")
+            stock = yf_retry(lambda: stock_ticker.history(start=trade_date, end=end_str))
+            spy = yf_retry(lambda: spy_ticker.history(start=trade_date, end=end_str))
 
             if len(stock) < 2 or len(spy) < 2:
                 return None, None, None
