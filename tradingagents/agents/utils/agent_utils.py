@@ -2,8 +2,9 @@ import functools
 import logging
 from typing import Any, Mapping, Optional
 
-import yfinance as yf
 from langchain_core.messages import HumanMessage, RemoveMessage
+
+from tradingagents.dataflows import yfinance_proxy as yf
 
 # Import tools from separate utility files
 from tradingagents.agents.utils.core_stock_tools import (

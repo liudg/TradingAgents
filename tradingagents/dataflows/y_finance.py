@@ -2,8 +2,8 @@ from typing import Annotated
 from datetime import datetime
 from dateutil.relativedelta import relativedelta
 import pandas as pd
-import yfinance as yf
 import os
+from . import yfinance_proxy as yf
 from .stockstats_utils import StockstatsUtils, _clean_dataframe, yf_retry, load_ohlcv, filter_financials_by_date
 from .symbol_utils import normalize_symbol, NoMarketDataError
 

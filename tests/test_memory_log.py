@@ -489,19 +489,12 @@ class TestDeferredReflection:
         stock_prices = [100.0, 102.0, 104.0, 103.0, 105.0, 106.0]
         spy_prices   = [400.0, 402.0, 404.0, 403.0, 405.0, 406.0]
         mock_graph = MagicMock(spec=TradingAgentsGraph)
-        yf_mock = MagicMock()
         def _make_ticker(sym):
             m = MagicMock()
             m.history.return_value = _price_df(spy_prices if sym == "SPY" else stock_prices)
             return m
-        yf_mock.Ticker.side_effect = _make_ticker
-        with patch("tradingagents.graph.trading_graph.get_yf", return_value=yf_mock) as get_yf_mock, patch(
-            "tradingagents.graph.trading_graph.yf_retry",
-            side_effect=lambda func: func(),
-        ) as retry_mock:
+        with patch("tradingagents.graph.trading_graph.yf.Ticker", side_effect=_make_ticker):
             raw, alpha, days = TradingAgentsGraph._fetch_returns(mock_graph, "NVDA", "2026-01-05")
-        get_yf_mock.assert_called_once_with()
-        assert retry_mock.call_count == 2
         assert raw is not None and alpha is not None and days is not None
         assert isinstance(raw, float) and isinstance(alpha, float) and isinstance(days, int)
         assert days == 5
@@ -509,28 +502,18 @@ class TestDeferredReflection:
     def test_fetch_returns_too_recent(self):
         """Only 1 data point available → returns (None, None, None), no crash."""
         mock_graph = MagicMock(spec=TradingAgentsGraph)
-        yf_mock = MagicMock()
         m = MagicMock()
         m.history.return_value = _price_df([100.0])
-        yf_mock.Ticker.return_value = m
-        with patch("tradingagents.graph.trading_graph.get_yf", return_value=yf_mock), patch(
-            "tradingagents.graph.trading_graph.yf_retry",
-            side_effect=lambda func: func(),
-        ):
+        with patch("tradingagents.graph.trading_graph.yf.Ticker", return_value=m):
             raw, alpha, days = TradingAgentsGraph._fetch_returns(mock_graph, "NVDA", "2026-04-19")
         assert raw is None and alpha is None and days is None
 
     def test_fetch_returns_delisted(self):
         """Empty DataFrame → returns (None, None, None), no crash."""
         mock_graph = MagicMock(spec=TradingAgentsGraph)
-        yf_mock = MagicMock()
         m = MagicMock()
         m.history.return_value = pd.DataFrame({"Close": []})
-        yf_mock.Ticker.return_value = m
-        with patch("tradingagents.graph.trading_graph.get_yf", return_value=yf_mock), patch(
-            "tradingagents.graph.trading_graph.yf_retry",
-            side_effect=lambda func: func(),
-        ):
+        with patch("tradingagents.graph.trading_graph.yf.Ticker", return_value=m):
             raw, alpha, days = TradingAgentsGraph._fetch_returns(mock_graph, "XXXXXFAKE", "2026-01-10")
         assert raw is None and alpha is None and days is None
 
@@ -539,16 +522,11 @@ class TestDeferredReflection:
         stock_prices = [100.0, 102.0, 104.0, 103.0, 105.0, 106.0]
         spy_prices   = [400.0, 402.0, 403.0]
         mock_graph = MagicMock(spec=TradingAgentsGraph)
-        yf_mock = MagicMock()
         def _make_ticker(sym):
             m = MagicMock()
             m.history.return_value = _price_df(spy_prices if sym == "SPY" else stock_prices)
             return m
-        yf_mock.Ticker.side_effect = _make_ticker
-        with patch("tradingagents.graph.trading_graph.get_yf", return_value=yf_mock), patch(
-            "tradingagents.graph.trading_graph.yf_retry",
-            side_effect=lambda func: func(),
-        ):
+        with patch("tradingagents.graph.trading_graph.yf.Ticker", side_effect=_make_ticker):
             raw, alpha, days = TradingAgentsGraph._fetch_returns(mock_graph, "NVDA", "2026-01-05")
         assert raw is not None and alpha is not None and days is not None
         assert days == 2

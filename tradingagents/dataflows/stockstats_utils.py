@@ -2,12 +2,11 @@ import time
 import logging
 
 import pandas as pd
-from yfinance.exceptions import YFRateLimitError
 from stockstats import wrap
 from typing import Annotated
 import os
 from .config import get_config
-from .yfinance_proxy import get_yf
+from .yfinance_proxy import YFRateLimitError, get_yf
 from .utils import safe_ticker_component
 from .symbol_utils import normalize_symbol, NoMarketDataError
 

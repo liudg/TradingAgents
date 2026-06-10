@@ -1,6 +1,7 @@
 import os
 
 import yfinance as _yf
+from yfinance.exceptions import YFRateLimitError
 
 
 def configure_yfinance_proxy() -> None:
@@ -28,3 +29,8 @@ def configure_yfinance_proxy() -> None:
 def get_yf():
     configure_yfinance_proxy()
     return _yf
+
+
+def __getattr__(name: str):
+    configure_yfinance_proxy()
+    return getattr(_yf, name)

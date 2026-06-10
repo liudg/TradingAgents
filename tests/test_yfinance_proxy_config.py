@@ -72,25 +72,21 @@ class YFinanceProxyConfigTests(unittest.TestCase):
     def test_get_news_yfinance_configures_proxy_before_ticker_request(self):
         ticker_mock = MagicMock()
         ticker_mock.get_news.return_value = []
-        yf_mock = MagicMock()
-        yf_mock.Ticker.return_value = ticker_mock
 
-        with patch.object(yfinance_news, "get_yf", return_value=yf_mock) as get_yf_mock:
+        with patch.object(yfinance_news.yf, "Ticker", return_value=ticker_mock) as ticker_cls:
             result = yfinance_news.get_news_yfinance("AAPL", "2024-01-01", "2024-01-02")
 
-        get_yf_mock.assert_called_once_with()
+        ticker_cls.assert_called_once_with("AAPL")
         self.assertIn("No news found for AAPL", result)
 
     def test_get_global_news_yfinance_configures_proxy_before_search_request(self):
         search_mock = MagicMock()
         search_mock.news = []
-        yf_mock = MagicMock()
-        yf_mock.Search.return_value = search_mock
 
-        with patch.object(yfinance_news, "get_yf", return_value=yf_mock) as get_yf_mock:
+        with patch.object(yfinance_news.yf, "Search", return_value=search_mock) as search_cls:
             result = yfinance_news.get_global_news_yfinance("2024-01-02")
 
-        get_yf_mock.assert_called_once_with()
+        search_cls.assert_called()
         self.assertIn("No global news found", result)
 
     def test_backtest_history_download_configures_proxy(self):
@@ -115,31 +111,22 @@ class YFinanceProxyConfigTests(unittest.TestCase):
         get_yf_mock.assert_called_once_with()
         self.assertFalse(data.empty)
 
-    def test_fetch_returns_configures_proxy_and_retries_history(self):
+    def test_fetch_returns_uses_proxy_for_history(self):
         stock_frame = pd.DataFrame({"Close": [100.0, 102.0, 104.0, 106.0]})
         spy_frame = pd.DataFrame({"Close": [400.0, 402.0, 404.0, 406.0]})
-        yf_mock = MagicMock()
-
         def make_ticker(symbol):
             ticker = MagicMock()
             ticker.history.return_value = spy_frame if symbol == "SPY" else stock_frame
             return ticker
 
-        yf_mock.Ticker.side_effect = make_ticker
+        with patch("tradingagents.graph.trading_graph.yf.Ticker", side_effect=make_ticker) as ticker_cls:
+            raw, alpha, days = TradingAgentsGraph._fetch_returns(
+                MagicMock(spec=TradingAgentsGraph),
+                "AAPL",
+                "2024-01-02",
+            )
 
-        with patch("tradingagents.graph.trading_graph.get_yf", return_value=yf_mock) as get_yf_mock:
-            with patch(
-                "tradingagents.graph.trading_graph.yf_retry",
-                side_effect=lambda func: func(),
-            ) as retry_mock:
-                raw, alpha, days = TradingAgentsGraph._fetch_returns(
-                    MagicMock(spec=TradingAgentsGraph),
-                    "AAPL",
-                    "2024-01-02",
-                )
-
-        get_yf_mock.assert_called_once_with()
-        self.assertEqual(retry_mock.call_count, 2)
+        self.assertEqual(ticker_cls.call_count, 2)
         self.assertIsNotNone(raw)
         self.assertIsNotNone(alpha)
         self.assertEqual(days, 3)

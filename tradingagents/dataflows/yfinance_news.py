@@ -2,10 +2,10 @@
 
 from typing import Optional
 
-import yfinance as yf
 from datetime import datetime
 from dateutil.relativedelta import relativedelta
 
+from . import yfinance_proxy as yf
 from .config import get_config
 from .stockstats_utils import yf_retry
 

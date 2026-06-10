@@ -9,10 +9,9 @@ from typing import Any, Dict, Iterable
 from urllib.parse import urlparse
 
 import pandas as pd
-from yfinance.exceptions import YFRateLimitError
 
-from tradingagents.dataflows.yfinance_news import fetch_global_news_articles_yfinance, fetch_ticker_news_articles_yfinance
-from tradingagents.dataflows.yfinance_proxy import get_yf
+from tradingagents.dataflows.yfinance_proxy import YFRateLimitError, get_yf
+from .yfinance_articles import fetch_global_news_articles_yfinance, fetch_ticker_news_articles_yfinance
 from .cache import evaluate_symbol_daily_cache, save_symbol_daily_cache
 from .trading_calendar import expected_market_close_date, is_us_market_trading_day, market_now_eastern
 

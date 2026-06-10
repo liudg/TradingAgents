@@ -4,7 +4,6 @@ from unittest.mock import patch
 
 import pandas as pd
 
-from tradingagents.dataflows.yfinance_news import fetch_global_news_articles_yfinance
 from tradingagents.web.market_monitor.data import (
     _download_single_symbol,
     _evaluate_intraday_symbol_state,
@@ -17,6 +16,7 @@ from tradingagents.web.market_monitor.data import (
     fetch_intraday_history,
 )
 from tradingagents.web.market_monitor.universe import get_market_monitor_universe
+from tradingagents.web.market_monitor.yfinance_articles import fetch_global_news_articles_yfinance
 
 
 class _FakeYFinance:
@@ -41,11 +41,6 @@ class _FakeSearchResult:
             }
         }
     ]
-
-
-class _FakeNewsYFinance:
-    def Search(self, **kwargs):
-        return _FakeSearchResult()
 
 
 def _make_frame(days: int, end: str = "2026-04-10") -> pd.DataFrame:
@@ -93,8 +88,8 @@ def _cache_result(state: str, frame: pd.DataFrame | None = None, reason: str | N
 
 class MarketMonitorDataTests(unittest.TestCase):
     def test_fetch_global_news_articles_returns_structured_nested_articles(self) -> None:
-        with patch("tradingagents.dataflows.yfinance_news.get_yf", return_value=_FakeNewsYFinance()), patch(
-            "tradingagents.dataflows.yfinance_news.yf_retry",
+        with patch("tradingagents.web.market_monitor.yfinance_articles.yf.Search", return_value=_FakeSearchResult()), patch(
+            "tradingagents.web.market_monitor.yfinance_articles.yf_retry",
             side_effect=lambda func: func(),
         ):
             articles = fetch_global_news_articles_yfinance("2026-04-12", look_back_days=7, limit=1)
